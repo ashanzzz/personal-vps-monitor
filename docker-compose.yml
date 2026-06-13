@@ -1,0 +1,14 @@
+services:
+  akile-monitor:
+    image: ghcr.io/ashanzzz/akile-monitor:latest
+    container_name: akile-monitor
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:80"
+    environment:
+      - AKILE_TOKEN=${AKILE_TOKEN}
+    volumes:
+      - akile-data:/app/data
+
+volumes:
+  akile-data:
