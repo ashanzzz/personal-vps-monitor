@@ -1,5 +1,5 @@
-import { Tag, Tooltip } from 'antd'
-import { SyncOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
+import { Tag } from 'antd'
+import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import type { Machine } from '../api'
 import { fmtPrice, fmtMemory, CAT_LABELS } from '../api'
 import styles from './MachineCard.module.css'

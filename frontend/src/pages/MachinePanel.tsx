@@ -1,8 +1,8 @@
 import { useState, useMemo } from 'react'
-import { Input, Select, Switch, Space, Button, message, Tooltip } from 'antd'
-import { SyncOutlined, FilterOutlined } from '@ant-design/icons'
+import { Input, Select, Switch, Space, Button, Tooltip } from 'antd'
+import { SyncOutlined } from '@ant-design/icons'
 import type { Machine, PriceHistory, AppSettings } from '../api'
-import { CAT_LABELS, fmtMemory } from '../api'
+import { CAT_LABELS } from '../api'
 import { MachineCard } from '../components/MachineCard'
 
 interface Props {

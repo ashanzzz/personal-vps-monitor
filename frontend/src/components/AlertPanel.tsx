@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Table, Tag, Select, Typography, Button } from 'antd'
+import { Table, Tag, Select, Typography } from 'antd'
 import type { AlertEvent } from '../api'
 import { EVENT_LABELS, CAT_LABELS, fmtPrice } from '../api'
 import dayjs from 'dayjs'

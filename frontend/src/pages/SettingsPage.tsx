@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import {
   Card, Form, Input, InputNumber, Switch, Select, Button,
-  Divider, Space, Tag, message, Typography, Tooltip, Slider,
+  Divider, message, Typography, Slider,
 } from 'antd'
-import { PlusOutlined, SaveOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons'
+import { SaveOutlined, SendOutlined } from '@ant-design/icons'
 import type { AppSettings } from '../api'
 import { api } from '../api'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 const LS_REGION_OPTIONS = ['HK', 'JP', 'SG', 'TW', 'US', 'DE', 'MO', 'KR'].map(r => ({ value: r, label: r }))
 
