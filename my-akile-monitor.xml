@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>akile-monitor</Name>
+  <Repository>ghcr.io/ashanzzz/akile-monitor:latest</Repository>
+  <Registry>https://ghcr.io</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/ashanzzz/akile-monitor/issues</Support>
+  <Project>https://github.com/ashanzzz/akile-monitor</Project>
+  <Overview>AkileCloud 监控告警工具 — 实时监控 VPS 新机上架、轻量机变化、二手机上架，支持 Telegram 推送告警。前端可视化面板，支持筛选、历史记录、自定义轮询间隔。预留自动抢购功能接口。</Overview>
+  <Category>Tools: Status:Stable</Category>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/ashanzzz/akile-monitor/master/my-akile-monitor.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/ashanzzz/akile-monitor/master/frontend/public/favicon.svg</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled></DateInstalled>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  
+  <Config Name="WebUI Port" Target="80" Default="8080" Mode="tcp" Description="Web 界面访问端口" Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  
+  <Config Name="Data Volume" Target="/app/data" Default="/mnt/user/appdata/akile-monitor" Mode="rw" Description="数据持久化目录（SQLite 数据库、配置缓存）" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/akile-monitor</Config>
+  
+  <Config Name="AKILE_TOKEN" Target="AKILE_TOKEN" Default="" Mode="" Description="AkileCloud API Token（必填）。从 https://api.akilecloud.com 获取，用于调用监控 API。" Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  
+  <Config Name="TZ" Target="TZ" Default="Asia/Shanghai" Mode="" Description="容器时区（用于日志时间戳和定时任务）" Type="Variable" Display="advanced" Required="false" Mask="false">Asia/Shanghai</Config>
+</Container>
