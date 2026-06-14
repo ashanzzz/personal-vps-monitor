@@ -78,8 +78,7 @@ async def lifespan(app: FastAPI):
     logger.info("app.start version=%s", __version__)
 
     # Per-page pollers (each with its own independent interval). These also
-    # drive auto-buy. A legacy "poll" job stays for price-history + any global
-    # housekeeping not tied to a single page.
+    # drive auto-buy.
     _reschedule_page_jobs(settings)
 
     # Keep the Akile token alive entirely inside the backend: check hourly,
@@ -228,12 +227,6 @@ async def get_settings(_: str = Depends(require_auth), db: AsyncSession = Depend
 @app.post("/api/settings")
 async def save_settings(data: dict, _: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     result = await update_settings(db, data)
-
-    # Reschedule legacy global poller if interval changed (kept for back-compat).
-    new_interval = result.get("refresh_interval", 60)
-    if scheduler.get_job("poll"):
-        scheduler.reschedule_job("poll", trigger="interval", seconds=new_interval)
-        logger.info("Rescheduled poller to %ds", new_interval)
 
     # Reschedule per-page pollers (their intervals may have changed).
     _reschedule_page_jobs(result)
@@ -449,8 +442,9 @@ async def buy_machine(plan_id: str, _: str = Depends(require_auth), db: AsyncSes
         return {"error": "No token configured"}
 
     from . import akile_client as api
+    cycle = (settings.get("secondhand_buy") or {}).get("cycle", 1)
     try:
-        result = await api.buy_secondhand(token, {"id": plan_id, "cycle": settings.get("auto_buy_cycle", 1)})
+        result = await api.buy_secondhand(token, {"id": plan_id, "cycle": cycle})
     except httpx.HTTPError as e:
         return {"error": str(e)}
 

@@ -13,10 +13,9 @@ interface Props {
   onWatch: (id: string, watched: boolean) => void
   onBuy?: (id: string) => void
   priceHistory?: { price: number; cycle: number }[]
-  autoBuyEnabled?: boolean
 }
 
-export function MachineCard({ machine, watched, onWatch, onBuy, priceHistory, autoBuyEnabled }: Props) {
+export function MachineCard({ machine, watched, onWatch, onBuy, priceHistory }: Props) {
   const available = machine.available
 
   const cycleLabel = (c: number) => c === 1 ? '月付' : c === 12 ? '年付' : `${c}月`
@@ -89,7 +88,7 @@ export function MachineCard({ machine, watched, onWatch, onBuy, priceHistory, au
             </Tag>
           </Popover>
         )}
-        {autoBuyEnabled && machine.category === 'secondhand' && available && onBuy && (
+        {machine.category === 'secondhand' && available && onBuy && (
           <Tag color="green" style={{ cursor: 'pointer' }} onClick={() => onBuy(machine.plan_id)}>
             🛒 抢购
           </Tag>

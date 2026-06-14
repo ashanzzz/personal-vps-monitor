@@ -61,14 +61,6 @@ DEFAULTS: dict[str, Any] = {
     "webhook_notify_price_change": False,
     "webhook_notify_purchased": True,
 
-    # --- Auto-buy (secondhand) — legacy keys, kept for back-compat ---
-    "auto_buy_enabled": False,
-    "auto_buy_plans": [],             # plan_ids eligible for auto-buy
-    "auto_buy_max_price": 0,          # fen; 0 = no limit
-    "auto_buy_cycle": 1,              # preferred billing cycle in months
-    "auto_buy_max_per_run": 1,        # max purchases in a single poll cycle
-    "auto_buy_daily_limit": 1,        # max purchases per day
-
     # --- Per-page auto-buy (cloud / ls / secondhand) ---
     # Each page has an independent refresh interval, page-level quota gates,
     # and a list of condition-range buy rules. See PAGE_BUY_DEFAULTS below.
