@@ -101,3 +101,31 @@ async def buy_secondhand(token: str, payload: dict) -> dict:
                          json=payload, headers=_headers(token))
         r.raise_for_status()
         return r.json()
+
+
+async def get_user_info(token: str) -> dict:
+    """GET /v1/user/info – account profile + balance.
+
+    Returns data dict with: username, email, role, money (balance in fen),
+    telegram_id, is_real_name, is_ga, last_checkin_time, etc.
+    Verified live: both api.akilecloud.com and api.akile.ai serve this; we use
+    the store host for consistency with the rest of the client.
+    """
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        r = await c.get(f"{BASE}/v1/user/info", headers=_headers(token))
+        r.raise_for_status()
+        return r.json().get("data") or {}
+
+
+async def get_my_servers(token: str) -> list[dict]:
+    """POST /v1/server/GetServerV2List – the account's own instances.
+
+    Returns a list of server dicts. When the account has no instances the API
+    responds 200 with data.list = null, which we normalise to an empty list.
+    """
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        r = await c.post(f"{BASE}/v1/server/GetServerV2List",
+                         json={}, headers=_headers(token))
+        r.raise_for_status()
+        data = r.json().get("data") or {}
+        return data.get("list") or []

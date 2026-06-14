@@ -249,6 +249,32 @@ export const api = {
 
   getAppLog: (lines = 500) =>
     http.get<{ lines: number; content: string }>('/api/logs/app', { params: { lines } }).then(r => r.data),
+
+  // --- My account ---
+  getAccount: () =>
+    http.get<AccountInfo>('/api/account').then(r => r.data),
+}
+
+export interface AccountProfile {
+  username: string
+  email: string
+  role: string
+  money: number | null        // balance in fen
+  telegram_id: number | null
+  is_real_name: boolean
+  is_ga: boolean
+  last_checkin_time: number | null
+}
+
+export interface MyServer {
+  [key: string]: unknown
+}
+
+export interface AccountInfo {
+  configured: boolean
+  profile: AccountProfile | null
+  servers: MyServer[]
+  errors: string[]
 }
 
 export interface VersionInfo {

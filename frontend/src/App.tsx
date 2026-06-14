@@ -5,7 +5,7 @@ import {
 } from 'antd'
 import {
   DashboardOutlined, CloudServerOutlined, ThunderboltOutlined, ShoppingOutlined,
-  BellOutlined, SettingOutlined, LogoutOutlined, FileTextOutlined,
+  BellOutlined, SettingOutlined, LogoutOutlined, FileTextOutlined, WalletOutlined,
 } from '@ant-design/icons'
 
 import { api, clearToken, getToken, setUnauthorizedHandler } from './api'
@@ -17,13 +17,14 @@ import { AlertHistory }  from './pages/AlertHistory'
 import { SettingsPage }  from './pages/SettingsPage'
 import { LoginPage }     from './pages/LoginPage'
 import { LogsPage }      from './pages/LogsPage'
+import { AccountPage }   from './pages/AccountPage'
 
 import './App.css'
 
 const { Header, Sider, Content } = Layout
 const { Title } = Typography
 
-type PageKey = 'overview' | 'cloud' | 'lightweight' | 'secondhand' | 'alerts' | 'logs' | 'settings'
+type PageKey = 'overview' | 'account' | 'cloud' | 'lightweight' | 'secondhand' | 'alerts' | 'logs' | 'settings'
 
 export default function App() {
   const [authed, setAuthed]       = useState<boolean>(!!getToken())
@@ -155,6 +156,7 @@ export default function App() {
               style={{ background: '#111', borderRight: 0 }}
               items={[
                 { key: 'overview',  icon: <DashboardOutlined />,   label: '总览' },
+                { key: 'account',     icon: <WalletOutlined />,       label: '我的账户' },
                 { key: 'cloud',       icon: <CloudServerOutlined />,  label: '云服务器' },
                 { key: 'lightweight', icon: <ThunderboltOutlined />,  label: '轻量服务器' },
                 { key: 'secondhand',  icon: <ShoppingOutlined />,     label: '二手机' },
@@ -183,7 +185,7 @@ export default function App() {
               justifyContent: 'space-between',
             }}>
               <Typography.Text style={{ color: '#ccc', margin: 0 }}>
-                {{ overview: '总览', cloud: '云服务器', lightweight: '轻量服务器', secondhand: '二手机', alerts: '预警历史', logs: '调试日志', settings: '系统设置' }[page]}
+                {{ overview: '总览', account: '我的账户', cloud: '云服务器', lightweight: '轻量服务器', secondhand: '二手机', alerts: '预警历史', logs: '调试日志', settings: '系统设置' }[page]}
               </Typography.Text>
               <span style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                 <Typography.Text style={{ color: '#555', fontSize: 12 }}>
@@ -210,6 +212,7 @@ export default function App() {
               ) : (
                 <>
                   {page === 'overview'  && <Overview machines={machines} events={events} />}
+                  {page === 'account'  && <AccountPage />}
                   {page === 'cloud'  && (
                     <CategoryPage pageKey="cloud" machines={machines} settings={settings}
                       onBuy={handleBuy} onRefresh={handleRefresh} onSaveBuyConfig={handleSaveBuyConfig} />

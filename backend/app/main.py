@@ -276,6 +276,48 @@ async def get_token_status(_: str = Depends(require_auth)):
     return await token_status()
 
 
+@app.get("/api/account")
+async def get_account(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
+    """Aggregate the logged-in Akile account: profile + balance + own servers.
+
+    Balance comes from GET /v1/user/info (data.money, in fen). Servers come
+    from POST /v1/server/GetServerV2List (empty list when the account has no
+    instances). Each upstream call degrades independently so one failure does
+    not blank the whole panel.
+    """
+    settings = await get_all_settings(db)
+    token = settings.get("akile_token", "")
+    if not token:
+        return {"configured": False, "profile": None, "servers": [], "errors": ["no_token"]}
+
+    from . import akile_client as api
+    errors: list[str] = []
+    profile = None
+    servers: list[dict] = []
+
+    try:
+        info = await api.get_user_info(token)
+        profile = {
+            "username": info.get("username", ""),
+            "email": info.get("email", ""),
+            "role": info.get("role", ""),
+            "money": info.get("money"),            # balance in fen; None if missing
+            "telegram_id": info.get("telegram_id"),
+            "is_real_name": bool(info.get("is_real_name")),
+            "is_ga": bool(info.get("is_ga")),
+            "last_checkin_time": info.get("last_checkin_time"),
+        }
+    except httpx.HTTPError as e:
+        errors.append(f"profile:{e}")
+
+    try:
+        servers = await api.get_my_servers(token)
+    except httpx.HTTPError as e:
+        errors.append(f"servers:{e}")
+
+    return {"configured": True, "profile": profile, "servers": servers, "errors": errors}
+
+
 # ---------------------------------------------------------------------------
 # Machines
 # ---------------------------------------------------------------------------
