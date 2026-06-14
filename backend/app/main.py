@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .config import get_all_settings, update_settings
 from .database import AlertEvent, MachineSnapshot, PriceHistory, get_db, init_db
 from .poller import run_poll
+from .token_manager import ensure_fresh, refresh_now
 from .ws import broadcast, connect, disconnect
 
 logging.basicConfig(level=logging.INFO)
@@ -48,6 +49,10 @@ async def lifespan(app: FastAPI):
             await set_setting(db, "akile_token", env_token)
 
     scheduler.add_job(run_poll, "interval", seconds=interval, id="poll",
+                      next_run_time=datetime.now())
+    # Keep the Akile token alive entirely inside the backend: check hourly,
+    # refresh when within the expiry margin. Runs an immediate check on startup.
+    scheduler.add_job(ensure_fresh, "interval", hours=1, id="token_refresh",
                       next_run_time=datetime.now())
     scheduler.start()
     logger.info("Scheduler started with interval=%ds", interval)
@@ -109,6 +114,13 @@ async def trigger_poll():
     """Manually trigger a poll cycle."""
     asyncio.create_task(run_poll())
     return {"status": "triggered"}
+
+
+@app.post("/api/token/refresh")
+async def manual_refresh_token():
+    """Manually force an Akile token refresh (writes new token to DB)."""
+    ok = await refresh_now(reason="manual")
+    return {"status": "ok" if ok else "failed"}
 
 
 # ---------------------------------------------------------------------------

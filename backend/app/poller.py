@@ -329,6 +329,15 @@ async def poll_price_history(token: str) -> None:
 # ---------------------------------------------------------------------------
 
 async def run_poll() -> None:
+    # Keep the token alive before every poll cycle: cheap no-op when healthy,
+    # refreshes in-place (and persists to DB) when near expiry. This makes the
+    # backend fully self-sufficient — no external cron needed.
+    from .token_manager import ensure_fresh
+    try:
+        await ensure_fresh()
+    except Exception:
+        logger.exception("ensure_fresh failed during poll (continuing)")
+
     async with SessionLocal() as db:
         settings = await get_all_settings(db)
 
