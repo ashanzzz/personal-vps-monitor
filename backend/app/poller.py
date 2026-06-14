@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import akile_client as api
 from .config import get_all_settings
-from .database import AlertEvent, MachineSnapshot, PriceHistory, SessionLocal
+from .database import AccountCache, AlertEvent, MachineSnapshot, PriceHistory, SessionLocal
 from .notify import in_dnd_window, send_telegram, send_webhook
 from .ws import broadcast
 
@@ -465,6 +465,70 @@ async def poll_price_history(token: str) -> None:
                     cycle=item["cycle"],
                 ))
         await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Account cache (balance + profile + own servers)
+# ---------------------------------------------------------------------------
+
+async def poll_account(token: str, settings: dict) -> None:
+    """Fetch the logged-in account snapshot and store it in account_cache.
+
+    Aggregates balance/profile from GET /v1/user/info and the account's own
+    servers from POST /v1/server/GetServerV2List. Each upstream call degrades
+    independently so a single failure does not blank the whole panel. The
+    resulting payload (same shape as the /api/account response) is written to
+    the single-row account_cache table with a fresh updated_at.
+    """
+    from .logging_setup import log_event
+
+    errors: list[str] = []
+    profile = None
+    servers: list[dict] = []
+
+    try:
+        info = await api.get_user_info(token)
+        profile = {
+            "username": info.get("username", ""),
+            "email": info.get("email", ""),
+            "role": info.get("role", ""),
+            "money": info.get("money"),            # balance in fen; None if missing
+            "telegram_id": info.get("telegram_id"),
+            "is_real_name": bool(info.get("is_real_name")),
+            "is_ga": bool(info.get("is_ga")),
+            "last_checkin_time": info.get("last_checkin_time"),
+        }
+    except httpx.HTTPError as e:
+        logger.warning("Account profile poll failed: %s", e)
+        errors.append(f"profile:{e}")
+
+    try:
+        servers = await api.get_my_servers(token)
+    except httpx.HTTPError as e:
+        logger.warning("Account servers poll failed: %s", e)
+        errors.append(f"servers:{e}")
+
+    log_event("poll.fetch", category="account",
+              ok=not errors, errors=errors or None,
+              has_profile=profile is not None, server_count=len(servers))
+
+    payload = {
+        "configured": True,
+        "profile": profile,
+        "servers": servers,
+        "errors": errors,
+    }
+
+    async with SessionLocal() as db:
+        row = await db.scalar(select(AccountCache).where(AccountCache.id == 1))
+        if row is None:
+            db.add(AccountCache(id=1, data=json.dumps(payload)))
+        else:
+            row.data = json.dumps(payload)
+            row.updated_at = datetime.utcnow()
+        await db.commit()
+
+    await broadcast({"type": "refresh", "category": "account"})
 
 
 # ---------------------------------------------------------------------------

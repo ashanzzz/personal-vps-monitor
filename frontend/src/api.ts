@@ -134,6 +134,7 @@ export interface AppSettings {
   refresh_margin_hours: number
   request_timeout: number
   request_retries: number
+  account_refresh_interval: number
   // Monitor scope
   vps_enabled: boolean
   ls_enabled: boolean
@@ -246,6 +247,9 @@ export const api = {
   // --- My account ---
   getAccount: () =>
     http.get<AccountInfo>('/api/account').then(r => r.data),
+
+  refreshAccount: () =>
+    http.post<AccountInfo>('/api/account/refresh').then(r => r.data),
 }
 
 export interface AccountProfile {
@@ -268,6 +272,7 @@ export interface AccountInfo {
   profile: AccountProfile | null
   servers: MyServer[]
   errors: string[]
+  updated_at: string | null
 }
 
 export interface VersionInfo {

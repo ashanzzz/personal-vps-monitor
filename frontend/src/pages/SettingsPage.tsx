@@ -209,6 +209,13 @@ export function SettingsPage({ settings, onSaved }: Props) {
             <Select mode="multiple" options={LS_REGION_OPTIONS} placeholder="默认全部" />
           </Form.Item>
 
+          <Form.Item
+            label={<span>我的账户刷新间隔 (秒)<Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>账户页（余额 / 服务器）从缓存读取，按此间隔后台刷新；默认 300 秒</Text></span>}
+            name="account_refresh_interval"
+          >
+            <Slider min={30} max={3600} step={30} marks={{ 60: '1min', 300: '5min', 1800: '30min', 3600: '60min' }} />
+          </Form.Item>
+
           <Divider style={{ margin: '12px 0' }}>筛选条件（仅影响推送，面板始终展示全部）</Divider>
 
           <Form.Item
