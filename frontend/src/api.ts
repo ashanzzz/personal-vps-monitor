@@ -96,6 +96,36 @@ export interface PriceHistory {
   fetched_at: string
 }
 
+export interface BuyRule {
+  id: string
+  enabled: boolean
+  label: string
+  name_keyword: string
+  cpu_min: number
+  cpu_max: number
+  memory_min_mb: number
+  memory_max_mb: number
+  disk_min_gb: number
+  disk_max_gb: number
+  bandwidth_mode: 'any' | 'min' | 'exact'
+  bandwidth_mbps: number
+  traffic_min_gb: number
+  price_max_monthly: number   // fen
+  areas: string[]
+  max_per_rule: number
+}
+
+export interface PageBuyConfig {
+  enabled: boolean
+  refresh_interval: number     // seconds
+  max_total_per_run: number
+  max_total_daily: number
+  max_price: number            // fen; 0 = no cap
+  cycle: number
+  on_limit_reached: 'stop' | 'keep_watching'
+  rules: BuyRule[]
+}
+
 export interface AppSettings {
   // API & connection
   akile_token: string
@@ -139,13 +169,26 @@ export interface AppSettings {
   webhook_notify_delisted: boolean
   webhook_notify_price_change: boolean
   webhook_notify_purchased: boolean
-  // Auto-buy
+  // Legacy auto-buy
   auto_buy_enabled: boolean
   auto_buy_plans: string[]
   auto_buy_max_price: number
   auto_buy_cycle: number
   auto_buy_max_per_run: number
   auto_buy_daily_limit: number
+  // Per-page auto-buy
+  cloud_buy: PageBuyConfig
+  ls_buy: PageBuyConfig
+  secondhand_buy: PageBuyConfig
+  plan_label_map: Record<string, string>
+  // Scoring weights
+  score_w_cpu: number
+  score_w_mem: number
+  score_w_disk: number
+  score_w_bw: number
+  score_w_traffic: number
+  // Logging
+  log_level: 'INFO' | 'DEBUG'
   // System
   event_retention_days: number
   timezone: string
@@ -199,6 +242,19 @@ export const api = {
 
   changePassword: (old_password: string, new_password: string) =>
     http.post<{ status: string }>('/api/auth/change-password', { old_password, new_password }).then(r => r.data),
+
+  // --- Version & logs ---
+  getVersion: () =>
+    http.get<VersionInfo>('/api/version').then(r => r.data),
+
+  getAppLog: (lines = 500) =>
+    http.get<{ lines: number; content: string }>('/api/logs/app', { params: { lines } }).then(r => r.data),
+}
+
+export interface VersionInfo {
+  version: string
+  git_sha: string
+  build_time: string
 }
 
 export function fmtPrice(fen: number | null | undefined): string {

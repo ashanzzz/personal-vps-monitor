@@ -22,3 +22,7 @@ frontend/dist/
 .vscode/
 .idea/
 *.swp
+
+# Secrets / local artifacts (never commit real tokens)
+akile_token.txt
+*.token

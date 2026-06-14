@@ -4,36 +4,37 @@ import {
   Spin, theme, Typography,
 } from 'antd'
 import {
-  DashboardOutlined, CloudServerOutlined,
-  BellOutlined, SettingOutlined, LogoutOutlined,
+  DashboardOutlined, CloudServerOutlined, ThunderboltOutlined, ShoppingOutlined,
+  BellOutlined, SettingOutlined, LogoutOutlined, FileTextOutlined,
 } from '@ant-design/icons'
 
 import { api, clearToken, getToken, setUnauthorizedHandler } from './api'
-import type { AlertEvent, AppSettings, Machine, PriceHistory } from './api'
+import type { AlertEvent, AppSettings, Machine, PageBuyConfig, VersionInfo } from './api'
 import { useWebSocket } from './useWebSocket'
 import { Overview }      from './pages/Overview'
-import { MachinePanel } from './pages/MachinePanel'
+import { CategoryPage }  from './pages/CategoryPage'
 import { AlertHistory }  from './pages/AlertHistory'
 import { SettingsPage }  from './pages/SettingsPage'
 import { LoginPage }     from './pages/LoginPage'
+import { LogsPage }      from './pages/LogsPage'
 
 import './App.css'
 
 const { Header, Sider, Content } = Layout
 const { Title } = Typography
 
-type PageKey = 'overview' | 'machines' | 'alerts' | 'settings'
+type PageKey = 'overview' | 'cloud' | 'lightweight' | 'secondhand' | 'alerts' | 'logs' | 'settings'
 
 export default function App() {
   const [authed, setAuthed]       = useState<boolean>(!!getToken())
   const [page, setPage]           = useState<PageKey>('overview')
   const [machines, setMachines]   = useState<Machine[]>([])
   const [events, setEvents]       = useState<AlertEvent[]>([])
-  const [history, setHistory]     = useState<PriceHistory[]>([])
   const [settings, setSettings]   = useState<AppSettings | null>(null)
   const [loading, setLoading]     = useState(true)
   const [newAlerts, setNewAlerts] = useState(0)
   const [collapsed, setCollapsed] = useState(false)
+  const [version, setVersion]     = useState<VersionInfo | null>(null)
 
   // Bounce back to login on any 401.
   useEffect(() => {
@@ -42,16 +43,15 @@ export default function App() {
 
   const loadAll = useCallback(async () => {
     try {
-      const [m, e, h, s] = await Promise.all([
+      const [m, e, s] = await Promise.all([
         api.getMachines(),
         api.getEvents({ limit: 200 }),
-        api.getPriceHistory(),
         api.getSettings(),
       ])
       setMachines(m)
       setEvents(e)
-      setHistory(h)
       setSettings(s)
+      api.getVersion().then(setVersion).catch(() => {})
     } catch {
       antMessage.error('加载数据失败，请检查后端连接')
     } finally {
@@ -81,15 +81,6 @@ export default function App() {
     }
   })
 
-  const handleWatch = useCallback(async (planId: string, watched: boolean) => {
-    if (!settings) return
-    const current = new Set(settings.watched_plans ?? [])
-    if (watched) current.add(planId)
-    else current.delete(planId)
-    const updated = await api.saveSettings({ watched_plans: [...current] })
-    setSettings(updated)
-  }, [settings])
-
   const handleBuy = useCallback(async (planId: string) => {
     try {
       const result = await api.buyMachine(planId)
@@ -97,6 +88,18 @@ export default function App() {
       else antMessage.success('购买请求已提交')
     } catch {
       antMessage.error('购买失败')
+    }
+  }, [])
+
+  // Save a single page's buy config (debounced-ish: immediate save on change).
+  const handleSaveBuyConfig = useCallback(async (buyKey: keyof AppSettings, cfg: PageBuyConfig) => {
+    // Optimistic local update so the editor feels responsive.
+    setSettings(prev => (prev ? { ...prev, [buyKey]: cfg } : prev))
+    try {
+      const updated = await api.saveSettings({ [buyKey]: cfg } as Partial<AppSettings>)
+      setSettings(updated)
+    } catch {
+      antMessage.error('保存抢购设置失败')
     }
   }, [])
 
@@ -152,7 +155,9 @@ export default function App() {
               style={{ background: '#111', borderRight: 0 }}
               items={[
                 { key: 'overview',  icon: <DashboardOutlined />,   label: '总览' },
-                { key: 'machines',  icon: <CloudServerOutlined />,  label: '机器列表' },
+                { key: 'cloud',       icon: <CloudServerOutlined />,  label: '云服务器' },
+                { key: 'lightweight', icon: <ThunderboltOutlined />,  label: '轻量服务器' },
+                { key: 'secondhand',  icon: <ShoppingOutlined />,     label: '二手机' },
                 {
                   key: 'alerts',
                   icon: <BellOutlined />,
@@ -162,6 +167,7 @@ export default function App() {
                     </Badge>
                   ),
                 },
+                { key: 'logs',     icon: <FileTextOutlined />, label: '调试日志' },
                 { key: 'settings', icon: <SettingOutlined />, label: '设置' },
               ]}
             />
@@ -177,11 +183,14 @@ export default function App() {
               justifyContent: 'space-between',
             }}>
               <Typography.Text style={{ color: '#ccc', margin: 0 }}>
-                {{ overview: '总览', machines: '机器列表', alerts: '预警历史', settings: '系统设置' }[page]}
+                {{ overview: '总览', cloud: '云服务器', lightweight: '轻量服务器', secondhand: '二手机', alerts: '预警历史', logs: '调试日志', settings: '系统设置' }[page]}
               </Typography.Text>
               <span style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                 <Typography.Text style={{ color: '#555', fontSize: 12 }}>
                   {settings ? `刷新间隔 ${settings.refresh_interval}s` : ''}
+                </Typography.Text>
+                <Typography.Text style={{ color: '#555', fontSize: 12 }}>
+                  {version ? `v${version.version}` : ''}
                 </Typography.Text>
                 <Button
                   type="text"
@@ -201,17 +210,20 @@ export default function App() {
               ) : (
                 <>
                   {page === 'overview'  && <Overview machines={machines} events={events} />}
-                  {page === 'machines'  && (
-                    <MachinePanel
-                      machines={machines}
-                      priceHistory={history}
-                      settings={settings}
-                      onWatch={handleWatch}
-                      onBuy={handleBuy}
-                      onRefresh={handleRefresh}
-                    />
+                  {page === 'cloud'  && (
+                    <CategoryPage pageKey="cloud" machines={machines} settings={settings}
+                      onBuy={handleBuy} onRefresh={handleRefresh} onSaveBuyConfig={handleSaveBuyConfig} />
+                  )}
+                  {page === 'lightweight'  && (
+                    <CategoryPage pageKey="lightweight" machines={machines} settings={settings}
+                      onBuy={handleBuy} onRefresh={handleRefresh} onSaveBuyConfig={handleSaveBuyConfig} />
+                  )}
+                  {page === 'secondhand'  && (
+                    <CategoryPage pageKey="secondhand" machines={machines} settings={settings}
+                      onBuy={handleBuy} onRefresh={handleRefresh} onSaveBuyConfig={handleSaveBuyConfig} />
                   )}
                   {page === 'alerts'   && <AlertHistory events={events} />}
+                  {page === 'logs'     && <LogsPage />}
                   {page === 'settings' && <SettingsPage settings={settings} onSaved={setSettings} />}
                 </>
               )}

@@ -38,9 +38,22 @@ jobs:
       - name: Determine image tags
         id: tags
         run: |
-          TAG="${{ github.event.inputs.tag }}"
-          TAG="${TAG:-latest}"
-          echo "tags=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}" >> $GITHUB_OUTPUT
+          # Read version from backend/app/version.py (__version__ = "X.Y.Z")
+          VER=$(grep -oP '__version__\s*=\s*"\K[^"]+' backend/app/version.py || echo "")
+          BASE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          INPUT_TAG="${{ github.event.inputs.tag }}"
+          if [ -n "$INPUT_TAG" ]; then
+            # Manual dispatch: honour the requested tag, plus the version tag if available
+            TAGS="${BASE}:${INPUT_TAG}"
+            if [ -n "$VER" ]; then TAGS="${TAGS},${BASE}:v${VER}"; fi
+          else
+            # Push to master: always tag :latest, plus :vX.Y.Z when version.py is present
+            TAGS="${BASE}:latest"
+            if [ -n "$VER" ]; then TAGS="${TAGS},${BASE}:v${VER}"; fi
+          fi
+          echo "version=${VER}" >> $GITHUB_OUTPUT
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "Resolved tags: ${TAGS}"
 
       - name: Build and push
         uses: docker/build-push-action@v6

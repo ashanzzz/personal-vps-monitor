@@ -19,18 +19,36 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import auth
 from .auth import require_auth
-from .config import get_all_settings, update_settings
+from .config import PAGE_KEYS, get_all_settings, update_settings
 from .database import AlertEvent, MachineSnapshot, PriceHistory, get_db, init_db
+from .logging_setup import read_log_tail, set_level, setup_logging
 from .match import find_official_equivalent
-from .poller import run_poll
+from .poller import run_page_poll, run_poll
 from .token_manager import ensure_fresh, refresh_now, token_status
+from .version import __version__, get_version_info
 from .ws import broadcast, connect, disconnect
 
-logging.basicConfig(level=logging.INFO)
+setup_logging()
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler()
 _poll_interval: int = 60  # seconds, updated from DB on startup
+
+
+def _reschedule_page_jobs(settings: dict) -> None:
+    """(Re)schedule one poll job per page using its independent interval."""
+    for page in PAGE_KEYS:
+        cfg = settings.get(f"{page}_buy") or {}
+        interval = max(5, int(cfg.get("refresh_interval", 60) or 60))
+        job_id = f"poll_{page}"
+        if scheduler.get_job(job_id):
+            scheduler.reschedule_job(job_id, trigger="interval", seconds=interval)
+        else:
+            scheduler.add_job(
+                run_page_poll, "interval", seconds=interval, id=job_id,
+                args=[page], next_run_time=datetime.now(),
+            )
+        logger.info("page poller %s scheduled interval=%ds", page, interval)
 
 
 @asynccontextmanager
@@ -55,8 +73,15 @@ async def lifespan(app: FastAPI):
             from .config import set_setting
             await set_setting(db, "akile_token", env_token)
 
-    scheduler.add_job(run_poll, "interval", seconds=interval, id="poll",
-                      next_run_time=datetime.now())
+    # Apply persisted log level.
+    set_level(settings.get("log_level", "INFO"))
+    logger.info("app.start version=%s", __version__)
+
+    # Per-page pollers (each with its own independent interval). These also
+    # drive auto-buy. A legacy "poll" job stays for price-history + any global
+    # housekeeping not tied to a single page.
+    _reschedule_page_jobs(settings)
+
     # Keep the Akile token alive entirely inside the backend: check hourly,
     # refresh when within the expiry margin. Runs an immediate check on startup.
     scheduler.add_job(ensure_fresh, "interval", hours=1, id="token_refresh",
@@ -65,7 +90,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(_prune_events, "interval", hours=24, id="prune_events",
                       next_run_time=datetime.now())
     scheduler.start()
-    logger.info("Scheduler started with interval=%ds", interval)
+    logger.info("Scheduler started (per-page pollers active)")
 
     yield
 
@@ -204,13 +229,31 @@ async def get_settings(_: str = Depends(require_auth), db: AsyncSession = Depend
 async def save_settings(data: dict, _: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     result = await update_settings(db, data)
 
-    # Reschedule poller if interval changed
+    # Reschedule legacy global poller if interval changed (kept for back-compat).
     new_interval = result.get("refresh_interval", 60)
     if scheduler.get_job("poll"):
         scheduler.reschedule_job("poll", trigger="interval", seconds=new_interval)
         logger.info("Rescheduled poller to %ds", new_interval)
 
+    # Reschedule per-page pollers (their intervals may have changed).
+    _reschedule_page_jobs(result)
+
+    # Apply log level live.
+    set_level(result.get("log_level", "INFO"))
+
     return result
+
+
+@app.get("/api/version")
+async def get_version():
+    return get_version_info()
+
+
+@app.get("/api/logs/app")
+async def get_app_log(lines: int = 500, _: str = Depends(require_auth)):
+    """Return the tail of the persistent app log for in-UI debugging."""
+    lines = max(1, min(lines, 5000))
+    return {"lines": lines, "content": read_log_tail(lines)}
 
 
 @app.post("/api/poll/trigger")

@@ -380,9 +380,16 @@ async def poll_secondhand(token: str, settings: dict) -> None:
         data = await api.get_secondhand_list(token)
     except httpx.HTTPError as e:
         logger.warning("Secondhand poll failed: %s", e)
+        from .logging_setup import log_event
+        log_event("poll.fetch", category="secondhand", ok=False, error=str(e))
         return
 
     listings = data.get("list") or []
+    from .logging_setup import log_event
+    log_event("poll.fetch", category="secondhand",
+              status_code=data.get("status_code"), total=data.get("total"),
+              list_len=len(listings),
+              reason=("empty_market" if not listings else "ok"))
 
     async with SessionLocal() as db:
         seen: set[str] = set()
@@ -486,3 +493,54 @@ async def run_poll() -> None:
         await poll_secondhand(token, settings)
 
     await poll_price_history(token)
+
+
+# ---------------------------------------------------------------------------
+# Per-page poll + auto-buy (each runs on its own independent interval)
+# ---------------------------------------------------------------------------
+
+_PAGE_POLLERS = {
+    "cloud": ("vps_enabled", poll_vps),
+    "ls": ("ls_enabled", poll_ls),
+    "secondhand": ("secondhand_enabled", poll_secondhand),
+}
+
+
+async def run_page_poll(page: str) -> None:
+    """Poll a single page, then run its auto-buy rules. Used by per-page jobs."""
+    from .logging_setup import log_event
+    from .token_manager import ensure_fresh
+
+    try:
+        await ensure_fresh()
+    except Exception:
+        logger.exception("ensure_fresh failed during %s poll (continuing)", page)
+
+    async with SessionLocal() as db:
+        settings = await get_all_settings(db)
+
+    token = settings.get("akile_token") or ""
+    if not token:
+        log_event("poll.skip", page=page, reason="no_token")
+        return
+
+    entry = _PAGE_POLLERS.get(page)
+    if entry is None:
+        return
+    enabled_key, fn = entry
+    if not settings.get(enabled_key):
+        return
+
+    log_event("poll.start", page=page)
+    try:
+        await fn(token, settings)
+    except Exception:
+        logger.exception("poll %s failed", page)
+        return
+
+    # Run auto-buy for this page after fresh data is stored.
+    from .buyer import run_autobuy
+    try:
+        await run_autobuy(page)
+    except Exception:
+        logger.exception("autobuy %s failed", page)

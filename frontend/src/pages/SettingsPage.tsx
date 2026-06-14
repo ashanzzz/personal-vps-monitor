@@ -311,14 +311,14 @@ export function SettingsPage({ settings, onSaved }: Props) {
           ),
         }]} />
 
-        {/* ── Card 5: Auto-buy ── */}
+        {/* ── Card 5: Auto-buy (legacy global, 二手机) ── */}
         <Card
           size="small"
-          title={<Space><span>自动抢购</span><Tag color="red">实验性</Tag></Space>}
-          style={{ marginBottom: 16, borderColor: '#ffccc7' }}
+          title={<Space><span>自动抢购（旧版·全局二手）</span><Tag color="orange">兼容保留</Tag></Space>}
+          style={{ marginBottom: 16, borderColor: '#ffe7ba' }}
         >
-          <div style={{ background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 6, padding: '8px 12px', marginBottom: 16 }}>
-            <Text type="danger">⚠️ 开启后将自动下单付费购买，请谨慎设置价格上限与数量上限，避免误买。</Text>
+          <div style={{ background: '#fffbe6', border: '1px solid #ffe7ba', borderRadius: 6, padding: '8px 12px', marginBottom: 16 }}>
+            <Text type="warning">新版按「云服务器 / 轻量 / 二手机」每页独立的条件范围规则抢购，请到对应页面顶部「抢购设置」配置。此处为旧版全局二手抢购，仅作兼容保留。</Text>
           </div>
           <Form.Item label="启用自动购买" name="auto_buy_enabled" valuePropName="checked"><Switch /></Form.Item>
           <Form.Item
@@ -348,19 +348,37 @@ export function SettingsPage({ settings, onSaved }: Props) {
         {/* ── Card 6: System ── */}
         <Collapse style={{ marginBottom: 16 }} items={[{
           key: 'system',
-          label: '系统',
+          label: '系统 / 日志 / 优选权重',
           children: (
-            <Space size="large" wrap>
-              <Form.Item label="事件历史保留 (天)" name="event_retention_days" tooltip="超期事件自动清理，0 = 永久保留">
-                <InputNumber min={0} max={3650} style={{ width: 140 }} />
-              </Form.Item>
-              <Form.Item label="时区" name="timezone">
-                <Select
-                  style={{ width: 200 }}
-                  options={['Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Tokyo', 'UTC', 'America/Los_Angeles'].map(t => ({ value: t, label: t }))}
-                />
-              </Form.Item>
-            </Space>
+            <>
+              <Space size="large" wrap>
+                <Form.Item label="事件历史保留 (天)" name="event_retention_days" tooltip="超期事件自动清理，0 = 永久保留">
+                  <InputNumber min={0} max={3650} style={{ width: 140 }} />
+                </Form.Item>
+                <Form.Item label="时区" name="timezone">
+                  <Select
+                    style={{ width: 200 }}
+                    options={['Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Tokyo', 'UTC', 'America/Los_Angeles'].map(t => ({ value: t, label: t }))}
+                  />
+                </Form.Item>
+                <Form.Item label="日志级别" name="log_level" tooltip="排查问题时切到 DEBUG，可在「调试日志」页查看/下载">
+                  <Select style={{ width: 140 }} options={[
+                    { value: 'INFO', label: 'INFO（正常）' },
+                    { value: 'DEBUG', label: 'DEBUG（详细）' },
+                  ]} />
+                </Form.Item>
+              </Space>
+              <Divider style={{ margin: '8px 0' }} plain>
+                <Text type="secondary" style={{ fontSize: 12 }}>多候选优选权重（同价时按硬件打分高者优先）</Text>
+              </Divider>
+              <Space size="large" wrap>
+                <Form.Item label="CPU 权重" name="score_w_cpu"><InputNumber min={0} step={0.5} style={{ width: 110 }} /></Form.Item>
+                <Form.Item label="内存权重" name="score_w_mem"><InputNumber min={0} step={0.5} style={{ width: 110 }} /></Form.Item>
+                <Form.Item label="硬盘权重" name="score_w_disk"><InputNumber min={0} step={0.1} style={{ width: 110 }} /></Form.Item>
+                <Form.Item label="带宽权重" name="score_w_bw"><InputNumber min={0} step={0.5} style={{ width: 110 }} /></Form.Item>
+                <Form.Item label="流量权重" name="score_w_traffic"><InputNumber min={0} step={0.01} style={{ width: 110 }} /></Form.Item>
+              </Space>
+            </>
           ),
         }]} />
 

@@ -61,7 +61,7 @@ DEFAULTS: dict[str, Any] = {
     "webhook_notify_price_change": False,
     "webhook_notify_purchased": True,
 
-    # --- Auto-buy (secondhand) ---
+    # --- Auto-buy (secondhand) — legacy keys, kept for back-compat ---
     "auto_buy_enabled": False,
     "auto_buy_plans": [],             # plan_ids eligible for auto-buy
     "auto_buy_max_price": 0,          # fen; 0 = no limit
@@ -69,10 +69,69 @@ DEFAULTS: dict[str, Any] = {
     "auto_buy_max_per_run": 1,        # max purchases in a single poll cycle
     "auto_buy_daily_limit": 1,        # max purchases per day
 
+    # --- Per-page auto-buy (cloud / ls / secondhand) ---
+    # Each page has an independent refresh interval, page-level quota gates,
+    # and a list of condition-range buy rules. See PAGE_BUY_DEFAULTS below.
+    "cloud_buy": dict(),              # filled from PAGE_BUY_DEFAULTS at read time
+    "ls_buy": dict(),
+    "secondhand_buy": dict(),
+
+    # plan_id -> human label map (e.g. "111" -> "jppro"); shown in UI, used for
+    # per-rule quotas by label. Empty = show raw plan_id.
+    "plan_label_map": {},
+
+    # Hardware scoring weights — used to pick between equally-priced candidates.
+    # score = cpu*w_cpu + mem_gb*w_mem + disk_gb*w_disk + bw_tier*w_bw + traffic_gb*w_traffic
+    "score_w_cpu": 10.0,
+    "score_w_mem": 5.0,
+    "score_w_disk": 0.5,
+    "score_w_bw": 2.0,
+    "score_w_traffic": 0.05,
+
+    # --- Logging ---
+    "log_level": "INFO",              # INFO | DEBUG
+
     # --- System ---
     "event_retention_days": 90,       # auto-prune events older than this
     "timezone": "Asia/Shanghai",
 }
+
+
+# Default shape for each page's auto-buy config. Refresh interval is per-page
+# (slider 60–6000s in UI, but anything >=5 accepted for power users).
+def page_buy_defaults() -> dict:
+    return {
+        "enabled": False,
+        "refresh_interval": 60,        # seconds, independent per page
+        "max_total_per_run": 1,        # all rules combined, per cycle
+        "max_total_daily": 1,          # all rules combined, per day
+        "max_price": 0,                # fen; 0 = no page-level cap
+        "cycle": 1,                    # billing cycle months for purchases
+        "on_limit_reached": "keep_watching",  # "stop" | "keep_watching"
+        "rules": [],                   # list of rule dicts (see rule_defaults)
+    }
+
+
+def rule_defaults() -> dict:
+    """A single condition-range buy rule. Empty/0 fields mean 'no constraint'."""
+    return {
+        "id": "",                      # client-generated unique id
+        "enabled": True,
+        "label": "",                   # display label, e.g. jppro (optional)
+        "name_keyword": "",            # title must contain this (optional)
+        "cpu_min": 0, "cpu_max": 0,            # 0 = unbounded on that side
+        "memory_min_mb": 0, "memory_max_mb": 0,
+        "disk_min_gb": 0, "disk_max_gb": 0,
+        "bandwidth_mode": "any",       # "any" | "min" | "exact"
+        "bandwidth_mbps": 0,
+        "traffic_min_gb": 0,
+        "price_max_monthly": 0,        # fen; 0 = no limit
+        "areas": [],                   # area allow-list; [] = all
+        "max_per_rule": 1,             # max buys for this rule; 0 = unlimited
+    }
+
+
+PAGE_KEYS = ["cloud", "ls", "secondhand"]
 
 
 async def get_setting(db: AsyncSession, key: str) -> Any:
@@ -100,6 +159,23 @@ async def get_all_settings(db: AsyncSession) -> dict[str, Any]:
             result[row.key] = json.loads(row.value)
         except Exception:
             pass
+    # Merge page-buy configs over their defaults so partial saves stay valid.
+    for page in PAGE_KEYS:
+        key = f"{page}_buy"
+        merged = page_buy_defaults()
+        saved = result.get(key) or {}
+        if isinstance(saved, dict):
+            merged.update(saved)
+            # Normalize each rule against rule_defaults.
+            norm_rules = []
+            for rule in merged.get("rules") or []:
+                if not isinstance(rule, dict):
+                    continue
+                r = rule_defaults()
+                r.update(rule)
+                norm_rules.append(r)
+            merged["rules"] = norm_rules
+        result[key] = merged
     return result
 
 
