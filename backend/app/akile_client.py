@@ -70,7 +70,7 @@ async def get_secondhand_list(token: str, page: int = 1, page_size: int = 100) -
     """POST /v1/pushshop/GetPushProductList – returns current listings."""
     async with httpx.AsyncClient(timeout=TIMEOUT) as c:
         r = await c.post(f"{BASE}/v1/pushshop/GetPushProductList",
-                         json={"page": page, "pageSize": page_size},
+                         json={"page": page, "page_size": page_size},
                          headers=_headers(token))
         r.raise_for_status()
         return r.json()
