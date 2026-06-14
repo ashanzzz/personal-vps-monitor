@@ -21,6 +21,7 @@ DEFAULTS: dict[str, Any] = {
     "refresh_margin_hours": 6,        # refresh when validity drops below this
     "request_timeout": 15,            # seconds per upstream request
     "request_retries": 2,             # retries on transient upstream failure
+    "account_refresh_interval": 300,  # seconds; how often the account page cache (balance/servers) is refreshed
 
     # --- Monitor scope ---
     "vps_enabled": True,

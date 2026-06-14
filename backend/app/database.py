@@ -106,6 +106,21 @@ class AdminUser(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class AccountCache(Base):
+    """Cached snapshot of the logged-in Akile account.
+
+    Single row (id=1). Holds the aggregated account payload (profile + balance
+    + own servers) as a JSON blob so the account page can render instantly from
+    cache instead of hitting the upstream API on every load. Refreshed on its
+    own independent interval by the account poller, or on demand.
+    """
+    __tablename__ = "account_cache"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    data: Mapped[str] = mapped_column(Text, nullable=False, default="")  # JSON blob
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 async def init_db():
     async with engine.begin() as conn:
         # SQLite concurrency hardening: WAL lets readers and a writer coexist

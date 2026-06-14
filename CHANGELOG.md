@@ -2,6 +2,20 @@
 
 本项目遵循语义化版本。日期为发布日。
 
+## v0.8.0
+
+我的账户页加缓存 + 可配置刷新间隔（默认 300s）。
+
+### 新增
+- **账户数据缓存表 `account_cache`**：单行（id=1）存储账户聚合快照（余额 / 账户信息 / 我的服务器）的 JSON 与 `updated_at`，由独立的账户轮询任务按间隔刷新，进页面不再实时打 akile API。
+- **后端账户轮询**：`poller.poll_account(token, settings)` 抓取 `GET /v1/user/info`（余额 `data.money` 分）与 `POST /v1/server/GetServerV2List`（我的服务器列表），两个上游调用各自独立降级，结果写入 `account_cache`。`main.py` 新增 `_reschedule_account_job`，把账户轮询纳入调度，使用独立间隔。
+- **配置键 `account_refresh_interval`**：默认 300（秒），设置页新增「我的账户刷新间隔」滑块（复用现有三页滑块组件，30–3600s）。
+- **手动刷新接口 `POST /api/account/refresh`**：强制拉一次并更新缓存后返回。
+- **前端账户页**：加载时读缓存（秒开），展示「数据更新于 X 前」与手动「刷新」按钮（调用 `refreshAccount`）。
+
+### 变更
+- `GET /api/account` 改为读 `account_cache`（带 `updated_at`），不再每次实时打 akile；首访冷缓存时按需抓取一次填充。
+
 ## v0.7.0
 
 清理旧版全局抢购 + 设置页版本信息展示。
