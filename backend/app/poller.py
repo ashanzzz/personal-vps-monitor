@@ -82,12 +82,16 @@ async def _upsert(db: AsyncSession, category: str, plan_id: str, fields: dict) -
     Upsert a MachineSnapshot row and return a list of change-event dicts.
     Each event: {category, plan_id, name, area, event_type, old_value, new_value}
     """
-    row = await db.scalar(
-        select(MachineSnapshot).where(
-            MachineSnapshot.category == category,
-            MachineSnapshot.plan_id == plan_id,
+    # Wrap the lookup in no_autoflush: a plain query would otherwise trigger
+    # autoflush, prematurely flushing pending objects and hitting the SQLite
+    # write lock ("raised as a result of Query-invoked autoflush").
+    with db.no_autoflush:
+        row = await db.scalar(
+            select(MachineSnapshot).where(
+                MachineSnapshot.category == category,
+                MachineSnapshot.plan_id == plan_id,
+            )
         )
-    )
     events: list[dict] = []
 
     if row is None:

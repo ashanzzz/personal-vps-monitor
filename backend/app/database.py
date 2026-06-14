@@ -11,7 +11,10 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:////app/data/monitor.db")
 
-engine = create_async_engine(DATABASE_URL, echo=False)
+# busy_timeout=30s: when SQLite hits a write lock, wait up to 30s for it to
+# clear instead of failing immediately with "database is locked". Set per
+# connection via connect_args; PRAGMA busy_timeout in init_db is a backstop.
+engine = create_async_engine(DATABASE_URL, echo=False, connect_args={"timeout": 30})
 SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -105,6 +108,15 @@ class AdminUser(Base):
 
 async def init_db():
     async with engine.begin() as conn:
+        # SQLite concurrency hardening: WAL lets readers and a writer coexist
+        # (rollback-journal mode takes a global lock on every write), and
+        # busy_timeout makes concurrent writers wait instead of erroring out.
+        # WAL is a persistent DB property; busy_timeout/synchronous are
+        # per-connection, so they're also set here on the init connection.
+        if DATABASE_URL.startswith("sqlite"):
+            await conn.exec_driver_sql("PRAGMA journal_mode=WAL")
+            await conn.exec_driver_sql("PRAGMA synchronous=NORMAL")
+            await conn.exec_driver_sql("PRAGMA busy_timeout=30000")
         await conn.run_sync(Base.metadata.create_all)
         # Lightweight migration: add ip_status to pre-existing machine_snapshot
         # tables (create_all won't ALTER an existing table).
