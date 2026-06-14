@@ -380,18 +380,37 @@ async def poll_ls(token: str, settings: dict) -> None:
 
 
 async def poll_secondhand(token: str, settings: dict) -> None:
-    try:
-        data = await api.get_secondhand_list(token)
-    except httpx.HTTPError as e:
-        logger.warning("Secondhand poll failed: %s", e)
-        from .logging_setup import log_event
-        log_event("poll.fetch", category="secondhand", ok=False, error=str(e))
-        return
-
-    listings = data.get("list") or []
+    # Paginate through the whole market: the API returns ~30 per page by
+    # default but the market has ~89 listings. Loop from page=1 accumulating
+    # `list` until we've collected `total` rows or a page comes back empty.
     from .logging_setup import log_event
+    PAGE_SIZE = 100
+    MAX_PAGES = 20  # safety cap against runaway loops
+
+    listings: list[dict] = []
+    total = 0
+    last_data: dict = {}
+    for page in range(1, MAX_PAGES + 1):
+        try:
+            data = await api.get_secondhand_list(token, page=page,
+                                                 page_size=PAGE_SIZE)
+        except httpx.HTTPError as e:
+            logger.warning("Secondhand poll failed (page %s): %s", page, e)
+            log_event("poll.fetch", category="secondhand", ok=False,
+                      error=str(e), page=page)
+            return
+
+        last_data = data
+        total = data.get("total") or total
+        page_list = data.get("list") or []
+        if not page_list:
+            break
+        listings.extend(page_list)
+        if total and len(listings) >= total:
+            break
+
     log_event("poll.fetch", category="secondhand",
-              status_code=data.get("status_code"), total=data.get("total"),
+              status_code=last_data.get("status_code"), total=total,
               list_len=len(listings),
               reason=("empty_market" if not listings else "ok"))
 
@@ -428,8 +447,13 @@ async def poll_secondhand(token: str, settings: dict) -> None:
                 "ip_status": _ip_status(item),
                 "extra": json.dumps(item),
             }
-            evs = await _upsert(db, "secondhand", pid, fields)
-            all_events.extend(evs)
+            try:
+                evs = await _upsert(db, "secondhand", pid, fields)
+                all_events.extend(evs)
+            except Exception as e:
+                # One bad row must not abort the whole batch.
+                logger.warning("Secondhand upsert failed for pid=%s: %s", pid, e)
+                continue
 
         evs = await _mark_delisted(db, "secondhand", seen)
         all_events.extend(evs)
