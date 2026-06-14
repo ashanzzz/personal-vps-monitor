@@ -44,12 +44,28 @@ export interface PriceHistory {
 }
 
 export interface AppSettings {
+  // API & connection
   akile_token: string
   refresh_interval: number
+  auto_refresh_token: boolean
+  refresh_margin_hours: number
+  request_timeout: number
+  request_retries: number
+  // Monitor scope
   vps_enabled: boolean
   ls_enabled: boolean
   secondhand_enabled: boolean
+  ls_regions: string[]
+  // Filters
   watched_plans: string[]
+  filter_areas: string[]
+  filter_name_include: string
+  filter_name_exclude: string
+  filter_max_price: number
+  filter_min_cpu: number
+  filter_min_memory_mb: number
+  filter_min_traffic_gb: number
+  // Telegram
   tg_bot_token: string
   tg_chat_id: string
   tg_notify_new_listing: boolean
@@ -57,11 +73,37 @@ export interface AppSettings {
   tg_notify_delisted: boolean
   tg_notify_price_change: boolean
   tg_notify_purchased: boolean
+  notify_scope: 'all' | 'watched'
+  dnd_enabled: boolean
+  dnd_start: string
+  dnd_end: string
+  merge_interval_minutes: number
+  // Webhook
+  webhook_enabled: boolean
+  webhook_url: string
+  webhook_notify_new_listing: boolean
+  webhook_notify_restock: boolean
+  webhook_notify_delisted: boolean
+  webhook_notify_price_change: boolean
+  webhook_notify_purchased: boolean
+  // Auto-buy
   auto_buy_enabled: boolean
   auto_buy_plans: string[]
   auto_buy_max_price: number
   auto_buy_cycle: number
-  ls_regions: string[]
+  auto_buy_max_per_run: number
+  auto_buy_daily_limit: number
+  // System
+  event_retention_days: number
+  timezone: string
+}
+
+export interface TokenStatus {
+  configured: boolean
+  exp: number
+  seconds_left: number
+  expires_at: string | null
+  auto_refresh: boolean
 }
 
 export const api = {
@@ -85,6 +127,12 @@ export const api = {
 
   buyMachine: (plan_id: string) =>
     http.post(`/api/buy/${plan_id}`).then(r => r.data),
+
+  getTokenStatus: () =>
+    http.get<TokenStatus>('/api/token/status').then(r => r.data),
+
+  refreshToken: () =>
+    http.post<{ status: string }>('/api/token/refresh').then(r => r.data),
 }
 
 export function fmtPrice(fen: number | null | undefined): string {

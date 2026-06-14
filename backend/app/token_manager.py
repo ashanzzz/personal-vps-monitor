@@ -54,6 +54,39 @@ def _seconds_left(tok: str) -> int:
     return exp - int(time.time())
 
 
+async def token_status() -> dict:
+    """Return a snapshot of the current token's health for the UI.
+
+    Shape: {configured, exp, seconds_left, expires_at, auto_refresh}
+    Never raises.
+    """
+    async with SessionLocal() as db:
+        settings = await get_all_settings(db)
+
+    token = settings.get("akile_token") or ""
+    if not token:
+        return {
+            "configured": False,
+            "exp": 0,
+            "seconds_left": 0,
+            "expires_at": None,
+            "auto_refresh": bool(settings.get("auto_refresh_token", True)),
+        }
+
+    exp = jwt_exp(token)
+    left = _seconds_left(token)
+    expires_at = (
+        time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(exp)) if exp else None
+    )
+    return {
+        "configured": True,
+        "exp": exp,
+        "seconds_left": left,
+        "expires_at": expires_at,
+        "auto_refresh": bool(settings.get("auto_refresh_token", True)),
+    }
+
+
 async def _alert(settings: dict, text: str) -> None:
     """Send a Telegram alert if a bot is configured. Never raises."""
     bot = settings.get("tg_bot_token")
@@ -104,14 +137,24 @@ async def ensure_fresh() -> None:
     """Scheduled entry point: refresh only if the token is near expiry.
 
     Called periodically by APScheduler. Cheap no-op when the token is healthy.
+    Honours the auto_refresh_token toggle and the user-configured margin.
     """
     async with SessionLocal() as db:
         settings = await get_all_settings(db)
+
+    if not settings.get("auto_refresh_token", True):
+        logger.debug("ensure_fresh: auto-refresh disabled, skipping")
+        return
 
     token = settings.get("akile_token") or ""
     if not token:
         logger.info("ensure_fresh: no token configured, skipping")
         return
+
+    try:
+        margin = int(settings.get("refresh_margin_hours", 6)) * 3600
+    except (TypeError, ValueError):
+        margin = REFRESH_MARGIN_SECONDS
 
     left = _seconds_left(token)
     if left == -1:
@@ -119,7 +162,7 @@ async def ensure_fresh() -> None:
         await refresh_now(reason="unparseable-exp")
         return
 
-    if left <= REFRESH_MARGIN_SECONDS:
+    if left <= margin:
         logger.info("ensure_fresh: token has %ds left, refreshing", left)
         await refresh_now(reason="near-expiry")
     else:

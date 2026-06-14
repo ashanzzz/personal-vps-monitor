@@ -1,10 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import {
-  Card, Form, Input, InputNumber, Switch, Select, Button,
-  Divider, message, Typography, Slider,
+  Card, Form, Input, InputNumber, Switch, Select, Button, Collapse,
+  Divider, message, Typography, Slider, Radio, TimePicker, Space, Tag, Affix,
 } from 'antd'
-import { SaveOutlined, SendOutlined } from '@ant-design/icons'
-import type { AppSettings } from '../api'
+import {
+  SaveOutlined, SendOutlined, ReloadOutlined, CheckCircleTwoTone,
+  WarningTwoTone, CloseCircleTwoTone,
+} from '@ant-design/icons'
+import dayjs from 'dayjs'
+import type { AppSettings, TokenStatus } from '../api'
 import { api } from '../api'
 
 const { Text } = Typography
@@ -16,21 +20,64 @@ interface Props {
   onSaved: (s: AppSettings) => void
 }
 
+// Format remaining seconds as "23.5 小时" / "45 分钟"
+function fmtLeft(sec: number): string {
+  if (sec <= 0) return '已过期'
+  const h = sec / 3600
+  if (h >= 1) return `${h.toFixed(1)} 小时`
+  return `${Math.round(sec / 60)} 分钟`
+}
+
+function TokenStatusBadge({ status }: { status: TokenStatus | null }) {
+  if (!status) return <Text type="secondary">加载中…</Text>
+  if (!status.configured) {
+    return <span><CloseCircleTwoTone twoToneColor="#ff4d4f" /> <Text type="secondary">未配置 Token</Text></span>
+  }
+  const left = status.seconds_left
+  if (left <= 0) {
+    return <span><CloseCircleTwoTone twoToneColor="#ff4d4f" /> <Text type="danger">已过期，请重新登录获取</Text></span>
+  }
+  const warn = left < 6 * 3600
+  const icon = warn
+    ? <WarningTwoTone twoToneColor="#faad14" />
+    : <CheckCircleTwoTone twoToneColor="#52c41a" />
+  return (
+    <span>
+      {icon}{' '}
+      <Text type={warn ? 'warning' : 'success'}>有效，剩余 {fmtLeft(left)}</Text>
+      {status.expires_at && <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>到期 {status.expires_at}</Text>}
+    </span>
+  )
+}
+
 export function SettingsPage({ settings, onSaved }: Props) {
   const [form] = Form.useForm()
   const [saving, setSaving] = useState(false)
   const [testingTg, setTestingTg] = useState(false)
+  const [tokenStatus, setTokenStatus] = useState<TokenStatus | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
 
-  // Sync when settings load
+  const loadTokenStatus = useCallback(async () => {
+    try {
+      setTokenStatus(await api.getTokenStatus())
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
   useEffect(() => {
     if (settings) {
       form.setFieldsValue({
         ...settings,
         watched_plans: (settings.watched_plans ?? []).join('\n'),
         auto_buy_plans: (settings.auto_buy_plans ?? []).join('\n'),
+        dnd_start: settings.dnd_start ? dayjs(settings.dnd_start, 'HH:mm') : null,
+        dnd_end: settings.dnd_end ? dayjs(settings.dnd_end, 'HH:mm') : null,
       })
     }
   }, [settings, form])
+
+  useEffect(() => { loadTokenStatus() }, [loadTokenStatus])
 
   const handleSave = async () => {
     try {
@@ -38,22 +85,37 @@ export function SettingsPage({ settings, onSaved }: Props) {
       setSaving(true)
       const payload = {
         ...vals,
-        watched_plans: (vals.watched_plans ?? '')
-          .split(/[\n,]+/)
-          .map((s: string) => s.trim())
-          .filter(Boolean),
-        auto_buy_plans: (vals.auto_buy_plans ?? '')
-          .split(/[\n,]+/)
-          .map((s: string) => s.trim())
-          .filter(Boolean),
+        watched_plans: splitLines(vals.watched_plans),
+        auto_buy_plans: splitLines(vals.auto_buy_plans),
+        dnd_start: vals.dnd_start ? dayjs(vals.dnd_start).format('HH:mm') : '23:00',
+        dnd_end: vals.dnd_end ? dayjs(vals.dnd_end).format('HH:mm') : '08:00',
       }
       const saved = await api.saveSettings(payload)
       onSaved(saved)
       message.success('设置已保存')
+      loadTokenStatus()
     } catch (e: any) {
-      message.error(e?.response?.data?.detail ?? '保存失败')
+      if (e?.errorFields) message.error('请检查表单填写')
+      else message.error(e?.response?.data?.detail ?? '保存失败')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const manualRefresh = async () => {
+    setRefreshing(true)
+    try {
+      const res = await api.refreshToken()
+      if (res.status === 'ok') {
+        message.success('Token 已续期')
+        loadTokenStatus()
+      } else {
+        message.error('续期失败，请查看后端日志或重新登录获取 Token')
+      }
+    } catch {
+      message.error('续期请求失败')
+    } finally {
+      setRefreshing(false)
     }
   }
 
@@ -84,62 +146,111 @@ export function SettingsPage({ settings, onSaved }: Props) {
   }
 
   return (
-    <div style={{ maxWidth: 720, margin: '0 auto' }}>
+    <div style={{ maxWidth: 760, margin: '0 auto', paddingBottom: 72 }}>
       <Form form={form} layout="vertical" onFinish={handleSave}>
-        {/* API */}
-        <Card size="small" title="API 设置" style={{ marginBottom: 16 }}>
+        {/* ── Card 1: API & connection ── */}
+        <Card size="small" title="API 与连接" style={{ marginBottom: 16 }}>
           <Form.Item label="Akile Token" name="akile_token" rules={[{ required: true, message: '必填' }]}>
             <Input.Password placeholder="your-token" autoComplete="off" />
           </Form.Item>
 
+          <Form.Item label="Token 状态">
+            <Space wrap>
+              <TokenStatusBadge status={tokenStatus} />
+              <Button size="small" icon={<ReloadOutlined />} loading={refreshing} onClick={manualRefresh}>
+                立即续期
+              </Button>
+            </Space>
+          </Form.Item>
+
+          <Space size="large" wrap>
+            <Form.Item label="自动续期" name="auto_refresh_token" valuePropName="checked" tooltip="后端拿到首个 Token 后自动续命，无需重新登录">
+              <Switch />
+            </Form.Item>
+            <Form.Item label="提前续期阈值 (小时)" name="refresh_margin_hours">
+              <InputNumber min={1} max={23} style={{ width: 120 }} />
+            </Form.Item>
+          </Space>
+
           <Form.Item
-            label={
-              <span>
-                刷新间隔 (秒)
-                <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-                  建议 30–300 秒，太短容易触发限频
-                </Text>
-              </span>
-            }
+            label={<span>刷新间隔 (秒)<Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>建议 30–300 秒，太短容易触发限频</Text></span>}
             name="refresh_interval"
           >
             <Slider min={15} max={600} step={5} marks={{ 30: '30s', 60: '1min', 300: '5min', 600: '10min' }} />
           </Form.Item>
+
+          <Collapse ghost items={[{
+            key: 'adv',
+            label: '高级（请求超时 / 重试）',
+            children: (
+              <Space size="large" wrap>
+                <Form.Item label="请求超时 (秒)" name="request_timeout" style={{ marginBottom: 0 }}>
+                  <InputNumber min={5} max={120} style={{ width: 120 }} />
+                </Form.Item>
+                <Form.Item label="失败重试次数" name="request_retries" style={{ marginBottom: 0 }}>
+                  <InputNumber min={0} max={10} style={{ width: 120 }} />
+                </Form.Item>
+              </Space>
+            ),
+          }]} />
         </Card>
 
-        {/* Monitor scope */}
+        {/* ── Card 2: Monitor scope ── */}
         <Card size="small" title="监控范围" style={{ marginBottom: 16 }}>
-          <Form.Item label="启用新机VPS监控" name="vps_enabled" valuePropName="checked">
-            <Switch />
-          </Form.Item>
-          <Form.Item label="启用轻量机监控" name="ls_enabled" valuePropName="checked">
-            <Switch />
-          </Form.Item>
+          <Space size="large" wrap>
+            <Form.Item label="新机VPS" name="vps_enabled" valuePropName="checked"><Switch /></Form.Item>
+            <Form.Item label="轻量机" name="ls_enabled" valuePropName="checked"><Switch /></Form.Item>
+            <Form.Item label="二手机" name="secondhand_enabled" valuePropName="checked"><Switch /></Form.Item>
+          </Space>
           <Form.Item label="轻量机监控区域" name="ls_regions">
             <Select mode="multiple" options={LS_REGION_OPTIONS} placeholder="默认全部" />
           </Form.Item>
-          <Form.Item label="启用二手机监控" name="secondhand_enabled" valuePropName="checked">
-            <Switch />
-          </Form.Item>
 
-          <Divider style={{ margin: '12px 0' }} />
+          <Divider style={{ margin: '12px 0' }}>筛选条件（仅影响推送，面板始终展示全部）</Divider>
 
           <Form.Item
-            label={
-              <span>
-                关注的套餐 ID
-                <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-                  每行一个 plan_id，触发预警时会高亮显示
-                </Text>
-              </span>
-            }
+            label={<span>关注的套餐 ID<Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>每行一个 plan_id，触发预警时高亮</Text></span>}
             name="watched_plans"
           >
-            <Input.TextArea rows={4} placeholder="plan_id 每行一个" />
+            <Input.TextArea rows={3} placeholder="plan_id 每行一个" />
           </Form.Item>
+
+          <Collapse ghost items={[{
+            key: 'filters',
+            label: '进阶筛选（区域 / 关键词 / 价格 / 配置下限）',
+            children: (
+              <>
+                <Form.Item label="只看这些区域" name="filter_areas" tooltip="留空 = 全部区域">
+                  <Select mode="tags" placeholder="如 HK、JP，可自定义" />
+                </Form.Item>
+                <Space size="large" wrap style={{ display: 'flex' }}>
+                  <Form.Item label="名称包含" name="filter_name_include">
+                    <Input placeholder="关键词" style={{ width: 200 }} />
+                  </Form.Item>
+                  <Form.Item label="名称排除" name="filter_name_exclude">
+                    <Input placeholder="关键词" style={{ width: 200 }} />
+                  </Form.Item>
+                </Space>
+                <Space size="large" wrap>
+                  <Form.Item label="价格上限 (分)" name="filter_max_price" tooltip="0 = 不限">
+                    <InputNumber min={0} step={100} style={{ width: 140 }} />
+                  </Form.Item>
+                  <Form.Item label="最低 CPU" name="filter_min_cpu">
+                    <InputNumber min={0} style={{ width: 110 }} />
+                  </Form.Item>
+                  <Form.Item label="最低内存 (MB)" name="filter_min_memory_mb">
+                    <InputNumber min={0} step={256} style={{ width: 130 }} />
+                  </Form.Item>
+                  <Form.Item label="最低流量 (GB)" name="filter_min_traffic_gb">
+                    <InputNumber min={0} step={100} style={{ width: 130 }} />
+                  </Form.Item>
+                </Space>
+              </>
+            ),
+          }]} />
         </Card>
 
-        {/* Telegram */}
+        {/* ── Card 3: Telegram ── */}
         <Card size="small" title="Telegram 通知" style={{ marginBottom: 16 }}>
           <Form.Item label="Bot Token" name="tg_bot_token">
             <Input.Password placeholder="123456:ABC..." autoComplete="off" />
@@ -147,58 +258,127 @@ export function SettingsPage({ settings, onSaved }: Props) {
           <Form.Item label="Chat ID" name="tg_chat_id">
             <Input placeholder="-1001234567890 或个人 ID" />
           </Form.Item>
-          <Button
-            icon={<SendOutlined />}
-            loading={testingTg}
-            onClick={testTelegram}
-            style={{ marginBottom: 16 }}
-          >
+          <Button icon={<SendOutlined />} loading={testingTg} onClick={testTelegram} style={{ marginBottom: 16 }}>
             测试发送
           </Button>
+          <Divider style={{ margin: '0 0 12px' }}>推送事件</Divider>
+          <Space size="large" wrap>
+            <Form.Item label="新上架" name="tg_notify_new_listing" valuePropName="checked"><Switch /></Form.Item>
+            <Form.Item label="补货" name="tg_notify_restock" valuePropName="checked"><Switch /></Form.Item>
+            <Form.Item label="下架/售罄" name="tg_notify_delisted" valuePropName="checked"><Switch /></Form.Item>
+            <Form.Item label="价格变动" name="tg_notify_price_change" valuePropName="checked"><Switch /></Form.Item>
+            <Form.Item label="购买成功" name="tg_notify_purchased" valuePropName="checked"><Switch /></Form.Item>
+          </Space>
           <Divider style={{ margin: '0 0 12px' }} />
-          <Form.Item label="新上架" name="tg_notify_new_listing" valuePropName="checked"><Switch /></Form.Item>
-          <Form.Item label="补货" name="tg_notify_restock" valuePropName="checked"><Switch /></Form.Item>
-          <Form.Item label="下架/售罄" name="tg_notify_delisted" valuePropName="checked"><Switch /></Form.Item>
-          <Form.Item label="价格变动" name="tg_notify_price_change" valuePropName="checked"><Switch /></Form.Item>
-          <Form.Item label="购买成功" name="tg_notify_purchased" valuePropName="checked"><Switch /></Form.Item>
+          <Form.Item label="通知范围" name="notify_scope">
+            <Radio.Group>
+              <Radio value="all">全部机器</Radio>
+              <Radio value="watched">仅关注的套餐</Radio>
+            </Radio.Group>
+          </Form.Item>
+          <Space size="large" wrap align="end">
+            <Form.Item label="免打扰" name="dnd_enabled" valuePropName="checked"><Switch /></Form.Item>
+            <Form.Item label="开始" name="dnd_start"><TimePicker format="HH:mm" minuteStep={5} /></Form.Item>
+            <Form.Item label="结束" name="dnd_end"><TimePicker format="HH:mm" minuteStep={5} /></Form.Item>
+            <Form.Item label="合并间隔 (分钟)" name="merge_interval_minutes" tooltip="同类通知在此间隔内只发一次，0 = 不合并">
+              <InputNumber min={0} max={1440} style={{ width: 120 }} />
+            </Form.Item>
+          </Space>
         </Card>
 
-        {/* Auto-buy */}
-        <Card size="small" title="自动抢购（实验性）" style={{ marginBottom: 16 }}>
-          <Form.Item label="启用自动购买" name="auto_buy_enabled" valuePropName="checked">
-            <Switch />
-          </Form.Item>
+        {/* ── Card 4: Generic webhook ── */}
+        <Collapse style={{ marginBottom: 16 }} items={[{
+          key: 'webhook',
+          label: '其它通知渠道（Webhook）',
+          children: (
+            <>
+              <Form.Item label="启用 Webhook" name="webhook_enabled" valuePropName="checked"><Switch /></Form.Item>
+              <Form.Item
+                label={<span>Webhook URL<Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>POST JSON，可接 Server酱 / 企业微信 / Bark</Text></span>}
+                name="webhook_url"
+              >
+                <Input placeholder="https://..." />
+              </Form.Item>
+              <Divider style={{ margin: '0 0 12px' }}>推送事件</Divider>
+              <Space size="large" wrap>
+                <Form.Item label="新上架" name="webhook_notify_new_listing" valuePropName="checked"><Switch /></Form.Item>
+                <Form.Item label="补货" name="webhook_notify_restock" valuePropName="checked"><Switch /></Form.Item>
+                <Form.Item label="下架/售罄" name="webhook_notify_delisted" valuePropName="checked"><Switch /></Form.Item>
+                <Form.Item label="价格变动" name="webhook_notify_price_change" valuePropName="checked"><Switch /></Form.Item>
+                <Form.Item label="购买成功" name="webhook_notify_purchased" valuePropName="checked"><Switch /></Form.Item>
+              </Space>
+            </>
+          ),
+        }]} />
+
+        {/* ── Card 5: Auto-buy ── */}
+        <Card
+          size="small"
+          title={<Space><span>自动抢购</span><Tag color="red">实验性</Tag></Space>}
+          style={{ marginBottom: 16, borderColor: '#ffccc7' }}
+        >
+          <div style={{ background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 6, padding: '8px 12px', marginBottom: 16 }}>
+            <Text type="danger">⚠️ 开启后将自动下单付费购买，请谨慎设置价格上限与数量上限，避免误买。</Text>
+          </div>
+          <Form.Item label="启用自动购买" name="auto_buy_enabled" valuePropName="checked"><Switch /></Form.Item>
           <Form.Item
-            label={
-              <span>
-                自动购买套餐 ID
-                <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>每行一个 plan_id</Text>
-              </span>
-            }
+            label={<span>自动购买套餐 ID<Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>每行一个，仅二手机支持</Text></span>}
             name="auto_buy_plans"
           >
-            <Input.TextArea rows={3} placeholder="只有二手机支持自动购买" />
+            <Input.TextArea rows={3} placeholder="plan_id 每行一个" />
           </Form.Item>
-          <Form.Item label="最高可接受价格 (分)" name="auto_buy_max_price">
-            <InputNumber min={0} step={100} addonAfter="分" style={{ width: 180 }} />
-          </Form.Item>
-          <Form.Item label="购买周期 (月)" name="auto_buy_cycle">
-            <Select options={[1,3,6,12].map(v => ({ value: v, label: `${v} 个月` }))} style={{ width: 140 }} />
-          </Form.Item>
+          <Space size="large" wrap>
+            <Form.Item label="最高可接受价格 (分)" name="auto_buy_max_price" tooltip="0 = 不限">
+              <InputNumber min={0} step={100} style={{ width: 180 }} addonAfter="分" />
+            </Form.Item>
+            <Form.Item label="购买周期" name="auto_buy_cycle">
+              <Select options={[1, 3, 6, 12].map(v => ({ value: v, label: `${v} 个月` }))} style={{ width: 130 }} />
+            </Form.Item>
+          </Space>
+          <Space size="large" wrap>
+            <Form.Item label="单次最大数量" name="auto_buy_max_per_run">
+              <InputNumber min={1} max={50} style={{ width: 140 }} />
+            </Form.Item>
+            <Form.Item label="每日抢购上限" name="auto_buy_daily_limit">
+              <InputNumber min={1} max={100} style={{ width: 140 }} />
+            </Form.Item>
+          </Space>
         </Card>
 
-        <Form.Item>
-          <Button
-            type="primary"
-            htmlType="submit"
-            icon={<SaveOutlined />}
-            loading={saving}
-            block
-          >
-            保存设置
-          </Button>
-        </Form.Item>
+        {/* ── Card 6: System ── */}
+        <Collapse style={{ marginBottom: 16 }} items={[{
+          key: 'system',
+          label: '系统',
+          children: (
+            <Space size="large" wrap>
+              <Form.Item label="事件历史保留 (天)" name="event_retention_days" tooltip="超期事件自动清理，0 = 永久保留">
+                <InputNumber min={0} max={3650} style={{ width: 140 }} />
+              </Form.Item>
+              <Form.Item label="时区" name="timezone">
+                <Select
+                  style={{ width: 200 }}
+                  options={['Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Tokyo', 'UTC', 'America/Los_Angeles'].map(t => ({ value: t, label: t }))}
+                />
+              </Form.Item>
+            </Space>
+          ),
+        }]} />
+
+        <Affix offsetBottom={0}>
+          <div style={{ background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(4px)', padding: '12px 0', borderTop: '1px solid #f0f0f0' }}>
+            <Space>
+              <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={saving}>
+                保存设置
+              </Button>
+              <Button onClick={() => settings && form.setFieldsValue(settings)}>重置</Button>
+            </Space>
+          </div>
+        </Affix>
       </Form>
     </div>
   )
+}
+
+function splitLines(v: string | undefined): string[] {
+  return (v ?? '').split(/[\n,]+/).map(s => s.trim()).filter(Boolean)
 }

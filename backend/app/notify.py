@@ -3,6 +3,9 @@ Telegram notification sender.
 """
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import httpx
 
 _ICONS = {
@@ -85,3 +88,49 @@ async def send_custom(token: str, chat_id: str, text: str) -> None:
             })
     except Exception:
         pass
+
+
+async def send_webhook(url: str, event: dict) -> None:
+    """POST a JSON payload to a generic webhook (Server酱 / 企业微信 / Bark / ...).
+
+    Sends both a structured `event` object and a pre-rendered `text` so simple
+    receivers can use either. Never raises.
+    """
+    if not url:
+        return
+    payload = {
+        "title": "Akile Monitor",
+        "text": _build_text(event),
+        "event": event,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            await c.post(url, json=payload)
+    except Exception:
+        pass  # Don't crash the poller on notification failure
+
+
+def in_dnd_window(start: str, end: str, tz: str = "Asia/Shanghai") -> bool:
+    """Return True if 'now' (in tz) falls inside the do-not-disturb window.
+
+    Handles windows that wrap past midnight (e.g. 23:00 → 08:00). On any parse
+    error, returns False (fail open — better to notify than to silently drop).
+    """
+    try:
+        now = datetime.now(ZoneInfo(tz))
+    except Exception:
+        now = datetime.now()
+    try:
+        sh, sm = (int(x) for x in start.split(":", 1))
+        eh, em = (int(x) for x in end.split(":", 1))
+    except (ValueError, AttributeError):
+        return False
+    cur = now.hour * 60 + now.minute
+    s = sh * 60 + sm
+    e = eh * 60 + em
+    if s == e:
+        return False
+    if s < e:
+        return s <= cur < e
+    # wraps midnight
+    return cur >= s or cur < e

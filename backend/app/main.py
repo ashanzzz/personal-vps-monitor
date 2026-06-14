@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .config import get_all_settings, update_settings
 from .database import AlertEvent, MachineSnapshot, PriceHistory, get_db, init_db
 from .poller import run_poll
-from .token_manager import ensure_fresh, refresh_now
+from .token_manager import ensure_fresh, refresh_now, token_status
 from .ws import broadcast, connect, disconnect
 
 logging.basicConfig(level=logging.INFO)
@@ -54,12 +54,37 @@ async def lifespan(app: FastAPI):
     # refresh when within the expiry margin. Runs an immediate check on startup.
     scheduler.add_job(ensure_fresh, "interval", hours=1, id="token_refresh",
                       next_run_time=datetime.now())
+    # Prune old events daily to keep the DB lean.
+    scheduler.add_job(_prune_events, "interval", hours=24, id="prune_events",
+                      next_run_time=datetime.now())
     scheduler.start()
     logger.info("Scheduler started with interval=%ds", interval)
 
     yield
 
     scheduler.shutdown()
+
+
+async def _prune_events() -> None:
+    """Delete AlertEvent rows older than event_retention_days."""
+    from datetime import timedelta
+
+    from .database import SessionLocal
+
+    async with SessionLocal() as db:
+        settings = await get_all_settings(db)
+        days = settings.get("event_retention_days", 90)
+        try:
+            days = int(days)
+        except (TypeError, ValueError):
+            days = 90
+        if days <= 0:
+            return
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        from sqlalchemy import delete
+        await db.execute(delete(AlertEvent).where(AlertEvent.created_at < cutoff))
+        await db.commit()
+        logger.info("Pruned events older than %d days", days)
 
 
 app = FastAPI(title="Akile Monitor", lifespan=lifespan)
@@ -121,6 +146,12 @@ async def manual_refresh_token():
     """Manually force an Akile token refresh (writes new token to DB)."""
     ok = await refresh_now(reason="manual")
     return {"status": "ok" if ok else "failed"}
+
+
+@app.get("/api/token/status")
+async def get_token_status():
+    """Report the current token's expiry/health for the UI."""
+    return await token_status()
 
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -15,13 +16,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import akile_client as api
 from .config import get_all_settings
 from .database import AlertEvent, MachineSnapshot, PriceHistory, SessionLocal
-from .notify import send_telegram
+from .notify import in_dnd_window, send_telegram, send_webhook
 from .ws import broadcast
 
 if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+# Module-level merge state: last notification time per (channel, event_type).
+# Used to collapse bursts of the same event type when merge_interval_minutes > 0.
+_last_notified: dict[str, float] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -126,29 +131,129 @@ async def _save_events(db: AsyncSession, events: list[dict], settings: dict) -> 
         db.add(AlertEvent(**ev))
     await db.commit()
 
-    # Notify
-    if settings.get("tg_bot_token") and settings.get("tg_chat_id"):
+    if events:
         for ev in events:
-            et = ev["event_type"]
-            if et == "new_listing" and settings.get("tg_notify_new_listing"):
-                pass
-            elif et == "restock" and settings.get("tg_notify_restock"):
-                pass
-            elif et == "delisted" and settings.get("tg_notify_delisted"):
-                pass
-            elif et == "price_change" and settings.get("tg_notify_price_change"):
-                pass
-            else:
-                continue
-            await send_telegram(
-                token=settings["tg_bot_token"],
-                chat_id=settings["tg_chat_id"],
-                event=ev,
-            )
+            await _dispatch_event(db, ev, settings)
 
-    # Broadcast to WebSocket clients
+    # Broadcast to WebSocket clients (UI always sees everything, unfiltered)
     if events:
         await broadcast({"type": "events", "data": events})
+
+
+# ---------------------------------------------------------------------------
+# Notification filtering + dispatch
+# ---------------------------------------------------------------------------
+
+async def _machine_for(db: AsyncSession, category: str, plan_id: str) -> MachineSnapshot | None:
+    return await db.scalar(
+        select(MachineSnapshot).where(
+            MachineSnapshot.category == category,
+            MachineSnapshot.plan_id == plan_id,
+        )
+    )
+
+
+def _passes_filters(ev: dict, machine: MachineSnapshot | None, settings: dict) -> bool:
+    """Decide whether an event is worth notifying about, based on user filters.
+
+    Filters only gate notifications — data collection and the UI always see
+    everything. Returns True when the event should be sent.
+    """
+    # Scope: only watched plans?
+    if settings.get("notify_scope") == "watched":
+        watched = settings.get("watched_plans") or []
+        if ev.get("plan_id") not in watched:
+            return False
+
+    # Area allow-list
+    areas = settings.get("filter_areas") or []
+    if areas and ev.get("area") not in areas:
+        return False
+
+    # Name include / exclude
+    name = ev.get("name") or ""
+    inc = (settings.get("filter_name_include") or "").strip()
+    exc = (settings.get("filter_name_exclude") or "").strip()
+    if inc and inc not in name:
+        return False
+    if exc and exc in name:
+        return False
+
+    # Spec / price floors — need the machine snapshot for these
+    if machine is not None:
+        max_price = settings.get("filter_max_price") or 0
+        if max_price and machine.price_monthly and machine.price_monthly > max_price:
+            return False
+        if (settings.get("filter_min_cpu") or 0) and machine.cpu < settings["filter_min_cpu"]:
+            return False
+        if (settings.get("filter_min_memory_mb") or 0) and machine.memory_mb < settings["filter_min_memory_mb"]:
+            return False
+        if (settings.get("filter_min_traffic_gb") or 0) and (machine.traffic_gb or 0) < settings["filter_min_traffic_gb"]:
+            return False
+
+    return True
+
+
+def _channel_wants(prefix: str, event_type: str, settings: dict) -> bool:
+    """Per-channel per-event-type toggle, e.g. tg_notify_restock."""
+    key = f"{prefix}_notify_{event_type}"
+    # delisted and out_of_stock share the delisted toggle
+    if event_type == "out_of_stock":
+        key = f"{prefix}_notify_delisted"
+    return bool(settings.get(key))
+
+
+def _merge_ok(channel: str, event_type: str, settings: dict) -> bool:
+    """Rate-limit same-type notifications when merge_interval_minutes > 0."""
+    minutes = settings.get("merge_interval_minutes") or 0
+    if not minutes:
+        return True
+    key = f"{channel}:{event_type}"
+    now = time.time()
+    last = _last_notified.get(key, 0)
+    if now - last < minutes * 60:
+        return False
+    _last_notified[key] = now
+    return True
+
+
+async def _dispatch_event(db: AsyncSession, ev: dict, settings: dict) -> None:
+    """Route a single event through filters, DND, merge, then channels."""
+    et = ev["event_type"]
+    machine = await _machine_for(db, ev.get("category", ""), ev.get("plan_id", ""))
+
+    if not _passes_filters(ev, machine, settings):
+        return
+
+    # Do-not-disturb window suppresses all push (events are still stored + shown)
+    if settings.get("dnd_enabled") and in_dnd_window(
+        settings.get("dnd_start", "23:00"),
+        settings.get("dnd_end", "08:00"),
+        settings.get("timezone", "Asia/Shanghai"),
+    ):
+        return
+
+    # Telegram
+    if (
+        settings.get("tg_bot_token")
+        and settings.get("tg_chat_id")
+        and _channel_wants("tg", et, settings)
+        and _merge_ok("tg", et, settings)
+    ):
+        await send_telegram(
+            token=settings["tg_bot_token"],
+            chat_id=settings["tg_chat_id"],
+            event=ev,
+        )
+
+    # Generic webhook
+    if (
+        settings.get("webhook_enabled")
+        and settings.get("webhook_url")
+        and _channel_wants("webhook", et, settings)
+        and _merge_ok("webhook", et, settings)
+    ):
+        await send_webhook(settings["webhook_url"], ev)
 
 
 # ---------------------------------------------------------------------------
