@@ -47,6 +47,32 @@ def _price_yearly(price_datas: list[dict]) -> int | None:
     return None
 
 
+def _ip_status(item: dict) -> str:
+    """Normalize a secondhand listing's seller-declared IP status.
+
+    Akile's listing form stores this as ``ipStatus`` with values gfw / normal,
+    but be liberal about the exact key and value shape since the public listing
+    payload isn't documented. Returns "gfw", "normal", or "" (unknown).
+    """
+    raw = (
+        item.get("ipStatus")
+        or item.get("ip_status")
+        or item.get("ipstatus")
+        or ""
+    )
+    # Some APIs use numeric codes (0/1/2) — map conservatively.
+    if isinstance(raw, (int, float)):
+        return {1: "normal", 2: "gfw"}.get(int(raw), "")
+    s = str(raw).strip().lower()
+    if not s:
+        return ""
+    if s in ("gfw", "blocked", "ban", "banned", "2") or "墙" in s:
+        return "gfw"
+    if s in ("normal", "ok", "good", "1") or "正常" in s:
+        return "normal"
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Snapshot upsert + diff
 # ---------------------------------------------------------------------------
@@ -388,6 +414,7 @@ async def poll_secondhand(token: str, settings: dict) -> None:
                 "traffic_gb": item.get("flow", 0),
                 "ipv4": item.get("ipv4_num", 0),
                 "available": True,
+                "ip_status": _ip_status(item),
                 "extra": json.dumps(item),
             }
             evs = await _upsert(db, "secondhand", pid, fields)

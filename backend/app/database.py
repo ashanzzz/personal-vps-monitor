@@ -52,6 +52,9 @@ class MachineSnapshot(Base):
     ipv4: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # true = currently on sale / in stock / available
     available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Seller-declared IP reachability for secondhand listings: "normal" | "gfw" | "".
+    # Sourced from the Akile listing's ipStatus field; empty for vps/ls.
+    ip_status: Mapped[str] = mapped_column(String(16), nullable=False, default="")
     extra: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON blob
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -103,6 +106,17 @@ class AdminUser(Base):
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Lightweight migration: add ip_status to pre-existing machine_snapshot
+        # tables (create_all won't ALTER an existing table).
+        if not await _has_column(conn, "machine_snapshot", "ip_status"):
+            await conn.exec_driver_sql(
+                "ALTER TABLE machine_snapshot ADD COLUMN ip_status VARCHAR(16) NOT NULL DEFAULT ''"
+            )
+
+
+async def _has_column(conn, table: str, column: str) -> bool:
+    rows = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
+    return any(r[1] == column for r in rows.fetchall())
 
 
 async def get_db():

@@ -21,6 +21,7 @@ from . import auth
 from .auth import require_auth
 from .config import get_all_settings, update_settings
 from .database import AlertEvent, MachineSnapshot, PriceHistory, get_db, init_db
+from .match import find_official_equivalent
 from .poller import run_poll
 from .token_manager import ensure_fresh, refresh_now, token_status
 from .ws import broadcast, connect, disconnect
@@ -250,10 +251,26 @@ async def list_machines(
         q = q.where(MachineSnapshot.available == True)  # noqa: E712
     q = q.order_by(MachineSnapshot.category, MachineSnapshot.area, MachineSnapshot.name)
     rows = (await db.execute(q)).scalars().all()
-    return [_machine_dict(r) for r in rows]
+
+    # For secondhand rows, find an equivalent brand-new official plan so the UI
+    # can show a "official new one exists" comparison. Fetch official plans once.
+    has_secondhand = any(r.category == "secondhand" for r in rows)
+    official: list[MachineSnapshot] = []
+    if has_secondhand:
+        official = (await db.execute(
+            select(MachineSnapshot).where(MachineSnapshot.category.in_(["vps", "ls"]))
+        )).scalars().all()
+
+    result = []
+    for r in rows:
+        match = None
+        if r.category == "secondhand" and official:
+            match = find_official_equivalent(r, official)
+        result.append(_machine_dict(r, match))
+    return result
 
 
-def _machine_dict(r: MachineSnapshot) -> dict:
+def _machine_dict(r: MachineSnapshot, official_match: dict | None = None) -> dict:
     return {
         "id": r.id,
         "category": r.category,
@@ -271,6 +288,8 @@ def _machine_dict(r: MachineSnapshot) -> dict:
         "traffic_gb": r.traffic_gb,
         "ipv4": r.ipv4,
         "available": r.available,
+        "ip_status": getattr(r, "ip_status", "") or "",
+        "official_match": official_match,
         "updated_at": r.updated_at.isoformat() if r.updated_at else None,
     }
 

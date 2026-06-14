@@ -43,6 +43,17 @@ http.interceptors.response.use(
   }
 )
 
+export interface OfficialMatch {
+  plan_id: string
+  name: string
+  area: string
+  price_monthly: number
+  available: boolean
+  price_delta: number   // official - secondhand (fen); + means official pricier
+  cheaper: 'official' | 'secondhand' | 'equal'
+  buy_url: string
+}
+
 export interface Machine {
   id: number
   category: 'vps' | 'ls' | 'secondhand'
@@ -60,6 +71,8 @@ export interface Machine {
   traffic_gb: number
   ipv4: number
   available: boolean
+  ip_status: '' | 'normal' | 'gfw'
+  official_match: OfficialMatch | null
   updated_at: string
 }
 
