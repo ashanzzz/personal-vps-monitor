@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { wsUrl } from './config'
+import { getToken } from './api'
 
 export type WsMessage = {
   type: 'refresh' | 'events' | 'purchased'
@@ -16,7 +17,10 @@ export function useWebSocket(onMessage: (msg: WsMessage) => void) {
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
-    const ws = new WebSocket(wsUrl())
+    const token = getToken()
+    if (!token) return  // not logged in yet — skip
+    const sep = wsUrl().includes('?') ? '&' : '?'
+    const ws = new WebSocket(`${wsUrl()}${sep}token=${encodeURIComponent(token)}`)
     ws.onmessage = (e) => {
       try {
         onMsgRef.current(JSON.parse(e.data))

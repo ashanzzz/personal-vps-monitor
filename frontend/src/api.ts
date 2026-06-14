@@ -1,7 +1,47 @@
 import axios from 'axios'
 import { API_BASE } from './config'
 
+const TOKEN_KEY = 'akile_token'
+
+export function getToken(): string {
+  return localStorage.getItem(TOKEN_KEY) ?? ''
+}
+export function setToken(t: string): void {
+  localStorage.setItem(TOKEN_KEY, t)
+}
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY)
+}
+
+// Called when a 401 is seen — wired up by App to bounce back to login.
+let onUnauthorized: (() => void) | null = null
+export function setUnauthorizedHandler(fn: () => void): void {
+  onUnauthorized = fn
+}
+
 const http = axios.create({ baseURL: API_BASE })
+
+// Attach bearer token to every request.
+http.interceptors.request.use(cfg => {
+  const t = getToken()
+  if (t) cfg.headers.Authorization = ['Bearer', t].join(' ')
+  return cfg
+})
+
+// On 401, clear the token and notify the app (skip the login call itself).
+http.interceptors.response.use(
+  r => r,
+  err => {
+    if (err?.response?.status === 401) {
+      const url: string = err.config?.url ?? ''
+      if (!url.includes('/api/auth/login') && !url.includes('/api/auth/setup')) {
+        clearToken()
+        onUnauthorized?.()
+      }
+    }
+    return Promise.reject(err)
+  }
+)
 
 export interface Machine {
   id: number
@@ -133,6 +173,19 @@ export const api = {
 
   refreshToken: () =>
     http.post<{ status: string }>('/api/token/refresh').then(r => r.data),
+
+  // --- Auth ---
+  authStatus: () =>
+    http.get<{ initialized: boolean }>('/api/auth/status').then(r => r.data),
+
+  login: (username: string, password: string) =>
+    http.post<{ token: string; username: string }>('/api/auth/login', { username, password }).then(r => r.data),
+
+  setupAdmin: (username: string, password: string) =>
+    http.post<{ token: string; username: string }>('/api/auth/setup', { username, password }).then(r => r.data),
+
+  changePassword: (old_password: string, new_password: string) =>
+    http.post<{ status: string }>('/api/auth/change-password', { old_password, new_password }).then(r => r.data),
 }
 
 export function fmtPrice(fen: number | null | undefined): string {

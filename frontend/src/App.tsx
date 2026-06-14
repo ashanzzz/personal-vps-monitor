@@ -1,20 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  App as AntApp, Badge, ConfigProvider, Layout, Menu, message as antMessage,
+  App as AntApp, Badge, Button, ConfigProvider, Layout, Menu, message as antMessage,
   Spin, theme, Typography,
 } from 'antd'
 import {
   DashboardOutlined, CloudServerOutlined,
-  BellOutlined, SettingOutlined,
+  BellOutlined, SettingOutlined, LogoutOutlined,
 } from '@ant-design/icons'
 
-import { api } from './api'
+import { api, clearToken, getToken, setUnauthorizedHandler } from './api'
 import type { AlertEvent, AppSettings, Machine, PriceHistory } from './api'
 import { useWebSocket } from './useWebSocket'
 import { Overview }      from './pages/Overview'
 import { MachinePanel } from './pages/MachinePanel'
 import { AlertHistory }  from './pages/AlertHistory'
 import { SettingsPage }  from './pages/SettingsPage'
+import { LoginPage }     from './pages/LoginPage'
 
 import './App.css'
 
@@ -24,6 +25,7 @@ const { Title } = Typography
 type PageKey = 'overview' | 'machines' | 'alerts' | 'settings'
 
 export default function App() {
+  const [authed, setAuthed]       = useState<boolean>(!!getToken())
   const [page, setPage]           = useState<PageKey>('overview')
   const [machines, setMachines]   = useState<Machine[]>([])
   const [events, setEvents]       = useState<AlertEvent[]>([])
@@ -32,6 +34,11 @@ export default function App() {
   const [loading, setLoading]     = useState(true)
   const [newAlerts, setNewAlerts] = useState(0)
   const [collapsed, setCollapsed] = useState(false)
+
+  // Bounce back to login on any 401.
+  useEffect(() => {
+    setUnauthorizedHandler(() => setAuthed(false))
+  }, [])
 
   const loadAll = useCallback(async () => {
     try {
@@ -52,7 +59,13 @@ export default function App() {
     }
   }, [])
 
-  useEffect(() => { loadAll() }, [loadAll])
+  useEffect(() => { if (authed) loadAll() }, [authed, loadAll])
+
+  const handleLogout = useCallback(() => {
+    clearToken()
+    setAuthed(false)
+    antMessage.success('已退出登录')
+  }, [])
 
   // WebSocket real-time updates
   useWebSocket(msg => {
@@ -91,6 +104,17 @@ export default function App() {
     api.triggerPoll().catch(() => {})
     setTimeout(loadAll, 1500)
   }, [loadAll])
+
+  // Not logged in → show the gatekeeper (login or first-time setup).
+  if (!authed) {
+    return (
+      <ConfigProvider theme={{ algorithm: theme.darkAlgorithm, token: { colorPrimary: '#177ddc', borderRadius: 6 } }}>
+        <AntApp>
+          <LoginPage onAuthed={() => { setAuthed(true); setLoading(true) }} />
+        </AntApp>
+      </ConfigProvider>
+    )
+  }
 
   return (
     <ConfigProvider
@@ -152,14 +176,23 @@ export default function App() {
               alignItems: 'center',
               justifyContent: 'space-between',
             }}>
-              <Title level={5} style={{ color: '#ccc', margin: 0 }}>
+              <Typography.Text style={{ color: '#ccc', margin: 0 }}>
                 {{ overview: '总览', machines: '机器列表', alerts: '预警历史', settings: '系统设置' }[page]}
-              </Title>
-              <Typography.Text style={{ color: '#555', fontSize: 12 }}>
-                {settings
-                  ? `刷新间隔 ${settings.refresh_interval}s`
-                  : ''}
               </Typography.Text>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <Typography.Text style={{ color: '#555', fontSize: 12 }}>
+                  {settings ? `刷新间隔 ${settings.refresh_interval}s` : ''}
+                </Typography.Text>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<LogoutOutlined />}
+                  onClick={handleLogout}
+                  style={{ color: '#888' }}
+                >
+                  退出
+                </Button>
+              </span>
             </Header>
 
             <Content style={{ padding: 20, background: '#0d0d0d', minHeight: 0 }}>

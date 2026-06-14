@@ -11,11 +11,14 @@ from datetime import datetime
 
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from . import auth
+from .auth import require_auth
 from .config import get_all_settings, update_settings
 from .database import AlertEvent, MachineSnapshot, PriceHistory, get_db, init_db
 from .poller import run_poll
@@ -33,6 +36,9 @@ _poll_interval: int = 60  # seconds, updated from DB on startup
 async def lifespan(app: FastAPI):
     # Init DB
     await init_db()
+
+    # Provision the admin account from env if configured and none exists yet.
+    await auth.provision_from_env()
 
     # Load interval from settings
     from .database import SessionLocal
@@ -89,9 +95,13 @@ async def _prune_events() -> None:
 
 app = FastAPI(title="Akile Monitor", lifespan=lifespan)
 
+# CORS: default to a permissive setup for LAN use, but allow locking down to a
+# comma-separated allowlist via ALLOWED_ORIGINS (e.g. "https://akile.example.com").
+_origins_env = os.getenv("ALLOWED_ORIGINS", "").strip()
+_allow_origins = [o.strip() for o in _origins_env.split(",") if o.strip()] or ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -99,11 +109,79 @@ app.add_middleware(
 
 
 # ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+
+class LoginBody(BaseModel):
+    username: str
+    password: str
+
+
+class SetupBody(BaseModel):
+    username: str
+    password: str
+
+
+class ChangePwBody(BaseModel):
+    old_password: str
+    new_password: str
+
+
+@app.get("/api/auth/status")
+async def auth_status():
+    """Whether an admin exists yet — drives login vs first-time setup screen."""
+    return {"initialized": await auth.admin_exists()}
+
+
+@app.post("/api/auth/setup")
+async def auth_setup(body: SetupBody, db: AsyncSession = Depends(get_db)):
+    """One-time admin creation, only allowed when no admin exists."""
+    if await auth.get_admin(db) is not None:
+        raise HTTPException(status_code=400, detail="管理员已存在")
+    if not body.username or len(body.password) < 6:
+        raise HTTPException(status_code=400, detail="用户名必填，密码至少 6 位")
+    await auth.create_admin(db, body.username, body.password)
+    token = await auth.issue_token(db, body.username)
+    return {"token": token, "username": body.username}
+
+
+@app.post("/api/auth/login")
+async def auth_login(body: LoginBody, db: AsyncSession = Depends(get_db)):
+    admin = await auth.get_admin(db)
+    # Constant-ish behaviour: don't reveal whether the username exists.
+    if admin is None or admin.username != body.username or not auth.verify_password(
+        body.password, admin.password_hash
+    ):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    token = await auth.issue_token(db, admin.username)
+    return {"token": token, "username": admin.username}
+
+
+@app.post("/api/auth/change-password")
+async def auth_change_password(
+    body: ChangePwBody,
+    user: str = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    admin = await auth.get_admin(db)
+    if admin is None or not auth.verify_password(body.old_password, admin.password_hash):
+        raise HTTPException(status_code=400, detail="原密码错误")
+    if len(body.new_password) < 6:
+        raise HTTPException(status_code=400, detail="新密码至少 6 位")
+    await auth.change_password(db, admin.username, body.new_password)
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
 # WebSocket
 # ---------------------------------------------------------------------------
 
 @app.websocket("/ws")
-async def websocket_endpoint(ws: WebSocket):
+async def websocket_endpoint(ws: WebSocket, token: str = ""):
+    # Authenticate via ?token=... query param before accepting the socket.
+    if not await auth.verify_ws_token(token):
+        await ws.close(code=4401)
+        return
     await connect(ws)
     try:
         while True:
@@ -117,12 +195,12 @@ async def websocket_endpoint(ws: WebSocket):
 # ---------------------------------------------------------------------------
 
 @app.get("/api/settings")
-async def get_settings(db: AsyncSession = Depends(get_db)):
+async def get_settings(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     return await get_all_settings(db)
 
 
 @app.post("/api/settings")
-async def save_settings(data: dict, db: AsyncSession = Depends(get_db)):
+async def save_settings(data: dict, _: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     result = await update_settings(db, data)
 
     # Reschedule poller if interval changed
@@ -135,21 +213,21 @@ async def save_settings(data: dict, db: AsyncSession = Depends(get_db)):
 
 
 @app.post("/api/poll/trigger")
-async def trigger_poll():
+async def trigger_poll(_: str = Depends(require_auth)):
     """Manually trigger a poll cycle."""
     asyncio.create_task(run_poll())
     return {"status": "triggered"}
 
 
 @app.post("/api/token/refresh")
-async def manual_refresh_token():
+async def manual_refresh_token(_: str = Depends(require_auth)):
     """Manually force an Akile token refresh (writes new token to DB)."""
     ok = await refresh_now(reason="manual")
     return {"status": "ok" if ok else "failed"}
 
 
 @app.get("/api/token/status")
-async def get_token_status():
+async def get_token_status(_: str = Depends(require_auth)):
     """Report the current token's expiry/health for the UI."""
     return await token_status()
 
@@ -162,6 +240,7 @@ async def get_token_status():
 async def list_machines(
     category: str | None = None,
     available_only: bool = False,
+    _: str = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     q = select(MachineSnapshot)
@@ -205,6 +284,7 @@ async def list_events(
     limit: int = 100,
     category: str | None = None,
     event_type: str | None = None,
+    _: str = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     q = select(AlertEvent).order_by(desc(AlertEvent.id))
@@ -236,7 +316,7 @@ async def list_events(
 # ---------------------------------------------------------------------------
 
 @app.get("/api/price-history")
-async def get_price_history(plan_id: str | None = None, db: AsyncSession = Depends(get_db)):
+async def get_price_history(plan_id: str | None = None, _: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     q = select(PriceHistory).order_by(PriceHistory.plan_id, PriceHistory.cycle)
     if plan_id:
         q = q.where(PriceHistory.plan_id == plan_id)
@@ -257,7 +337,7 @@ async def get_price_history(plan_id: str | None = None, db: AsyncSession = Depen
 # ---------------------------------------------------------------------------
 
 @app.post("/api/buy/{plan_id}")
-async def buy_machine(plan_id: str, db: AsyncSession = Depends(get_db)):
+async def buy_machine(plan_id: str, _: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     """Manually trigger a purchase for a secondhand listing."""
     settings = await get_all_settings(db)
     token = settings.get("akile_token", "")

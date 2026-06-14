@@ -375,7 +375,67 @@ export function SettingsPage({ settings, onSaved }: Props) {
           </div>
         </Affix>
       </Form>
+
+      <ChangePasswordCard />
     </div>
+  )
+}
+
+function ChangePasswordCard() {
+  const [form] = Form.useForm()
+  const [saving, setSaving] = useState(false)
+
+  const onSubmit = async () => {
+    try {
+      const v = await form.validateFields()
+      setSaving(true)
+      await api.changePassword(v.old_password, v.new_password)
+      message.success('密码已修改，下次登录请使用新密码')
+      form.resetFields()
+    } catch (e: any) {
+      if (e?.errorFields) return
+      message.error(e?.response?.data?.detail ?? '修改失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Collapse style={{ marginTop: 16, marginBottom: 80 }} items={[{
+      key: 'password',
+      label: '修改管理员密码',
+      children: (
+        <Form form={form} layout="vertical" style={{ maxWidth: 360 }}>
+          <Form.Item label="原密码" name="old_password" rules={[{ required: true, message: '请输入原密码' }]}>
+            <Input.Password autoComplete="current-password" />
+          </Form.Item>
+          <Form.Item
+            label="新密码"
+            name="new_password"
+            rules={[{ required: true, message: '请输入新密码' }, { min: 6, message: '至少 6 位' }]}
+          >
+            <Input.Password autoComplete="new-password" />
+          </Form.Item>
+          <Form.Item
+            label="确认新密码"
+            name="confirm"
+            dependencies={['new_password']}
+            rules={[
+              { required: true, message: '请再次输入新密码' },
+              ({ getFieldValue }) => ({
+                validator: (_, value) =>
+                  !value || getFieldValue('new_password') === value
+                    ? Promise.resolve()
+                    : Promise.reject(new Error('两次输入的密码不一致')),
+              }),
+            ]}
+          >
+            <Input.Password autoComplete="new-password" />
+          </Form.Item>
+          <Button type="primary" onClick={onSubmit} loading={saving}>修改密码</Button>
+        </Form>
+      ),
+    }]} />
   )
 }
 
