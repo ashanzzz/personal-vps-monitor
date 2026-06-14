@@ -1,14 +1,14 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   Card, Form, Input, InputNumber, Switch, Select, Button, Collapse,
-  Divider, message, Typography, Slider, Radio, TimePicker, Space, Tag, Affix,
+  Divider, message, Typography, Slider, Radio, TimePicker, Space, Affix,
 } from 'antd'
 import {
   SaveOutlined, SendOutlined, ReloadOutlined, CheckCircleTwoTone,
   WarningTwoTone, CloseCircleTwoTone,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import type { AppSettings, TokenStatus } from '../api'
+import type { AppSettings, TokenStatus, VersionInfo } from '../api'
 import { api } from '../api'
 
 const { Text } = Typography
@@ -56,6 +56,7 @@ export function SettingsPage({ settings, onSaved }: Props) {
   const [testingTg, setTestingTg] = useState(false)
   const [tokenStatus, setTokenStatus] = useState<TokenStatus | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [version, setVersion] = useState<VersionInfo | null>(null)
 
   const loadTokenStatus = useCallback(async () => {
     try {
@@ -70,7 +71,6 @@ export function SettingsPage({ settings, onSaved }: Props) {
       form.setFieldsValue({
         ...settings,
         watched_plans: (settings.watched_plans ?? []).join('\n'),
-        auto_buy_plans: (settings.auto_buy_plans ?? []).join('\n'),
         dnd_start: settings.dnd_start ? dayjs(settings.dnd_start, 'HH:mm') : null,
         dnd_end: settings.dnd_end ? dayjs(settings.dnd_end, 'HH:mm') : null,
       })
@@ -79,6 +79,10 @@ export function SettingsPage({ settings, onSaved }: Props) {
 
   useEffect(() => { loadTokenStatus() }, [loadTokenStatus])
 
+  useEffect(() => {
+    api.getVersion().then(setVersion).catch(() => { /* ignore */ })
+  }, [])
+
   const handleSave = async () => {
     try {
       const vals = await form.validateFields()
@@ -86,7 +90,6 @@ export function SettingsPage({ settings, onSaved }: Props) {
       const payload = {
         ...vals,
         watched_plans: splitLines(vals.watched_plans),
-        auto_buy_plans: splitLines(vals.auto_buy_plans),
         dnd_start: vals.dnd_start ? dayjs(vals.dnd_start).format('HH:mm') : '23:00',
         dnd_end: vals.dnd_end ? dayjs(vals.dnd_end).format('HH:mm') : '08:00',
       }
@@ -311,37 +314,12 @@ export function SettingsPage({ settings, onSaved }: Props) {
           ),
         }]} />
 
-        {/* ── Card 5: Auto-buy (legacy global, 二手机) ── */}
-        <Card
-          size="small"
-          title={<Space><span>自动抢购（旧版·全局二手）</span><Tag color="orange">兼容保留</Tag></Space>}
-          style={{ marginBottom: 16, borderColor: '#ffe7ba' }}
-        >
-          <div style={{ background: '#fffbe6', border: '1px solid #ffe7ba', borderRadius: 6, padding: '8px 12px', marginBottom: 16 }}>
-            <Text type="warning">新版按「云服务器 / 轻量 / 二手机」每页独立的条件范围规则抢购，请到对应页面顶部「抢购设置」配置。此处为旧版全局二手抢购，仅作兼容保留。</Text>
-          </div>
-          <Form.Item label="启用自动购买" name="auto_buy_enabled" valuePropName="checked"><Switch /></Form.Item>
-          <Form.Item
-            label={<span>自动购买套餐 ID<Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>每行一个，仅二手机支持</Text></span>}
-            name="auto_buy_plans"
-          >
-            <Input.TextArea rows={3} placeholder="plan_id 每行一个" />
-          </Form.Item>
+        {/* ── Card 5: 版本信息 ── */}
+        <Card size="small" title="版本信息" style={{ marginBottom: 16 }}>
           <Space size="large" wrap>
-            <Form.Item label="最高可接受价格 (分)" name="auto_buy_max_price" tooltip="0 = 不限">
-              <InputNumber min={0} step={100} style={{ width: 180 }} addonAfter="分" />
-            </Form.Item>
-            <Form.Item label="购买周期" name="auto_buy_cycle">
-              <Select options={[1, 3, 6, 12].map(v => ({ value: v, label: `${v} 个月` }))} style={{ width: 130 }} />
-            </Form.Item>
-          </Space>
-          <Space size="large" wrap>
-            <Form.Item label="单次最大数量" name="auto_buy_max_per_run">
-              <InputNumber min={1} max={50} style={{ width: 140 }} />
-            </Form.Item>
-            <Form.Item label="每日抢购上限" name="auto_buy_daily_limit">
-              <InputNumber min={1} max={100} style={{ width: 140 }} />
-            </Form.Item>
+            <span><Text type="secondary">版本号：</Text><Text strong>{version?.version ?? '-'}</Text></span>
+            <span><Text type="secondary">git_sha：</Text><Text code>{version?.git_sha ? version.git_sha.slice(0, 7) : '-'}</Text></span>
+            <span><Text type="secondary">构建时间：</Text><Text>{version?.build_time || '-'}</Text></span>
           </Space>
         </Card>
 

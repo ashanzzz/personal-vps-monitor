@@ -169,13 +169,6 @@ export interface AppSettings {
   webhook_notify_delisted: boolean
   webhook_notify_price_change: boolean
   webhook_notify_purchased: boolean
-  // Legacy auto-buy
-  auto_buy_enabled: boolean
-  auto_buy_plans: string[]
-  auto_buy_max_price: number
-  auto_buy_cycle: number
-  auto_buy_max_per_run: number
-  auto_buy_daily_limit: number
   // Per-page auto-buy
   cloud_buy: PageBuyConfig
   ls_buy: PageBuyConfig

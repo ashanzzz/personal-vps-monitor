@@ -2,6 +2,19 @@
 
 本项目遵循语义化版本。日期为发布日。
 
+## v0.7.0
+
+清理旧版全局抢购 + 设置页版本信息展示。
+
+### 新增
+- **设置页「版本信息」卡片**：调用已有的 `GET /api/version`，展示版本号、git_sha（取前 7 位，为空显示 `-`）、构建时间（为空显示 `-`）。页面加载时拉取一次。
+
+### 变更
+- 修复二手列表 `page_size` 请求参数（驼峰 `pageSize` → 下划线 `page_size`）。此前已合并（PR #1）但尚未随版本发布。
+
+### 移除
+- **永久移除旧版全局二手自动抢购**（`auto_buy_*` 全套）：删除 `config.py` 中 6 个 legacy 键、`main.py` 中遗留的全局 poller 注释与重排逻辑、前端 `api.ts` 的 `auto_buy_*` 字段、`SettingsPage.tsx` 的旧版抢购卡片、`MachinePanel.tsx`/`MachineCard.tsx` 的 `autoBuyEnabled` 传参。新抢购统一走每页（云服务器 / 轻量 / 二手机）条件范围规则，不再保留任何兼容层。二手机手动「抢购」按钮保留（走 `POST /api/buy/{plan_id}`，购买周期改取 `secondhand_buy.cycle`）。
+
 ## v0.6.0
 
 我的账户页（余额 + 账户信息 + 服务器列表）。
@@ -33,7 +46,6 @@
 - 新增 API：`GET /api/version`、`GET /api/logs/app`（均 require_auth）。
 
 ### 变更
-- 旧版全局二手自动抢购（`auto_buy_*`）改为「兼容保留」，新抢购统一走每页条件范围规则；旧键保留向后兼容。
 - 二手抓取增加 `poll.fetch` 日志打点，空仓（list:null）明确标注 `reason=empty_market`，不再误判为故障。
 - GitHub Actions 构建改为双 tag：推 master 时同时打 `:latest` 与 `:vX.Y.Z`（版本号从 `version.py` 读取）。
 

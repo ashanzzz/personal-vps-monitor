@@ -108,7 +108,6 @@ export function MachinePanel({ machines, priceHistory, settings, onWatch, onBuy,
             onWatch={onWatch}
             onBuy={onBuy}
             priceHistory={histByPlan[m.plan_id]}
-            autoBuyEnabled={settings?.auto_buy_enabled}
           />
         ))}
       </div>
