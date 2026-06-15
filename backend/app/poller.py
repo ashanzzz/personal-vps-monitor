@@ -521,10 +521,20 @@ async def poll_account(token: str, settings: dict) -> None:
             "is_real_name": bool(info.get("is_real_name")),
             "is_ga": bool(info.get("is_ga")),
             "last_checkin_time": info.get("last_checkin_time"),
+            "ak_coin": None,  # populated below
         }
     except httpx.HTTPError as e:
         logger.warning("Account profile poll failed: %s", e)
         errors.append(f"profile:{e}")
+
+    # Fetch AK coin balance from the separate /v1/user/index endpoint.
+    if profile is not None:
+        try:
+            coin_info = await api.get_ak_coin_info(token)
+            profile["ak_coin"] = coin_info.get("ak_coin")
+        except Exception as e:
+            logger.warning("AK coin info poll failed: %s", e)
+            errors.append(f"ak_coin:{e}")
 
     try:
         servers = await api.get_my_servers(token)

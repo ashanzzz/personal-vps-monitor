@@ -270,6 +270,10 @@ export const api = {
 
   refreshAccount: () =>
     http.post<AccountInfo>('/api/account/refresh').then(r => r.data),
+
+  // --- Checkin ---
+  checkin: () =>
+    http.post<{ status_code: number; status_msg: string }>('/api/checkin').then(r => r.data),
 }
 
 export interface AccountProfile {
@@ -281,6 +285,7 @@ export interface AccountProfile {
   is_real_name: boolean
   is_ga: boolean
   last_checkin_time: number | null
+  ak_coin: number | null
 }
 
 export interface MyServer {

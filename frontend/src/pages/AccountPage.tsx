@@ -5,7 +5,7 @@ import {
 } from 'antd'
 import {
   ReloadOutlined, WalletOutlined, CloudServerOutlined, CheckCircleTwoTone,
-  CloseCircleTwoTone,
+  CloseCircleTwoTone, GoldOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { api, fmtPrice } from '../api'
@@ -40,11 +40,23 @@ function pick(s: MyServer, keys: string[]): unknown {
   return undefined
 }
 
+// Whether last_checkin_time (unix seconds) falls on the local calendar today.
+function checkedInToday(ts: number | null | undefined): boolean {
+  if (!ts) return false
+  const then = new Date(ts * 1000)
+  if (Number.isNaN(then.getTime())) return false
+  const now = new Date()
+  return then.getFullYear() === now.getFullYear()
+    && then.getMonth() === now.getMonth()
+    && then.getDate() === now.getDate()
+}
+
 export function AccountPage() {
   const { message } = AntApp.useApp()
   const [data, setData] = useState<AccountInfo | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [checkingIn, setCheckingIn] = useState(false)
 
   // Initial load reads the cached snapshot — instant, no upstream call.
   const load = useCallback(async () => {
@@ -68,6 +80,27 @@ export function AccountPage() {
       message.error('刷新账户数据失败')
     } finally {
       setRefreshing(false)
+    }
+  }, [message])
+
+  // Manual daily checkin. On success, refresh the cache so the AK coin
+  // balance and last_checkin_time reflect the new state.
+  const checkin = useCallback(async () => {
+    setCheckingIn(true)
+    try {
+      const res = await api.checkin()
+      const msg = res.status_msg || '签到完成'
+      if (res.status_code === 0) {
+        message.success(msg)
+      } else {
+        message.info(msg)
+      }
+      // Pull fresh account data so AK coin / last_checkin_time update.
+      try { setData(await api.refreshAccount()) } catch { /* keep current */ }
+    } catch {
+      message.error('签到失败')
+    } finally {
+      setCheckingIn(false)
     }
   }, [message])
 
@@ -106,7 +139,18 @@ export function AccountPage() {
             数据更新于 {timeAgo(data?.updated_at)}
           </Text>
         </Space>
-        <Button icon={<ReloadOutlined />} loading={refreshing} onClick={refresh}>刷新</Button>
+        <Space>
+          <Button
+            type="primary"
+            icon={<GoldOutlined />}
+            loading={checkingIn}
+            disabled={checkedInToday(profile?.last_checkin_time)}
+            onClick={checkin}
+          >
+            {checkedInToday(profile?.last_checkin_time) ? '今日已签到' : '签到'}
+          </Button>
+          <Button icon={<ReloadOutlined />} loading={refreshing} onClick={refresh}>刷新</Button>
+        </Space>
       </div>
 
       {data && !data.configured && (
@@ -119,7 +163,7 @@ export function AccountPage() {
           message="部分账户数据获取失败" description={data.errors.join('; ')} />
       ) : null}
 
-      {/* Balance + profile */}
+      {/* Balance + AK coin + profile */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col xs={24} sm={8}>
           <Card size="small">
@@ -133,7 +177,17 @@ export function AccountPage() {
             )}
           </Card>
         </Col>
-        <Col xs={24} sm={16}>
+        <Col xs={24} sm={8}>
+          <Card size="small">
+            <Statistic
+              title={<Space><GoldOutlined />AK 币</Space>}
+              value={profile?.ak_coin != null ? profile.ak_coin : '—'}
+              suffix={profile?.ak_coin != null ? 'AK 币' : undefined}
+              valueStyle={{ color: '#faad14' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={8}>
           <Card size="small" title="账户信息">
             {profile ? (
               <Descriptions size="small" column={{ xs: 1, sm: 2 }}>

@@ -29,6 +29,7 @@ from .scoring import compute_score
 from .token_manager import ensure_fresh, refresh_now, token_status
 from .version import __version__, get_version_info
 from .ws import broadcast, connect, disconnect
+from . import akile_client
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -128,12 +129,49 @@ async def lifespan(app: FastAPI):
     # Prune old events daily to keep the DB lean.
     scheduler.add_job(_prune_events, "interval", hours=24, id="prune_events",
                       next_run_time=datetime.now())
+    # Daily checkin for AK coins (08:01 Asia/Shanghai).
+    from apscheduler.triggers.cron import CronTrigger
+    tz = settings.get("timezone", "Asia/Shanghai")
+    scheduler.add_job(
+        _daily_checkin, CronTrigger(hour=8, minute=1, timezone=tz),
+        id="daily_checkin",
+    )
     scheduler.start()
     logger.info("Scheduler started (per-page pollers active)")
 
     yield
 
     scheduler.shutdown()
+
+
+async def _daily_checkin() -> None:
+    """Automatic daily checkin for AK coins."""
+    from .database import SessionLocal
+
+    try:
+        await ensure_fresh()
+    except Exception:
+        logger.exception("ensure_fresh failed during daily checkin (continuing)")
+
+    async with SessionLocal() as db:
+        settings = await get_all_settings(db)
+    token = settings.get("akile_token") or ""
+    if not token:
+        logger.info("daily_checkin: no token configured, skipping")
+        return
+
+    try:
+        result = await akile_client.checkin(token)
+        status_code = result.get("status_code")
+        status_msg = result.get("status_msg", "")
+        if status_code == 0:
+            logger.info("daily_checkin: success – %s", status_msg)
+        elif status_code == 1:
+            logger.info("daily_checkin: already signed – %s", status_msg)
+        else:
+            logger.warning("daily_checkin: unexpected response: %s", result)
+    except Exception:
+        logger.exception("daily_checkin failed")
 
 
 async def _prune_events() -> None:
@@ -358,6 +396,19 @@ async def refresh_account(_: str = Depends(require_auth), db: AsyncSession = Dep
     payload = json.loads(row.data)
     payload["updated_at"] = row.updated_at.isoformat() if row.updated_at else None
     return payload
+
+
+@app.post("/api/checkin")
+async def manual_checkin(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
+    """Manually trigger the daily AK-coin checkin, returning Akile's raw response."""
+    settings = await get_all_settings(db)
+    token = settings.get("akile_token", "")
+    if not token:
+        return {"error": "No token configured"}
+    try:
+        return await akile_client.checkin(token)
+    except httpx.HTTPError as e:
+        return {"error": str(e)}
 
 
 # ---------------------------------------------------------------------------
