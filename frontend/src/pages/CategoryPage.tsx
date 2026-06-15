@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Input, Select, Switch, Space, Button, Tooltip, Table, Tag, Typography, App as AntApp } from 'antd'
-import { SyncOutlined, ShoppingCartOutlined, ColumnWidthOutlined } from '@ant-design/icons'
+import { Input, Select, Switch, Space, Button, Tooltip, Table, Tag, Typography, Card, InputNumber, App as AntApp } from 'antd'
+import { SyncOutlined, ShoppingCartOutlined, ColumnWidthOutlined, FilterOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import type { ResizeCallbackData } from 'react-resizable'
 import type { Machine, AppSettings, PageBuyConfig, ScoreRules } from '../api'
@@ -66,6 +66,18 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onRefresh, on
   const [areaFilter, setAreaFilter] = useState<string>('all')
   const [availOnly, setAvailOnly] = useState(false)
 
+  // Advanced, client-side filters over the already-loaded snapshot. All are
+  // optional; empty/0 means "no constraint". They never refetch — purely
+  // narrow the rows already in memory, so they apply instantly.
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [tagFilter, setTagFilter] = useState<string[]>([])      // match name/node
+  const [ipFilter, setIpFilter] = useState<'all' | 'normal' | 'gfw'>('all')
+  const [cpuRange, setCpuRange] = useState<[number, number]>([0, 0])
+  const [memRange, setMemRange] = useState<[number, number]>([0, 0])   // MB
+  const [diskRange, setDiskRange] = useState<[number, number]>([0, 0]) // GB
+  const [priceRange, setPriceRange] = useState<[number, number]>([0, 0]) // 元/月
+  const [salePriceMax, setSalePriceMax] = useState(0)                  // 元
+
   // Column widths: seed once from defaults overlaid with whatever was persisted
   // for THIS page. CategoryPage remounts on every page switch (App renders it
   // conditionally) and only after settings have loaded, so a lazy initializer
@@ -102,6 +114,18 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onRefresh, on
     onSaveColWidths(meta.widthKey, {})
   }
 
+  // Inline label style + reset for the advanced filter panel.
+  const advLbl = { color: '#999', fontSize: 12, display: 'block', marginBottom: 2 }
+  const resetAdvanced = () => {
+    setTagFilter([])
+    setIpFilter('all')
+    setCpuRange([0, 0])
+    setMemRange([0, 0])
+    setDiskRange([0, 0])
+    setPriceRange([0, 0])
+    setSalePriceMax(0)
+  }
+
   const labelMap = settings?.plan_label_map ?? {}
   const rows = useMemo(
     () => machines.filter(m => m.category === meta.category),
@@ -121,8 +145,25 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onRefresh, on
       const q = search.toLowerCase()
       if (!m.name.toLowerCase().includes(q) && !m.area.toLowerCase().includes(q)) return false
     }
+    // Advanced filters (client-side over loaded snapshot; 0/empty = no constraint).
+    if (tagFilter.length) {
+      const hay = `${m.name}\n${m.node ?? ''}`.toLowerCase()
+      if (!tagFilter.some(t => hay.includes(t.toLowerCase()))) return false
+    }
+    if (ipFilter !== 'all' && m.ip_status !== ipFilter) return false
+    const inRange = (v: number, lo: number, hi: number) =>
+      (!lo || v >= lo) && (!hi || v <= hi)
+    if (!inRange(m.cpu, cpuRange[0], cpuRange[1])) return false
+    if (!inRange(m.memory_mb, memRange[0], memRange[1])) return false
+    if (!inRange(m.disk_gb, diskRange[0], diskRange[1])) return false
+    if (!inRange(m.price_monthly, priceRange[0] * 100, priceRange[1] * 100)) return false
+    if (salePriceMax) {
+      // sale_price isn't always present; only exclude rows that carry one.
+      const sale = (m as { sale_price?: number }).sale_price
+      if (sale != null && sale > salePriceMax * 100) return false
+    }
     return true
-  }), [rows, areaFilter, availOnly, search])
+  }), [rows, areaFilter, availOnly, search, tagFilter, ipFilter, cpuRange, memRange, diskRange, priceRange, salePriceMax])
 
   const buyCfg: PageBuyConfig = (settings?.[meta.buyKey] as PageBuyConfig) ?? pageBuyDefaults()
 
@@ -236,7 +277,6 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onRefresh, on
       <BuyRulesEditor
         pageLabel={meta.label}
         value={buyCfg}
-        areas={areas}
         onChange={cfg => onSaveBuyConfig(meta.buyKey, cfg)}
       />
 
@@ -256,11 +296,84 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onRefresh, on
           <Switch size="small" checked={availOnly} onChange={setAvailOnly} />
         </Space>
         <Tooltip title="立即刷新"><Button icon={<SyncOutlined />} size="small" onClick={onRefresh} /></Tooltip>
+        <Button size="small" type={showAdvanced ? 'primary' : 'default'} icon={<FilterOutlined />}
+          onClick={() => setShowAdvanced(v => !v)}>高级筛选</Button>
         <Tooltip title="恢复默认列宽">
           <Button icon={<ColumnWidthOutlined />} size="small" onClick={restoreDefaultWidths}>恢复默认宽度</Button>
         </Tooltip>
         <span style={{ color: '#666', fontSize: 12 }}>共 {filtered.length} 台</span>
       </div>
+
+      {showAdvanced && (
+        <Card size="small" style={{ marginBottom: 12 }}
+          title={<Text style={{ color: '#ccc' }}>高级筛选（对当前已加载数据实时生效，留空/0=不限）</Text>}
+          extra={<Button size="small" onClick={resetAdvanced}>重置</Button>}>
+          <Space direction="vertical" size={10} style={{ width: '100%' }}>
+            <Space wrap size="middle" align="start">
+              <span>
+                <span style={advLbl}>标签包含(名称/节点,任一命中)</span>
+                <Select mode="tags" value={tagFilter} style={{ width: 240 }}
+                  placeholder="如 jppro、jpiij" tokenSeparators={[',', ' ']} open={false}
+                  onChange={setTagFilter} />
+              </span>
+              <span>
+                <span style={advLbl}>IP 状态</span>
+                <Select value={ipFilter} style={{ width: 120 }} onChange={setIpFilter}
+                  options={[
+                    { value: 'all', label: '全部' },
+                    { value: 'normal', label: 'IP正常' },
+                    { value: 'gfw', label: 'IP被墙' },
+                  ]} />
+              </span>
+            </Space>
+            <Space wrap size="middle" align="start">
+              <span>
+                <span style={advLbl}>CPU 核 min-max</span>
+                <Space.Compact>
+                  <InputNumber min={0} value={cpuRange[0]} style={{ width: 70 }} placeholder="min"
+                    onChange={v => setCpuRange([Number(v) || 0, cpuRange[1]])} />
+                  <InputNumber min={0} value={cpuRange[1]} style={{ width: 70 }} placeholder="max"
+                    onChange={v => setCpuRange([cpuRange[0], Number(v) || 0])} />
+                </Space.Compact>
+              </span>
+              <span>
+                <span style={advLbl}>内存 MB min-max</span>
+                <Space.Compact>
+                  <InputNumber min={0} value={memRange[0]} style={{ width: 80 }} placeholder="min"
+                    onChange={v => setMemRange([Number(v) || 0, memRange[1]])} />
+                  <InputNumber min={0} value={memRange[1]} style={{ width: 80 }} placeholder="max"
+                    onChange={v => setMemRange([memRange[0], Number(v) || 0])} />
+                </Space.Compact>
+              </span>
+              <span>
+                <span style={advLbl}>硬盘 GB min-max</span>
+                <Space.Compact>
+                  <InputNumber min={0} value={diskRange[0]} style={{ width: 70 }} placeholder="min"
+                    onChange={v => setDiskRange([Number(v) || 0, diskRange[1]])} />
+                  <InputNumber min={0} value={diskRange[1]} style={{ width: 70 }} placeholder="max"
+                    onChange={v => setDiskRange([diskRange[0], Number(v) || 0])} />
+                </Space.Compact>
+              </span>
+            </Space>
+            <Space wrap size="middle" align="start">
+              <span>
+                <span style={advLbl}>月付价 元 min-max</span>
+                <Space.Compact>
+                  <InputNumber min={0} value={priceRange[0]} style={{ width: 80 }} placeholder="min"
+                    onChange={v => setPriceRange([Number(v) || 0, priceRange[1]])} />
+                  <InputNumber min={0} value={priceRange[1]} style={{ width: 80 }} placeholder="max"
+                    onChange={v => setPriceRange([priceRange[0], Number(v) || 0])} />
+                </Space.Compact>
+              </span>
+              <span>
+                <span style={advLbl}>售价 ≤ 元</span>
+                <InputNumber min={0} value={salePriceMax} style={{ width: 110 }}
+                  onChange={v => setSalePriceMax(Number(v) || 0)} />
+              </span>
+            </Space>
+          </Space>
+        </Card>
+      )}
 
       <Table<Machine>
         rowKey="id"

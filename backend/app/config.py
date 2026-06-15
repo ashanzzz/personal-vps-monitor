@@ -122,22 +122,32 @@ def page_buy_defaults() -> dict:
     }
 
 
+def spec_defaults() -> dict:
+    """Per-dimension min/max ranges for a rule. 0 on a side = unbounded.
+
+    memory is in MB (matching the stored field); the others map 1:1 to the
+    snapshot fields (cpu cores, disk GB, bandwidth Mbps, traffic GB).
+    """
+    return {dim: {"min": 0, "max": 0} for dim in
+            ("cpu", "memory", "disk", "bandwidth", "traffic")}
+
+
 def rule_defaults() -> dict:
-    """A single condition-range buy rule. Empty/0 fields mean 'no constraint'."""
+    """A single buy rule. Empty/0 fields mean 'no constraint'.
+
+    Scoring and buying are decoupled: this rule only filters + counts; the
+    page's scoring rules decide which matched machine is bought first.
+    """
     return {
         "id": "",                      # client-generated unique id
         "enabled": True,
         "label": "",                   # display label, e.g. jppro (optional)
-        "name_keyword": "",            # title must contain this (optional)
-        "cpu_min": 0, "cpu_max": 0,            # 0 = unbounded on that side
-        "memory_min_mb": 0, "memory_max_mb": 0,
-        "disk_min_gb": 0, "disk_max_gb": 0,
-        "bandwidth_mode": "any",       # "any" | "min" | "exact"
-        "bandwidth_mbps": 0,
-        "traffic_min_gb": 0,
-        "price_max_monthly": 0,        # fen; 0 = no limit
-        "areas": [],                   # area allow-list; [] = all
-        "max_per_rule": 1,             # max buys for this rule; 0 = unlimited
+        "tags_include": [],            # match ANY substring in name/node; [] = any
+        "spec": spec_defaults(),       # cpu/memory/disk/bandwidth/traffic min-max
+        "price_type": "monthly",       # "monthly" | "yearly" (mutually exclusive)
+        "price_max": 0,                # fen; cap on the chosen-cycle renewal price; 0 = no limit
+        "sale_price_max": 0,           # fen; cap on the sale price; 0 = no limit
+        "max_buy": 1,                  # max buys for this rule; 0 = unlimited
     }
 
 
@@ -176,13 +186,25 @@ async def get_all_settings(db: AsyncSession) -> dict[str, Any]:
         saved = result.get(key) or {}
         if isinstance(saved, dict):
             merged.update(saved)
-            # Normalize each rule against rule_defaults.
+            # Normalize each rule against rule_defaults (deep-merge spec).
             norm_rules = []
             for rule in merged.get("rules") or []:
                 if not isinstance(rule, dict):
                     continue
                 r = rule_defaults()
+                saved_spec = rule.get("spec")
                 r.update(rule)
+                # spec is nested {dim: {min, max}}; merge per-dimension so a
+                # partial save never drops dimensions or sides.
+                spec = spec_defaults()
+                if isinstance(saved_spec, dict):
+                    for dim, rng in saved_spec.items():
+                        if dim in spec and isinstance(rng, dict):
+                            spec[dim] = {
+                                "min": rng.get("min", 0) or 0,
+                                "max": rng.get("max", 0) or 0,
+                            }
+                r["spec"] = spec
                 norm_rules.append(r)
             merged["rules"] = norm_rules
         result[key] = merged

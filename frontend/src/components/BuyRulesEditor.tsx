@@ -4,21 +4,30 @@ import {
   Collapse, Tag, Tooltip, Divider, Typography, Popconfirm, App as AntApp,
 } from 'antd'
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons'
-import type { PageBuyConfig, BuyRule } from '../api'
+import type { PageBuyConfig, BuyRule, SpecDimension } from '../api'
 import { ruleDefaults } from '../buyDefaults'
 
 const { Text } = Typography
 
+// Spec dimensions rendered as min-max range inputs. memory is in MB.
+const SPEC_META: { key: SpecDimension; label: string; addon?: string }[] = [
+  { key: 'cpu', label: 'CPU 核' },
+  { key: 'memory', label: '内存', addon: 'MB' },
+  { key: 'disk', label: '硬盘', addon: 'GB' },
+  { key: 'bandwidth', label: '带宽', addon: 'M' },
+  { key: 'traffic', label: '流量', addon: 'GB' },
+]
+
 interface Props {
   pageLabel: string
   value: PageBuyConfig
-  areas: string[]
   onChange: (next: PageBuyConfig) => void
 }
 
 // Refresh interval slider: 60–6000s, plus a custom numeric input that allows
-// down to 5s for power users (with a warning).
-export function BuyRulesEditor({ pageLabel, value, areas, onChange }: Props) {
+// down to 5s for power users (with a warning). Each rule is an independent
+// filter + per-rule count cap; the page's scoring rules order candidates.
+export function BuyRulesEditor({ pageLabel, value, onChange }: Props) {
   const { message } = AntApp.useApp()
   const [custom, setCustom] = useState(false)
 
@@ -110,11 +119,6 @@ export function BuyRulesEditor({ pageLabel, value, areas, onChange }: Props) {
             onChange={v => patch({ max_total_daily: Number(v) || 0 })} />
         </span>
         <span>
-          <Text style={{ color: '#aaa', marginRight: 6 }}>页价格上限(元/月)</Text>
-          <InputNumber min={0} value={value.max_price / 100} style={{ width: 90 }}
-            onChange={v => patch({ max_price: Math.round((Number(v) || 0) * 100) })} />
-        </span>
-        <span>
           <Text style={{ color: '#aaa', marginRight: 6 }}>周期</Text>
           <Select value={value.cycle} style={{ width: 90 }}
             onChange={v => patch({ cycle: v })}
@@ -140,7 +144,7 @@ export function BuyRulesEditor({ pageLabel, value, areas, onChange }: Props) {
       </div>
 
       {value.rules.length === 0 ? (
-        <Text type="secondary" style={{ fontSize: 12 }}>暂无规则。点「新增规则」设置条件区间，刷到符合的机器会自动抢购。</Text>
+        <Text type="secondary" style={{ fontSize: 12 }}>暂无规则。点「新增规则」设置条件，刷到符合的机器会按评分从高到低自动抢购。</Text>
       ) : (
         <Collapse
           size="small"
@@ -152,9 +156,9 @@ export function BuyRulesEditor({ pageLabel, value, areas, onChange }: Props) {
                   onClick={(_, e) => e.stopPropagation()}
                   onChange={v => patchRule(idx, { enabled: v })} />
                 <Text style={{ color: '#ddd' }}>{r.label || `规则 ${idx + 1}`}</Text>
-                {r.max_per_rule === 0
+                {r.max_buy === 0
                   ? <Tag color="gold">不限量</Tag>
-                  : <Tag color="green">限{r.max_per_rule}台</Tag>}
+                  : <Tag color="green">限{r.max_buy}台</Tag>}
               </Space>
             ),
             extra: (
@@ -162,7 +166,7 @@ export function BuyRulesEditor({ pageLabel, value, areas, onChange }: Props) {
                 <DeleteOutlined onClick={e => e.stopPropagation()} style={{ color: '#c66' }} />
               </Popconfirm>
             ),
-            children: <RuleFields rule={r} areas={areas} onPatch={p => patchRule(idx, p)} />,
+            children: <RuleFields rule={r} onPatch={p => patchRule(idx, p)} />,
           }))}
         />
       )}
@@ -170,98 +174,78 @@ export function BuyRulesEditor({ pageLabel, value, areas, onChange }: Props) {
   )
 }
 
-function RuleFields({ rule, areas, onPatch }: {
-  rule: BuyRule; areas: string[]; onPatch: (p: Partial<BuyRule>) => void
+function RuleFields({ rule, onPatch }: {
+  rule: BuyRule; onPatch: (p: Partial<BuyRule>) => void
 }) {
   const lbl = { color: '#999', fontSize: 12, display: 'block', marginBottom: 2 }
+
+  const patchSpec = (dim: SpecDimension, side: 'min' | 'max', v: number) =>
+    onPatch({ spec: { ...rule.spec, [dim]: { ...rule.spec[dim], [side]: v } } })
+
   return (
     <Space direction="vertical" style={{ width: '100%' }} size={8}>
       <Space wrap size="middle">
         <span>
-          <span style={lbl}>标签名(如 jppro)</span>
+          <span style={lbl}>标签名(显示用,如 jppro)</span>
           <Input value={rule.label} style={{ width: 130 }} placeholder="可选"
             onChange={e => onPatch({ label: e.target.value })} />
         </span>
         <span>
-          <span style={lbl}>标题关键词</span>
-          <Input value={rule.name_keyword} style={{ width: 130 }} placeholder="可选"
-            onChange={e => onPatch({ name_keyword: e.target.value })} />
-        </span>
-        <span>
           <span style={lbl}>本规则上限(0=不限)</span>
-          <InputNumber min={0} value={rule.max_per_rule} style={{ width: 100 }}
-            onChange={v => onPatch({ max_per_rule: Number(v) || 0 })} />
-        </span>
-      </Space>
-
-      <Space wrap size="middle">
-        <span>
-          <span style={lbl}>CPU 核(min-max)</span>
-          <Space.Compact>
-            <InputNumber min={0} value={rule.cpu_min} style={{ width: 70 }} placeholder="min"
-              onChange={v => onPatch({ cpu_min: Number(v) || 0 })} />
-            <InputNumber min={0} value={rule.cpu_max} style={{ width: 70 }} placeholder="max"
-              onChange={v => onPatch({ cpu_max: Number(v) || 0 })} />
-          </Space.Compact>
-        </span>
-        <span>
-          <span style={lbl}>内存 MB(min-max)</span>
-          <Space.Compact>
-            <InputNumber min={0} value={rule.memory_min_mb} style={{ width: 80 }} placeholder="min"
-              onChange={v => onPatch({ memory_min_mb: Number(v) || 0 })} />
-            <InputNumber min={0} value={rule.memory_max_mb} style={{ width: 80 }} placeholder="max"
-              onChange={v => onPatch({ memory_max_mb: Number(v) || 0 })} />
-          </Space.Compact>
-        </span>
-        <span>
-          <span style={lbl}>硬盘 GB(min-max)</span>
-          <Space.Compact>
-            <InputNumber min={0} value={rule.disk_min_gb} style={{ width: 70 }} placeholder="min"
-              onChange={v => onPatch({ disk_min_gb: Number(v) || 0 })} />
-            <InputNumber min={0} value={rule.disk_max_gb} style={{ width: 70 }} placeholder="max"
-              onChange={v => onPatch({ disk_max_gb: Number(v) || 0 })} />
-          </Space.Compact>
-        </span>
-      </Space>
-
-      <Space wrap size="middle">
-        <span>
-          <span style={lbl}>带宽</span>
-          <Space.Compact>
-            <Select value={rule.bandwidth_mode} style={{ width: 90 }}
-              onChange={v => onPatch({ bandwidth_mode: v })}
-              options={[
-                { value: 'any', label: '不限' },
-                { value: 'min', label: '≥' },
-                { value: 'exact', label: '=' },
-              ]} />
-            <InputNumber min={0} value={rule.bandwidth_mbps} style={{ width: 100 }} addonAfter="M"
-              disabled={rule.bandwidth_mode === 'any'}
-              onChange={v => onPatch({ bandwidth_mbps: Number(v) || 0 })} />
-          </Space.Compact>
-        </span>
-        <span>
-          <span style={lbl}>流量 ≥ GB/月</span>
-          <InputNumber min={0} value={rule.traffic_min_gb} style={{ width: 100 }}
-            onChange={v => onPatch({ traffic_min_gb: Number(v) || 0 })} />
-        </span>
-        <span>
-          <span style={lbl}>续费价 ≤ 元/月</span>
-          <InputNumber min={0} value={rule.price_max_monthly / 100} style={{ width: 100 }}
-            onChange={v => onPatch({ price_max_monthly: Math.round((Number(v) || 0) * 100) })} />
+          <InputNumber min={0} value={rule.max_buy} style={{ width: 100 }}
+            onChange={v => onPatch({ max_buy: Number(v) || 0 })} />
         </span>
       </Space>
 
       <span>
-        <span style={lbl}>地区(留空=全部)</span>
-        <Select mode="multiple" value={rule.areas} style={{ width: '100%', maxWidth: 420 }}
-          placeholder="全部地区"
-          onChange={v => onPatch({ areas: v })}
-          options={areas.map(a => ({ value: a, label: a }))} />
+        <span style={lbl}>标签包含(匹配名称/节点,任一命中即可;留空=不限)</span>
+        <Select mode="tags" value={rule.tags_include} style={{ width: '100%', maxWidth: 420 }}
+          placeholder="如 jppro、jpiij,回车添加"
+          tokenSeparators={[',', ' ']}
+          open={false}
+          onChange={v => onPatch({ tags_include: v })} />
       </span>
-      <Tooltip title="续费价统一换算成月付比较；年付填年价会自动按 /12 比较。留空或 0 表示该项不限制。">
-        <Text type="secondary" style={{ fontSize: 11 }}>提示：所有条件留空/0 = 不限制。命中多台时优先抢便宜的，同价抢硬件更强的。</Text>
+
+      <Space wrap size="middle">
+        {SPEC_META.map(s => (
+          <span key={s.key}>
+            <span style={lbl}>{s.label}{s.addon ? `(${s.addon})` : ''} min-max</span>
+            <Space.Compact>
+              <InputNumber min={0} value={rule.spec[s.key].min} style={{ width: 80 }} placeholder="min"
+                onChange={v => patchSpec(s.key, 'min', Number(v) || 0)} />
+              <InputNumber min={0} value={rule.spec[s.key].max} style={{ width: 80 }} placeholder="max"
+                onChange={v => patchSpec(s.key, 'max', Number(v) || 0)} />
+            </Space.Compact>
+          </span>
+        ))}
+      </Space>
+
+      <Space wrap size="middle">
+        <span>
+          <span style={lbl}>续费周期</span>
+          <Select value={rule.price_type} style={{ width: 100 }}
+            onChange={v => onPatch({ price_type: v })}
+            options={[
+              { value: 'monthly', label: '月付' },
+              { value: 'yearly', label: '年付' },
+            ]} />
+        </span>
+        <span>
+          <span style={lbl}>续费价 ≤ 元({rule.price_type === 'yearly' ? '年' : '月'})</span>
+          <InputNumber min={0} value={rule.price_max / 100} style={{ width: 110 }}
+            onChange={v => onPatch({ price_max: Math.round((Number(v) || 0) * 100) })} />
+        </span>
+        <span>
+          <span style={lbl}>售价 ≤ 元</span>
+          <InputNumber min={0} value={rule.sale_price_max / 100} style={{ width: 110 }}
+            onChange={v => onPatch({ sale_price_max: Math.round((Number(v) || 0) * 100) })} />
+        </span>
+      </Space>
+
+      <Tooltip title="所有条件留空/0 = 不限制。续费价按所选周期(月付/年付)比较;售价独立。命中多台时按本页评分规则从高到低抢,达本规则上限即停。">
+        <Text type="secondary" style={{ fontSize: 11 }}>提示：所有条件留空/0 = 不限制。命中多台时按评分从高到低抢，评分规则在上方「评分规则」配置。</Text>
       </Tooltip>
     </Space>
   )
 }
+

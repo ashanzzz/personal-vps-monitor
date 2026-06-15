@@ -18,8 +18,13 @@ from .logging_setup import log_event
 
 logger = logging.getLogger(__name__)
 
-# Map page key -> snapshot category.
+# Map page key -> snapshot category, and page key -> per-page score rules key.
 _PAGE_CATEGORY = {"cloud": "vps", "ls": "ls", "secondhand": "secondhand"}
+_PAGE_SCORE_KEY = {
+    "cloud": "score_rules_cloud",
+    "ls": "score_rules_ls",
+    "secondhand": "score_rules_secondhand",
+}
 
 
 async def run_autobuy(page: str) -> None:
@@ -45,10 +50,9 @@ async def run_autobuy(page: str) -> None:
     if not enabled_rules:
         return
 
-    weights = {k: settings.get(k) for k in (
-        "score_w_cpu", "score_w_mem", "score_w_disk", "score_w_bw", "score_w_traffic"
-    )}
-    page_max_price = cfg.get("max_price", 0)
+    # Scoring rules (decoupled from buying) decide candidate ordering: the
+    # highest-scoring matched machine is bought first.
+    score_rules = settings.get(_PAGE_SCORE_KEY.get(page, ""))
     max_per_run = cfg.get("max_total_per_run", 1)
     max_daily = cfg.get("max_total_daily", 1)
     on_limit = cfg.get("on_limit_reached", "keep_watching")
@@ -72,20 +76,20 @@ async def run_autobuy(page: str) -> None:
 
     for rule in enabled_rules:
         rid = rule.get("id") or rule.get("label") or "rule"
-        max_per_rule = rule.get("max_per_rule", 1)
+        max_buy = rule.get("max_buy", 1)
 
-        # Quota gate: per-rule daily cap (0 = unlimited).
+        # Quota gate: per-rule cap (0 = unlimited).
         already = buy_state.rule_count(page, rid)
-        if max_per_rule and already >= max_per_rule:
+        if max_buy and already >= max_buy:
             if on_limit == "stop":
                 log_event("autobuy.rule_done", page=page, rule=rid, bought=already)
             continue
 
-        candidates = [m for m in rows if rule_matches(rule, m, page_max_price)]
+        candidates = [m for m in rows if rule_matches(rule, m)]
         if not candidates:
             continue
 
-        ranked = rank_candidates(candidates, weights)
+        ranked = rank_candidates(candidates, score_rules)
         log_event(
             "autobuy.match", page=page, rule=rid, candidates=len(ranked),
             top_price=ranked[0].price_monthly, top_id=ranked[0].plan_id,
@@ -93,7 +97,7 @@ async def run_autobuy(page: str) -> None:
 
         for m in ranked:
             # Re-check all gates before each purchase.
-            if max_per_rule and buy_state.rule_count(page, rid) >= max_per_rule:
+            if max_buy and buy_state.rule_count(page, rid) >= max_buy:
                 break
             if max_per_run and bought_this_run >= max_per_run:
                 log_event("autobuy.run_cap", page=page, cap=max_per_run)
