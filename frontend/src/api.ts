@@ -175,6 +175,10 @@ export interface AppSettings {
   ls_buy: PageBuyConfig
   secondhand_buy: PageBuyConfig
   plan_label_map: Record<string, string>
+  // Per-page table column widths ({col key -> width px}); {} = code defaults
+  col_widths_cloud: Record<string, number>
+  col_widths_ls: Record<string, number>
+  col_widths_secondhand: Record<string, number>
   // Scoring weights
   score_w_cpu: number
   score_w_mem: number

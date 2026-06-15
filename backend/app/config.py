@@ -73,6 +73,13 @@ DEFAULTS: dict[str, Any] = {
     # per-rule quotas by label. Empty = show raw plan_id.
     "plan_label_map": {},
 
+    # --- Per-page table column widths (UI only) ---
+    # Each maps {column key -> width px}; empty {} means "use the code defaults".
+    # Persisted independently per page so each list view remembers its layout.
+    "col_widths_cloud": {},
+    "col_widths_ls": {},
+    "col_widths_secondhand": {},
+
     # Hardware scoring weights — used to pick between equally-priced candidates.
     # score = cpu*w_cpu + mem_gb*w_mem + disk_gb*w_disk + bw_tier*w_bw + traffic_gb*w_traffic
     "score_w_cpu": 10.0,

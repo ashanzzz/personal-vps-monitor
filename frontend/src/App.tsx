@@ -104,6 +104,19 @@ export default function App() {
     }
   }, [])
 
+  // Persist a page's column widths (key already debounced in CategoryPage).
+  const handleSaveColWidths = useCallback(async (
+    widthKey: 'col_widths_cloud' | 'col_widths_ls' | 'col_widths_secondhand',
+    widths: Record<string, number>,
+  ) => {
+    setSettings(prev => (prev ? { ...prev, [widthKey]: widths } : prev))
+    try {
+      await api.saveSettings({ [widthKey]: widths } as Partial<AppSettings>)
+    } catch {
+      antMessage.error('保存列宽失败')
+    }
+  }, [])
+
   const handleRefresh = useCallback(() => {
     api.triggerPoll().catch(() => {})
     setTimeout(loadAll, 1500)
@@ -215,15 +228,18 @@ export default function App() {
                   {page === 'account'  && <AccountPage />}
                   {page === 'cloud'  && (
                     <CategoryPage pageKey="cloud" machines={machines} settings={settings}
-                      onBuy={handleBuy} onRefresh={handleRefresh} onSaveBuyConfig={handleSaveBuyConfig} />
+                      onBuy={handleBuy} onRefresh={handleRefresh} onSaveBuyConfig={handleSaveBuyConfig}
+                      onSaveColWidths={handleSaveColWidths} />
                   )}
                   {page === 'lightweight'  && (
                     <CategoryPage pageKey="lightweight" machines={machines} settings={settings}
-                      onBuy={handleBuy} onRefresh={handleRefresh} onSaveBuyConfig={handleSaveBuyConfig} />
+                      onBuy={handleBuy} onRefresh={handleRefresh} onSaveBuyConfig={handleSaveBuyConfig}
+                      onSaveColWidths={handleSaveColWidths} />
                   )}
                   {page === 'secondhand'  && (
                     <CategoryPage pageKey="secondhand" machines={machines} settings={settings}
-                      onBuy={handleBuy} onRefresh={handleRefresh} onSaveBuyConfig={handleSaveBuyConfig} />
+                      onBuy={handleBuy} onRefresh={handleRefresh} onSaveBuyConfig={handleSaveBuyConfig}
+                      onSaveColWidths={handleSaveColWidths} />
                   )}
                   {page === 'alerts'   && <AlertHistory events={events} />}
                   {page === 'logs'     && <LogsPage />}
