@@ -20,6 +20,20 @@ function show(v: unknown): string {
   return String(v)
 }
 
+// Human "N ago" for the cache timestamp. Input is ISO8601 UTC.
+function timeAgo(iso: string | null | undefined): string {
+  if (!iso) return '从未'
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return '未知'
+  const sec = Math.max(0, Math.round((Date.now() - then) / 1000))
+  if (sec < 60) return `${sec} 秒前`
+  const min = Math.round(sec / 60)
+  if (min < 60) return `${min} 分钟前`
+  const hr = Math.round(min / 60)
+  if (hr < 24) return `${hr} 小时前`
+  return `${Math.round(hr / 24)} 天前`
+}
+
 // Pick the first present key from a server object (Akile field names vary).
 function pick(s: MyServer, keys: string[]): unknown {
   for (const k of keys) if (s[k] !== undefined && s[k] !== null && s[k] !== '') return s[k]
@@ -30,7 +44,9 @@ export function AccountPage() {
   const { message } = AntApp.useApp()
   const [data, setData] = useState<AccountInfo | null>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
 
+  // Initial load reads the cached snapshot — instant, no upstream call.
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -39,6 +55,19 @@ export function AccountPage() {
       message.error('加载账户信息失败')
     } finally {
       setLoading(false)
+    }
+  }, [message])
+
+  // Manual refresh forces a live fetch and updates the cache.
+  const refresh = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      setData(await api.refreshAccount())
+      message.success('已刷新账户数据')
+    } catch {
+      message.error('刷新账户数据失败')
+    } finally {
+      setRefreshing(false)
     }
   }, [message])
 
@@ -71,8 +100,13 @@ export function AccountPage() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Text strong style={{ color: '#ccc', fontSize: 16 }}>我的账户</Text>
-        <Button icon={<ReloadOutlined />} loading={loading} onClick={load}>刷新</Button>
+        <Space size="middle" align="center">
+          <Text strong style={{ color: '#ccc', fontSize: 16 }}>我的账户</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            数据更新于 {timeAgo(data?.updated_at)}
+          </Text>
+        </Space>
+        <Button icon={<ReloadOutlined />} loading={refreshing} onClick={refresh}>刷新</Button>
       </div>
 
       {data && !data.configured && (

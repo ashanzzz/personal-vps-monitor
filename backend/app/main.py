@@ -4,6 +4,7 @@ FastAPI application entry point.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -20,10 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import auth
 from .auth import require_auth
 from .config import PAGE_KEYS, get_all_settings, update_settings
-from .database import AlertEvent, MachineSnapshot, PriceHistory, get_db, init_db
+from .database import AccountCache, AlertEvent, MachineSnapshot, PriceHistory, get_db, init_db
 from .logging_setup import read_log_tail, set_level, setup_logging
 from .match import find_official_equivalent
-from .poller import run_page_poll, run_poll
+from .poller import poll_account, run_page_poll, run_poll
 from .token_manager import ensure_fresh, refresh_now, token_status
 from .version import __version__, get_version_info
 from .ws import broadcast, connect, disconnect
@@ -49,6 +50,40 @@ def _reschedule_page_jobs(settings: dict) -> None:
                 args=[page], next_run_time=datetime.now(),
             )
         logger.info("page poller %s scheduled interval=%ds", page, interval)
+
+
+async def _run_account_poll() -> None:
+    """Refresh the account cache (balance + profile + own servers) on its own
+    independent interval. Keeps the token alive first, like the page pollers."""
+    from .database import SessionLocal
+    try:
+        await ensure_fresh()
+    except Exception:
+        logger.exception("ensure_fresh failed during account poll (continuing)")
+
+    async with SessionLocal() as db:
+        settings = await get_all_settings(db)
+    token = settings.get("akile_token") or ""
+    if not token:
+        return
+    try:
+        await poll_account(token, settings)
+    except Exception:
+        logger.exception("account poll failed")
+
+
+def _reschedule_account_job(settings: dict) -> None:
+    """(Re)schedule the account-cache poll using account_refresh_interval."""
+    interval = max(30, int(settings.get("account_refresh_interval", 300) or 300))
+    job_id = "poll_account"
+    if scheduler.get_job(job_id):
+        scheduler.reschedule_job(job_id, trigger="interval", seconds=interval)
+    else:
+        scheduler.add_job(
+            _run_account_poll, "interval", seconds=interval, id=job_id,
+            next_run_time=datetime.now(),
+        )
+    logger.info("account poller scheduled interval=%ds", interval)
 
 
 @asynccontextmanager
@@ -80,6 +115,10 @@ async def lifespan(app: FastAPI):
     # Per-page pollers (each with its own independent interval). These also
     # drive auto-buy.
     _reschedule_page_jobs(settings)
+
+    # Account-page cache poller (balance + profile + own servers) on its own
+    # interval so the account page reads cache instead of hitting akile on load.
+    _reschedule_account_job(settings)
 
     # Keep the Akile token alive entirely inside the backend: check hourly,
     # refresh when within the expiry margin. Runs an immediate check on startup.
@@ -231,6 +270,9 @@ async def save_settings(data: dict, _: str = Depends(require_auth), db: AsyncSes
     # Reschedule per-page pollers (their intervals may have changed).
     _reschedule_page_jobs(result)
 
+    # Reschedule the account-cache poller (account_refresh_interval may have changed).
+    _reschedule_account_job(result)
+
     # Apply log level live.
     set_level(result.get("log_level", "INFO"))
 
@@ -271,44 +313,50 @@ async def get_token_status(_: str = Depends(require_auth)):
 
 @app.get("/api/account")
 async def get_account(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
-    """Aggregate the logged-in Akile account: profile + balance + own servers.
+    """Return the cached account snapshot (profile + balance + own servers).
 
-    Balance comes from GET /v1/user/info (data.money, in fen). Servers come
-    from POST /v1/server/GetServerV2List (empty list when the account has no
-    instances). Each upstream call degrades independently so one failure does
-    not blank the whole panel.
+    Reads from the single-row account_cache table that the account poller keeps
+    fresh on its own interval (account_refresh_interval, default 300s), so
+    loading the page never blocks on an upstream call. When no cache exists yet
+    (e.g. fresh install before the first poll), populate it once on demand.
     """
     settings = await get_all_settings(db)
     token = settings.get("akile_token", "")
     if not token:
-        return {"configured": False, "profile": None, "servers": [], "errors": ["no_token"]}
+        return {"configured": False, "profile": None, "servers": [],
+                "errors": ["no_token"], "updated_at": None}
 
-    from . import akile_client as api
-    errors: list[str] = []
-    profile = None
-    servers: list[dict] = []
+    row = await db.scalar(select(AccountCache).where(AccountCache.id == 1))
+    if row is None or not row.data:
+        # Cold cache: fetch once so the page isn't empty on first visit.
+        await poll_account(token, settings)
+        row = await db.scalar(select(AccountCache).where(AccountCache.id == 1))
+        if row is None or not row.data:
+            return {"configured": True, "profile": None, "servers": [],
+                    "errors": ["cache_empty"], "updated_at": None}
 
-    try:
-        info = await api.get_user_info(token)
-        profile = {
-            "username": info.get("username", ""),
-            "email": info.get("email", ""),
-            "role": info.get("role", ""),
-            "money": info.get("money"),            # balance in fen; None if missing
-            "telegram_id": info.get("telegram_id"),
-            "is_real_name": bool(info.get("is_real_name")),
-            "is_ga": bool(info.get("is_ga")),
-            "last_checkin_time": info.get("last_checkin_time"),
-        }
-    except httpx.HTTPError as e:
-        errors.append(f"profile:{e}")
+    payload = json.loads(row.data)
+    payload["updated_at"] = row.updated_at.isoformat() if row.updated_at else None
+    return payload
 
-    try:
-        servers = await api.get_my_servers(token)
-    except httpx.HTTPError as e:
-        errors.append(f"servers:{e}")
 
-    return {"configured": True, "profile": profile, "servers": servers, "errors": errors}
+@app.post("/api/account/refresh")
+async def refresh_account(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
+    """Force an immediate live fetch and update the account cache, then return it."""
+    settings = await get_all_settings(db)
+    token = settings.get("akile_token", "")
+    if not token:
+        return {"configured": False, "profile": None, "servers": [],
+                "errors": ["no_token"], "updated_at": None}
+
+    await poll_account(token, settings)
+    row = await db.scalar(select(AccountCache).where(AccountCache.id == 1))
+    if row is None or not row.data:
+        return {"configured": True, "profile": None, "servers": [],
+                "errors": ["cache_empty"], "updated_at": None}
+    payload = json.loads(row.data)
+    payload["updated_at"] = row.updated_at.isoformat() if row.updated_at else None
+    return payload
 
 
 # ---------------------------------------------------------------------------
