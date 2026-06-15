@@ -72,6 +72,7 @@ export interface Machine {
   ipv4: number
   available: boolean
   ip_status: '' | 'normal' | 'gfw'
+  score: number
   official_match: OfficialMatch | null
   updated_at: string
 }
@@ -126,6 +127,15 @@ export interface PageBuyConfig {
   rules: BuyRule[]
 }
 
+// Per-page hardware scoring weights: {dimension -> weight}. score = Σ(value×weight).
+// Positive = more is better; negative (price/latency) = less is better.
+// latency is skipped when a machine has no measured value. Mirrors backend
+// scoring.DEFAULT_SCORE_RULES.
+export type ScoreDimension =
+  | 'cpu' | 'memory' | 'disk' | 'bandwidth' | 'traffic'
+  | 'price_monthly' | 'sale_price' | 'latency'
+export type ScoreRules = Record<ScoreDimension, number>
+
 export interface AppSettings {
   // API & connection
   akile_token: string
@@ -179,6 +189,10 @@ export interface AppSettings {
   col_widths_cloud: Record<string, number>
   col_widths_ls: Record<string, number>
   col_widths_secondhand: Record<string, number>
+  // Per-page hardware scoring rules ({dimension -> weight}); drives the 评分 column
+  score_rules_cloud: ScoreRules
+  score_rules_ls: ScoreRules
+  score_rules_secondhand: ScoreRules
   // Scoring weights
   score_w_cpu: number
   score_w_mem: number

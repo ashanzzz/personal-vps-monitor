@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .database import Settings
+from .scoring import default_score_rules
 
 # LS regions Akile supports (used to enumerate the store)
 LS_REGIONS = ["HK", "JP", "TW", "US", "SG", "DE", "KR", "MO"]
@@ -79,6 +80,15 @@ DEFAULTS: dict[str, Any] = {
     "col_widths_cloud": {},
     "col_widths_ls": {},
     "col_widths_secondhand": {},
+
+    # Per-page hardware scoring rules — a column "评分" on each list page is
+    # computed from these. Each is a {dimension: weight} map; score is the
+    # weighted sum Σ(dimension_value × weight). Empty {} = use code defaults.
+    # See scoring.py (compute_score / DEFAULT_SCORE_RULES). Each page is
+    # independent so cloud / ls / secondhand can weight differently.
+    "score_rules_cloud": default_score_rules(),
+    "score_rules_ls": default_score_rules(),
+    "score_rules_secondhand": default_score_rules(),
 
     # Hardware scoring weights — used to pick between equally-priced candidates.
     # score = cpu*w_cpu + mem_gb*w_mem + disk_gb*w_disk + bw_tier*w_bw + traffic_gb*w_traffic
@@ -176,6 +186,20 @@ async def get_all_settings(db: AsyncSession) -> dict[str, Any]:
                 norm_rules.append(r)
             merged["rules"] = norm_rules
         result[key] = merged
+
+    # Merge each page's score rules over the defaults so a partial save (or an
+    # older DB row missing newer dimensions) always exposes every weight.
+    for page in PAGE_KEYS:
+        key = f"score_rules_{page}"
+        merged_rules = default_score_rules()
+        saved = result.get(key) or {}
+        if isinstance(saved, dict):
+            for dim, weight in saved.items():
+                try:
+                    merged_rules[dim] = float(weight)
+                except (TypeError, ValueError):
+                    continue
+        result[key] = merged_rules
     return result
 
 

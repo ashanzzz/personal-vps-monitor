@@ -7,6 +7,12 @@
 三页列表（云服务器 / 轻量 / 二手机）支持表头排序 + 列宽拖拽记忆 + 一键恢复默认宽度。
 
 ### 新增
+- **评分系统（算分 + 显示 + 配置）**：云 / 轻量 / 二手三页各新增「评分」列，分数由后端按各页独立的评分规则加权算好后随快照查询返回。
+  - 后端 `config.py` `DEFAULTS` 新增 `score_rules_cloud` / `score_rules_ls` / `score_rules_secondhand` 三个键（`{维度: 权重}` 映射，默认 cpu 每核 50、内存每 GB 20、硬盘每 GB 1、带宽/流量 0、月付价/售价/延迟为负权重）。`get_all_settings` 把保存值合并到默认上，缺失维度自动补齐。
+  - 新增 `backend/app/scoring.py`，`compute_score(machine, rules)` 计算 `score = Σ(维度数值 × 权重)`；内存按 GB、价格按元换算；`latency`、`sale_price` 无数据时跳过该维度且不报错。
+  - `GET /api/machines` 每条结果按其所属页规则附带 `score` 字段（`vps→cloud`、`ls→ls`、`secondhand→secondhand`）。
+  - 三页列表（共用 `CategoryPage`）新增「评分」列，默认按评分降序，支持点击表头排序（接入 antd 表格排序）。
+  - 每页顶部新增「评分规则」编辑器（`ScoreRulesEditor`），可独立编辑各维度权重并「恢复默认」，保存后即时重算评分列。
 - **表头排序**：三页列表（共用 `CategoryPage`）的名称、地区、CPU、内存、硬盘、带宽、流量、价格、库存列均加 `sorter`，支持点击表头按数值/字符串排序。原「配置」合并列拆为 CPU / 内存 / 硬盘 / 带宽 / 流量 五个独立可排序列。
 - **列宽可拖拽 + 持久化**：表头单元格用 `react-resizable` 包裹，可拖拽调整列宽。宽度变化经 500ms 防抖后写入 `POST /api/settings`，按页存入 `col_widths_cloud` / `col_widths_ls` / `col_widths_secondhand`（值为 `{列key: 宽度px}`）；刷新或重新进入页面后读回应用。三页各存各的。
 - **「恢复默认宽度」按钮**：每页列表工具栏新增按钮，点击清空该页 `col_widths_*`（置为 `{}`）并恢复代码中定义的默认列宽。
