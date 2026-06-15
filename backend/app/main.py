@@ -25,6 +25,7 @@ from .database import AccountCache, AlertEvent, MachineSnapshot, PriceHistory, g
 from .logging_setup import read_log_tail, set_level, setup_logging
 from .match import find_official_equivalent
 from .poller import poll_account, run_page_poll, run_poll
+from .scoring import compute_score
 from .token_manager import ensure_fresh, refresh_now, token_status
 from .version import __version__, get_version_info
 from .ws import broadcast, connect, disconnect
@@ -378,6 +379,14 @@ async def list_machines(
     q = q.order_by(MachineSnapshot.category, MachineSnapshot.area, MachineSnapshot.name)
     rows = (await db.execute(q)).scalars().all()
 
+    # Per-page scoring rules (independent weights per category). category -> key.
+    settings = await get_all_settings(db)
+    score_rules_by_cat = {
+        "vps": settings.get("score_rules_cloud"),
+        "ls": settings.get("score_rules_ls"),
+        "secondhand": settings.get("score_rules_secondhand"),
+    }
+
     # For secondhand rows, find an equivalent brand-new official plan so the UI
     # can show a "official new one exists" comparison. Fetch official plans once.
     has_secondhand = any(r.category == "secondhand" for r in rows)
@@ -392,11 +401,13 @@ async def list_machines(
         match = None
         if r.category == "secondhand" and official:
             match = find_official_equivalent(r, official)
-        result.append(_machine_dict(r, match))
+        score = compute_score(r, score_rules_by_cat.get(r.category))
+        result.append(_machine_dict(r, match, score))
     return result
 
 
-def _machine_dict(r: MachineSnapshot, official_match: dict | None = None) -> dict:
+def _machine_dict(r: MachineSnapshot, official_match: dict | None = None,
+                  score: float = 0.0) -> dict:
     return {
         "id": r.id,
         "category": r.category,
@@ -415,6 +426,7 @@ def _machine_dict(r: MachineSnapshot, official_match: dict | None = None) -> dic
         "ipv4": r.ipv4,
         "available": r.available,
         "ip_status": getattr(r, "ip_status", "") or "",
+        "score": score,
         "official_match": official_match,
         "updated_at": r.updated_at.isoformat() if r.updated_at else None,
     }

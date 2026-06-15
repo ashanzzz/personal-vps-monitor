@@ -9,7 +9,7 @@ import {
 } from '@ant-design/icons'
 
 import { api, clearToken, getToken, setUnauthorizedHandler } from './api'
-import type { AlertEvent, AppSettings, Machine, PageBuyConfig, VersionInfo } from './api'
+import type { AlertEvent, AppSettings, Machine, PageBuyConfig, ScoreRules, VersionInfo } from './api'
 import { useWebSocket } from './useWebSocket'
 import { Overview }      from './pages/Overview'
 import { CategoryPage }  from './pages/CategoryPage'
@@ -114,6 +114,22 @@ export default function App() {
       await api.saveSettings({ [widthKey]: widths } as Partial<AppSettings>)
     } catch {
       antMessage.error('保存列宽失败')
+    }
+  }, [])
+
+  // Persist a page's hardware scoring rules (immediate save on change).
+  const handleSaveScoreRules = useCallback(async (
+    scoreKey: 'score_rules_cloud' | 'score_rules_ls' | 'score_rules_secondhand',
+    rules: ScoreRules,
+  ) => {
+    setSettings(prev => (prev ? { ...prev, [scoreKey]: rules } : prev))
+    try {
+      const updated = await api.saveSettings({ [scoreKey]: rules } as Partial<AppSettings>)
+      setSettings(updated)
+      // Re-pull machines so the 评分 column reflects the new weights.
+      api.getMachines().then(setMachines).catch(() => {})
+    } catch {
+      antMessage.error('保存评分规则失败')
     }
   }, [])
 
@@ -229,17 +245,17 @@ export default function App() {
                   {page === 'cloud'  && (
                     <CategoryPage pageKey="cloud" machines={machines} settings={settings}
                       onBuy={handleBuy} onRefresh={handleRefresh} onSaveBuyConfig={handleSaveBuyConfig}
-                      onSaveColWidths={handleSaveColWidths} />
+                      onSaveColWidths={handleSaveColWidths} onSaveScoreRules={handleSaveScoreRules} />
                   )}
                   {page === 'lightweight'  && (
                     <CategoryPage pageKey="lightweight" machines={machines} settings={settings}
                       onBuy={handleBuy} onRefresh={handleRefresh} onSaveBuyConfig={handleSaveBuyConfig}
-                      onSaveColWidths={handleSaveColWidths} />
+                      onSaveColWidths={handleSaveColWidths} onSaveScoreRules={handleSaveScoreRules} />
                   )}
                   {page === 'secondhand'  && (
                     <CategoryPage pageKey="secondhand" machines={machines} settings={settings}
                       onBuy={handleBuy} onRefresh={handleRefresh} onSaveBuyConfig={handleSaveBuyConfig}
-                      onSaveColWidths={handleSaveColWidths} />
+                      onSaveColWidths={handleSaveColWidths} onSaveScoreRules={handleSaveScoreRules} />
                   )}
                   {page === 'alerts'   && <AlertHistory events={events} />}
                   {page === 'logs'     && <LogsPage />}

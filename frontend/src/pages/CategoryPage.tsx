@@ -3,9 +3,10 @@ import { Input, Select, Switch, Space, Button, Tooltip, Table, Tag, Typography, 
 import { SyncOutlined, ShoppingCartOutlined, ColumnWidthOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import type { ResizeCallbackData } from 'react-resizable'
-import type { Machine, AppSettings, PageBuyConfig } from '../api'
+import type { Machine, AppSettings, PageBuyConfig, ScoreRules } from '../api'
 import { fmtPrice, fmtMemory } from '../api'
 import { BuyRulesEditor } from '../components/BuyRulesEditor'
+import { ScoreRulesEditor } from '../components/ScoreRulesEditor'
 import { ResizableTitle } from '../components/ResizableTitle'
 import { pageBuyDefaults } from '../buyDefaults'
 
@@ -16,11 +17,12 @@ const PAGE_MAP: Record<string, {
   category: Machine['category']
   buyKey: keyof AppSettings
   widthKey: 'col_widths_cloud' | 'col_widths_ls' | 'col_widths_secondhand'
+  scoreKey: 'score_rules_cloud' | 'score_rules_ls' | 'score_rules_secondhand'
   label: string
 }> = {
-  cloud:       { category: 'vps',        buyKey: 'cloud_buy',      widthKey: 'col_widths_cloud',      label: '云服务器' },
-  lightweight: { category: 'ls',         buyKey: 'ls_buy',         widthKey: 'col_widths_ls',         label: '轻量服务器' },
-  secondhand:  { category: 'secondhand', buyKey: 'secondhand_buy', widthKey: 'col_widths_secondhand', label: '二手机' },
+  cloud:       { category: 'vps',        buyKey: 'cloud_buy',      widthKey: 'col_widths_cloud',      scoreKey: 'score_rules_cloud',      label: '云服务器' },
+  lightweight: { category: 'ls',         buyKey: 'ls_buy',         widthKey: 'col_widths_ls',         scoreKey: 'score_rules_ls',         label: '轻量服务器' },
+  secondhand:  { category: 'secondhand', buyKey: 'secondhand_buy', widthKey: 'col_widths_secondhand', scoreKey: 'score_rules_secondhand', label: '二手机' },
 }
 
 // Default column widths (px). The "恢复默认宽度" button restores exactly these.
@@ -33,6 +35,7 @@ const DEFAULT_COL_WIDTHS: Record<string, number> = {
   bandwidth: 100,
   traffic: 110,
   price: 140,
+  score: 90,
   stock: 120,
   action: 80,
 }
@@ -50,9 +53,13 @@ interface Props {
     widthKey: 'col_widths_cloud' | 'col_widths_ls' | 'col_widths_secondhand',
     widths: Record<string, number>,
   ) => void
+  onSaveScoreRules: (
+    scoreKey: 'score_rules_cloud' | 'score_rules_ls' | 'score_rules_secondhand',
+    rules: ScoreRules,
+  ) => void
 }
 
-export function CategoryPage({ pageKey, machines, settings, onBuy, onRefresh, onSaveBuyConfig, onSaveColWidths }: Props) {
+export function CategoryPage({ pageKey, machines, settings, onBuy, onRefresh, onSaveBuyConfig, onSaveColWidths, onSaveScoreRules }: Props) {
   const { modal } = AntApp.useApp()
   const meta = PAGE_MAP[pageKey]
   const [search, setSearch] = useState('')
@@ -175,6 +182,16 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onRefresh, on
       ),
     },
     {
+      title: '评分', key: 'score', width: colWidths.score,
+      defaultSortOrder: 'descend',
+      sorter: (a, b) => (a.score ?? 0) - (b.score ?? 0),
+      render: (_, m) => (
+        <Tooltip title="按本页评分规则加权计算，可在顶部「评分规则」调整权重">
+          <Text strong style={{ color: '#faad14' }}>{(m.score ?? 0).toFixed(1)}</Text>
+        </Tooltip>
+      ),
+    },
+    {
       title: '库存/状态', key: 'stock', width: colWidths.stock,
       sorter: (a, b) => a.stock - b.stock,
       render: (_, m) => (
@@ -221,6 +238,12 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onRefresh, on
         value={buyCfg}
         areas={areas}
         onChange={cfg => onSaveBuyConfig(meta.buyKey, cfg)}
+      />
+
+      <ScoreRulesEditor
+        pageLabel={meta.label}
+        value={(settings?.[meta.scoreKey] as ScoreRules)}
+        onChange={rules => onSaveScoreRules(meta.scoreKey, rules)}
       />
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
