@@ -2,35 +2,31 @@
 
 本项目遵循语义化版本。日期为发布日。
 
-## 未发布
-
-三页列表（云服务器 / 轻量 / 二手机）支持表头排序 + 列宽拖拽记忆 + 一键恢复默认宽度。
-
-### 新增
-- **评分系统（算分 + 显示 + 配置）**：云 / 轻量 / 二手三页各新增「评分」列，分数由后端按各页独立的评分规则加权算好后随快照查询返回。
-  - 后端 `config.py` `DEFAULTS` 新增 `score_rules_cloud` / `score_rules_ls` / `score_rules_secondhand` 三个键（`{维度: 权重}` 映射，默认 cpu 每核 50、内存每 GB 20、硬盘每 GB 1、带宽/流量 0、月付价/售价/延迟为负权重）。`get_all_settings` 把保存值合并到默认上，缺失维度自动补齐。
-  - 新增 `backend/app/scoring.py`，`compute_score(machine, rules)` 计算 `score = Σ(维度数值 × 权重)`；内存按 GB、价格按元换算；`latency`、`sale_price` 无数据时跳过该维度且不报错。
-  - `GET /api/machines` 每条结果按其所属页规则附带 `score` 字段（`vps→cloud`、`ls→ls`、`secondhand→secondhand`）。
-  - 三页列表（共用 `CategoryPage`）新增「评分」列，默认按评分降序，支持点击表头排序（接入 antd 表格排序）。
-  - 每页顶部新增「评分规则」编辑器（`ScoreRulesEditor`），可独立编辑各维度权重并「恢复默认」，保存后即时重算评分列。
-- **表头排序**：三页列表（共用 `CategoryPage`）的名称、地区、CPU、内存、硬盘、带宽、流量、价格、库存列均加 `sorter`，支持点击表头按数值/字符串排序。原「配置」合并列拆为 CPU / 内存 / 硬盘 / 带宽 / 流量 五个独立可排序列。
-- **列宽可拖拽 + 持久化**：表头单元格用 `react-resizable` 包裹，可拖拽调整列宽。宽度变化经 500ms 防抖后写入 `POST /api/settings`，按页存入 `col_widths_cloud` / `col_widths_ls` / `col_widths_secondhand`（值为 `{列key: 宽度px}`）；刷新或重新进入页面后读回应用。三页各存各的。
-- **「恢复默认宽度」按钮**：每页列表工具栏新增按钮，点击清空该页 `col_widths_*`（置为 `{}`）并恢复代码中定义的默认列宽。
-- 后端 `config.py` 的 `DEFAULTS` 新增 `col_widths_cloud` / `col_widths_ls` / `col_widths_secondhand` 三个键（默认 `{}`），复用现有 settings 读写，不新建表。
-
 ## v0.8.0
 
-我的账户页加缓存 + 可配置刷新间隔（默认 300s）。
+数据库并发加固 + 二手全量分页 + 我的账户缓存 + 三页排序/列宽 + 评分系统 + 抢购规则化 + 高级筛选。
 
 ### 新增
-- **账户数据缓存表 `account_cache`**：单行（id=1）存储账户聚合快照（余额 / 账户信息 / 我的服务器）的 JSON 与 `updated_at`，由独立的账户轮询任务按间隔刷新，进页面不再实时打 akile API。
-- **后端账户轮询**：`poller.poll_account(token, settings)` 抓取 `GET /v1/user/info`（余额 `data.money` 分）与 `POST /v1/server/GetServerV2List`（我的服务器列表），两个上游调用各自独立降级，结果写入 `account_cache`。`main.py` 新增 `_reschedule_account_job`，把账户轮询纳入调度，使用独立间隔。
-- **配置键 `account_refresh_interval`**：默认 300（秒），设置页新增「我的账户刷新间隔」滑块（复用现有三页滑块组件，30–3600s）。
-- **手动刷新接口 `POST /api/account/refresh`**：强制拉一次并更新缓存后返回。
-- **前端账户页**：加载时读缓存（秒开），展示「数据更新于 X 前」与手动「刷新」按钮（调用 `refreshAccount`）。
+- **抢购规则化（每页独立、每条规则独立次数闸）+ 接入评分排序**：抢购设置改为「一条一条规则」，存于 settings `<page>_buy.rules` JSON 数组。每条规则字段：`tags_include`（标签包含，匹配名称/节点，任一命中即可，如 jppro/jpiij）、`spec`（cpu/内存/硬盘/带宽/流量 的 min/max 区间）、`price_type`（monthly|yearly 二选一互斥）、`price_max`（该周期续费价上限，分）、`sale_price_max`（售价上限，分）、`max_buy`（本规则最多抢几次，命中即计数，达上限停）。
+  - 抢购引擎（`buy_engine.py`）：逐规则匹配候选机器 → 命中集合按**评分降序**（复用 `scoring.compute_score`）→ 抢分最高的。**评分与抢购解耦**：评分=排序依据，抢购规则=筛选 + 次数闸。
+  - 保留三道配额闸门：单规则 `max_buy` / 单轮合计 `max_total_per_run` / 每日合计 `max_total_daily`；`on_limit_reached` 默认 `keep_watching`（持续补抢）。
+  - 前端抢购设置 UI（`BuyRulesEditor`）改为规则列表，可增删每条规则，字段如上；每页独立。
+- **三页高级筛选**：云 / 轻量 / 二手三页列表工具栏新增「高级筛选」面板，支持按标签（名称/节点）、配置区间（CPU/内存/硬盘）、价格区间、售价上限、IP 状态、区域筛选。纯前端对已加载快照实时过滤，不重新请求。
+- **评分系统（算分 + 显示 + 配置）**：云 / 轻量 / 二手三页各新增「评分」列，分数由后端按各页独立的评分规则加权算好后随快照查询返回。
+  - `config.py` `DEFAULTS` 新增 `score_rules_cloud` / `score_rules_ls` / `score_rules_secondhand`（`{维度: 权重}` 映射，默认 cpu 每核 50、内存每 GB 20、硬盘每 GB 1、带宽/流量 0、月付价/售价/延迟为负权重）。`get_all_settings` 合并保存值到默认，缺失维度自动补齐。
+  - 新增 `backend/app/scoring.py`，`compute_score(machine, rules)` 计算 `score = Σ(维度数值 × 权重)`；内存按 GB、价格按元换算；`latency`、`sale_price` 无数据时跳过该维度且不报错。
+  - `GET /api/machines` 每条结果按其所属页规则附带 `score` 字段（`vps→cloud`、`ls→ls`、`secondhand→secondhand`）。
+  - 三页列表新增「评分」列，默认按评分降序、支持点击表头排序；每页顶部新增「评分规则」编辑器（`ScoreRulesEditor`），可独立编辑各维度权重并「恢复默认」。
+- **三页表头排序**：名称、地区、CPU、内存、硬盘、带宽、流量、价格、库存列均加 `sorter`。原「配置」合并列拆为 CPU / 内存 / 硬盘 / 带宽 / 流量 五个独立可排序列。
+- **列宽可拖拽 + 持久化 + 「恢复默认宽度」**：表头用 `react-resizable` 包裹，宽度变化经 500ms 防抖写入 `POST /api/settings`，按页存入 `col_widths_cloud` / `col_widths_ls` / `col_widths_secondhand`（`{列key: 宽度px}`）；「恢复默认宽度」清空该页覆盖（置 `{}`）回到代码默认。复用现有 settings 读写，不新建表。
+- **我的账户页缓存 + 可配置刷新间隔（默认 300s）**：新增 `account_cache` 表（单行 id=1，存账户聚合快照 JSON + `updated_at`），由独立账户轮询任务按间隔刷新，进页面秒开不实时打 API。`poller.poll_account` 抓 `GET /v1/user/info`（余额）与 `POST /v1/server/GetServerV2List`（服务器列表），各自独立降级；`main.py` 新增 `_reschedule_account_job`。配置键 `account_refresh_interval`（默认 300s，设置页加滑块）。新增 `POST /api/account/refresh` 强制刷新。
+- **二手列表全量分页抓取**：`poller.poll_secondhand` 翻页（PAGE_SIZE=100，MAX_PAGES 上限，空页/凑满 total 即停）抓全二手在售，`upsert` 单条 try/except 容错，单条异常不影响整批落库。
 
 ### 变更
 - `GET /api/account` 改为读 `account_cache`（带 `updated_at`），不再每次实时打 akile；首访冷缓存时按需抓取一次填充。
+
+### 修复
+- **修复线上 `database is locked`**：SQLite 启用 WAL（读写并发）+ `busy_timeout=30s`（写锁等待而非立即报错）+ 连接 `connect_args timeout` + `_upsert` 用 `no_autoflush`，二手数据可正常并发落库。
 
 ## v0.7.0
 

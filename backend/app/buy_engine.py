@@ -1,55 +1,60 @@
 """
-Auto-buy engine: condition-range rule matching, candidate ranking, and
+Auto-buy engine: per-rule candidate matching, score-based ranking, and
 quota-gated purchasing.
 
 Design (confirmed with user):
-  - Each page (cloud/ls/secondhand) has independent config + rules.
-  - A rule is a set of range/equality conditions. A machine matches when it
-    satisfies ALL non-empty conditions — so brand-new plans/names match too.
-  - When multiple machines match one rule, rank by [price asc, hw_score desc]:
-    cheapest first; on a price tie the stronger hardware wins.
-  - Three quota gates before each buy: per-rule, page-per-run, page-per-day.
-  - on_limit_reached: "stop" removes nothing (caller decides) — we simply stop
-    buying for that rule once max_per_rule is hit; "keep_watching" keeps trying
-    to backfill on later cycles. Purchase counts are tracked in buy_state.
+  - Each page (cloud/ls/secondhand) has independent config + a list of rules,
+    stored under settings ``<page>_buy.rules`` as a JSON array.
+  - A rule is a set of filter conditions. A machine matches when it satisfies
+    ALL non-empty conditions, so brand-new plans/names match too:
+      * tags_include: list of substrings; machine matches when ANY of them is
+        contained in its name OR node (e.g. jppro / jpiij). Empty = any.
+      * spec: {dimension: {min, max}} ranges over cpu / memory / disk /
+        bandwidth / traffic. 0 (or missing) on a side = unbounded there.
+      * price_type: "monthly" | "yearly" — which renewal price the rule caps.
+      * price_max: ceiling (fen) on the chosen renewal price. 0 = no cap.
+      * sale_price_max: ceiling (fen) on the sale price. 0 = no cap.
+      * max_buy: per-rule purchase cap. Counted on every hit; stop at the cap.
+  - Scoring and buying are DECOUPLED: the scoring rules (scoring.compute_score)
+    decide ordering; the buy rule only filters and counts. When multiple
+    machines match one rule, rank by score DESCENDING and buy the highest.
+  - Three quota gates before each buy: per-rule (max_buy), page-per-run
+    (max_total_per_run), page-per-day (max_total_daily).
+  - on_limit_reached: "keep_watching" (default) keeps trying to backfill on
+    later cycles; "stop" simply logs once the per-rule cap is hit. Purchase
+    counts are tracked in buy_state.
 """
 from __future__ import annotations
 
 import logging
 from datetime import date
+from typing import Any
 
-from .config import get_all_settings
-from .database import MachineSnapshot, SessionLocal
-from .logging_setup import log_event
+from .database import MachineSnapshot
+from .scoring import compute_score
 
 logger = logging.getLogger(__name__)
 
-# Bandwidth tier buckets (Mbps) used for hardware scoring.
-_BW_TIERS = [50, 100, 200, 500, 1000, 2000, 5000, 10000]
+# Spec dimensions a rule can range over, mapped to the machine attribute and
+# the unit conversion applied before comparison. Memory ranges are expressed
+# in MB (matching the stored field); the others map 1:1.
+_SPEC_FIELDS: dict[str, str] = {
+    "cpu": "cpu",
+    "memory": "memory_mb",
+    "disk": "disk_gb",
+    "bandwidth": "bandwidth_mbps",
+    "traffic": "traffic_gb",
+}
 
 
-def _bw_tier(mbps: int) -> int:
-    """Map a bandwidth value to a tier index (0-based) for scoring."""
-    tier = 0
-    for i, t in enumerate(_BW_TIERS):
-        if mbps >= t:
-            tier = i + 1
-    return tier
+def _get(m: Any, key: str, default: Any = None) -> Any:
+    if isinstance(m, dict):
+        return m.get(key, default)
+    return getattr(m, key, default)
 
 
-def hardware_score(m: MachineSnapshot, weights: dict) -> float:
-    """Weighted hardware strength. Higher = stronger config."""
-    return (
-        m.cpu * weights.get("score_w_cpu", 10.0)
-        + (m.memory_mb / 1024.0) * weights.get("score_w_mem", 5.0)
-        + m.disk_gb * weights.get("score_w_disk", 0.5)
-        + _bw_tier(m.bandwidth_mbps) * weights.get("score_w_bw", 2.0)
-        + (m.traffic_gb or 0) * weights.get("score_w_traffic", 0.05)
-    )
-
-
-def _in_range(value: int, lo: int, hi: int) -> bool:
-    """lo/hi of 0 mean unbounded on that side."""
+def _in_range(value: float, lo: float, hi: float) -> bool:
+    """lo/hi of 0 (or falsy) mean unbounded on that side."""
     if lo and value < lo:
         return False
     if hi and value > hi:
@@ -57,52 +62,84 @@ def _in_range(value: int, lo: int, hi: int) -> bool:
     return True
 
 
-def rule_matches(rule: dict, m: MachineSnapshot, page_max_price: int) -> bool:
+def _tags_match(tags: list[str], m: MachineSnapshot) -> bool:
+    """True when ANY tag is a substring of the machine name or node.
+
+    Empty tag list = no tag constraint (matches everything).
+    """
+    cleaned = [t.strip() for t in tags if isinstance(t, str) and t.strip()]
+    if not cleaned:
+        return True
+    haystack = f"{_get(m, 'name', '') or ''}\n{_get(m, 'node', '') or ''}"
+    return any(tag in haystack for tag in cleaned)
+
+
+def _rule_price(rule: dict, m: MachineSnapshot) -> int | None:
+    """The renewal price (fen) this rule caps, per its price_type.
+
+    Returns None when the machine has no price for the chosen cycle, in which
+    case the price ceiling can't be satisfied and the machine is excluded.
+    """
+    if rule.get("price_type") == "yearly":
+        return _get(m, "price_yearly", None)
+    return _get(m, "price_monthly", None)
+
+
+def rule_matches(rule: dict, m: MachineSnapshot) -> bool:
     """True when machine m satisfies all non-empty conditions of rule."""
     if not rule.get("enabled", True):
         return False
 
-    kw = (rule.get("name_keyword") or "").strip()
-    if kw and kw not in (m.name or ""):
+    if not _tags_match(rule.get("tags_include") or [], m):
         return False
 
-    if not _in_range(m.cpu, rule.get("cpu_min", 0), rule.get("cpu_max", 0)):
-        return False
-    if not _in_range(m.memory_mb, rule.get("memory_min_mb", 0), rule.get("memory_max_mb", 0)):
-        return False
-    if not _in_range(m.disk_gb, rule.get("disk_min_gb", 0), rule.get("disk_max_gb", 0)):
-        return False
+    # Spec ranges (min/max per dimension). Missing dimension = unbounded.
+    spec = rule.get("spec") or {}
+    for dim, field in _SPEC_FIELDS.items():
+        rng = spec.get(dim) or {}
+        lo = rng.get("min", 0) or 0
+        hi = rng.get("max", 0) or 0
+        if not lo and not hi:
+            continue
+        value = float(_get(m, field, 0) or 0)
+        if not _in_range(value, lo, hi):
+            return False
 
-    # Bandwidth: any / min / exact
-    mode = rule.get("bandwidth_mode", "any")
-    bw = rule.get("bandwidth_mbps", 0)
-    if mode == "min" and bw and m.bandwidth_mbps < bw:
-        return False
-    if mode == "exact" and bw and m.bandwidth_mbps != bw:
-        return False
+    # Renewal price ceiling on the chosen cycle (monthly|yearly).
+    price_max = rule.get("price_max", 0) or 0
+    if price_max:
+        price = _rule_price(rule, m)
+        if price is None or price > price_max:
+            return False
 
-    if rule.get("traffic_min_gb", 0) and (m.traffic_gb or 0) < rule["traffic_min_gb"]:
-        return False
-
-    # Price ceilings: rule-level and page-level (fen, monthly).
-    rule_cap = rule.get("price_max_monthly", 0)
-    if rule_cap and m.price_monthly and m.price_monthly > rule_cap:
-        return False
-    if page_max_price and m.price_monthly and m.price_monthly > page_max_price:
-        return False
-
-    areas = rule.get("areas") or []
-    if areas and m.area not in areas:
-        return False
+    # Sale-price ceiling (independent of renewal cycle). Only some machines
+    # carry a distinct sale price; when the cap is set and there's no sale
+    # price the machine can't satisfy it.
+    sale_max = rule.get("sale_price_max", 0) or 0
+    if sale_max:
+        sale = _get(m, "sale_price", None)
+        if sale in (None, "") or float(sale) > sale_max:
+            return False
 
     return True
 
 
-def rank_candidates(machines: list[MachineSnapshot], weights: dict) -> list[MachineSnapshot]:
-    """Sort by price ascending, then hardware score descending."""
+def rank_candidates(
+    machines: list[MachineSnapshot], score_rules: dict | None
+) -> list[MachineSnapshot]:
+    """Sort matched machines by hardware score DESCENDING.
+
+    Scoring is decoupled from buying: the page's scoring rules (the same ones
+    that drive the 评分 column) decide ordering, so the highest-scoring machine
+    is bought first. Ties keep a stable order (cheapest monthly as tiebreak).
+    """
     return sorted(
         machines,
-        key=lambda m: (m.price_monthly or 0, -hardware_score(m, weights)),
+        key=lambda m: (
+            compute_score(m, score_rules),
+            -(_get(m, "price_monthly", 0) or 0),
+        ),
+        reverse=True,
     )
 
 

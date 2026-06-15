@@ -97,23 +97,25 @@ export interface PriceHistory {
   fetched_at: string
 }
 
+// One spec dimension's range (min/max). 0 on a side = unbounded there.
+// memory range is in MB (matches the stored field); others map 1:1.
+export interface SpecRange {
+  min: number
+  max: number
+}
+export type SpecDimension = 'cpu' | 'memory' | 'disk' | 'bandwidth' | 'traffic'
+export type RuleSpec = Record<SpecDimension, SpecRange>
+
 export interface BuyRule {
   id: string
   enabled: boolean
   label: string
-  name_keyword: string
-  cpu_min: number
-  cpu_max: number
-  memory_min_mb: number
-  memory_max_mb: number
-  disk_min_gb: number
-  disk_max_gb: number
-  bandwidth_mode: 'any' | 'min' | 'exact'
-  bandwidth_mbps: number
-  traffic_min_gb: number
-  price_max_monthly: number   // fen
-  areas: string[]
-  max_per_rule: number
+  tags_include: string[]        // match ANY substring in name/node; [] = any
+  spec: RuleSpec                // cpu/memory/disk/bandwidth/traffic min-max
+  price_type: 'monthly' | 'yearly'
+  price_max: number             // fen; cap on chosen-cycle renewal price; 0 = no limit
+  sale_price_max: number        // fen; cap on sale price; 0 = no limit
+  max_buy: number               // per-rule buy cap; 0 = unlimited
 }
 
 export interface PageBuyConfig {
@@ -121,7 +123,7 @@ export interface PageBuyConfig {
   refresh_interval: number     // seconds
   max_total_per_run: number
   max_total_daily: number
-  max_price: number            // fen; 0 = no cap
+  max_price: number            // fen; legacy page cap, retained for back-compat
   cycle: number
   on_limit_reached: 'stop' | 'keep_watching'
   rules: BuyRule[]

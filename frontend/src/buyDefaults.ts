@@ -1,25 +1,28 @@
-import type { BuyRule, PageBuyConfig } from './api'
+import type { BuyRule, PageBuyConfig, RuleSpec } from './api'
 
 // Mirror of backend config.rule_defaults() / page_buy_defaults() so the UI can
 // create new rules and fall back gracefully when a page config is missing.
+export function specDefaults(): RuleSpec {
+  return {
+    cpu: { min: 0, max: 0 },
+    memory: { min: 0, max: 0 },
+    disk: { min: 0, max: 0 },
+    bandwidth: { min: 0, max: 0 },
+    traffic: { min: 0, max: 0 },
+  }
+}
+
 export function ruleDefaults(): BuyRule {
   return {
     id: '',
     enabled: true,
     label: '',
-    name_keyword: '',
-    cpu_min: 0,
-    cpu_max: 0,
-    memory_min_mb: 0,
-    memory_max_mb: 0,
-    disk_min_gb: 0,
-    disk_max_gb: 0,
-    bandwidth_mode: 'any',
-    bandwidth_mbps: 0,
-    traffic_min_gb: 0,
-    price_max_monthly: 0,
-    areas: [],
-    max_per_rule: 1,
+    tags_include: [],
+    spec: specDefaults(),
+    price_type: 'monthly',
+    price_max: 0,
+    sale_price_max: 0,
+    max_buy: 1,
   }
 }
 
