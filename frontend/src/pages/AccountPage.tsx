@@ -91,7 +91,11 @@ export function AccountPage() {
       const res = await api.checkin()
       const msg = res.status_msg || '签到完成'
       if (res.status_code === 0) {
-        message.success(msg)
+        if (res.ak_coin_earned) {
+          message.success(`✅ 签到成功！获得 ${res.ak_coin_earned} AK 币`)
+        } else {
+          message.success(msg)
+        }
       } else {
         message.info(msg)
       }
@@ -149,7 +153,7 @@ export function AccountPage() {
           >
             {checkedInToday(profile?.last_checkin_time) ? '今日已签到' : '签到'}
           </Button>
-          <Button icon={<ReloadOutlined />} loading={refreshing} onClick={refresh}>刷新</Button>
+          <Button type="primary" ghost icon={<ReloadOutlined />} loading={refreshing} onClick={refresh}>强制刷新</Button>
         </Space>
       </div>
 

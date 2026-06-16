@@ -39,10 +39,15 @@ _poll_interval: int = 60  # seconds, updated from DB on startup
 
 
 def _reschedule_page_jobs(settings: dict) -> None:
-    """(Re)schedule one poll job per page using its independent interval."""
+    """(Re)schedule one poll job per page using its independent interval.
+    When random_jitter_enabled, the interval is multiplied by random(0.8, 1.2)."""
+    import random
+    jitter = settings.get("random_jitter_enabled", True)
     for page in PAGE_KEYS:
         cfg = settings.get(f"{page}_buy") or {}
-        interval = max(5, int(cfg.get("refresh_interval", 60) or 60))
+        base = max(5, int(cfg.get("refresh_interval", 60) or 60))
+        interval = int(base * random.uniform(0.8, 1.2)) if jitter else base
+        interval = max(5, interval)
         job_id = f"poll_{page}"
         if scheduler.get_job(job_id):
             scheduler.reschedule_job(job_id, trigger="interval", seconds=interval)
@@ -51,7 +56,8 @@ def _reschedule_page_jobs(settings: dict) -> None:
                 run_page_poll, "interval", seconds=interval, id=job_id,
                 args=[page], next_run_time=datetime.now(),
             )
-        logger.info("page poller %s scheduled interval=%ds", page, interval)
+        logger.info("page poller %s scheduled interval=%ds (base=%ds, jitter=%s)",
+                    page, interval, base, jitter)
 
 
 async def _run_account_poll() -> None:
@@ -75,8 +81,13 @@ async def _run_account_poll() -> None:
 
 
 def _reschedule_account_job(settings: dict) -> None:
-    """(Re)schedule the account-cache poll using account_refresh_interval."""
-    interval = max(30, int(settings.get("account_refresh_interval", 300) or 300))
+    """(Re)schedule the account-cache poll using account_refresh_interval.
+    When random_jitter_enabled, the interval is multiplied by random(0.8, 1.2)."""
+    import random
+    base = max(30, int(settings.get("account_refresh_interval", 300) or 300))
+    jitter = settings.get("random_jitter_enabled", True)
+    interval = int(base * random.uniform(0.8, 1.2)) if jitter else base
+    interval = max(30, interval)
     job_id = "poll_account"
     if scheduler.get_job(job_id):
         scheduler.reschedule_job(job_id, trigger="interval", seconds=interval)
@@ -85,7 +96,8 @@ def _reschedule_account_job(settings: dict) -> None:
             _run_account_poll, "interval", seconds=interval, id=job_id,
             next_run_time=datetime.now(),
         )
-    logger.info("account poller scheduled interval=%ds", interval)
+    logger.info("account poller scheduled interval=%ds (base=%ds, jitter=%s)",
+                interval, base, jitter)
 
 
 @asynccontextmanager
@@ -153,6 +165,9 @@ async def _daily_checkin() -> None:
 
     async with SessionLocal() as db:
         settings = await get_all_settings(db)
+    if not settings.get("auto_checkin_enabled", True):
+        logger.info("daily_checkin: auto-checkin is disabled, skipping")
+        return
     token = settings.get("akile_token") or ""
     if not token:
         logger.info("daily_checkin: no token configured, skipping")
@@ -330,9 +345,21 @@ async def get_app_log(lines: int = 500, _: str = Depends(require_auth)):
 
 @app.post("/api/poll/trigger")
 async def trigger_poll(_: str = Depends(require_auth)):
-    """Manually trigger a poll cycle."""
+    """Manually trigger a full poll cycle (all pages)."""
     asyncio.create_task(run_poll())
     return {"status": "triggered"}
+
+
+@app.post("/api/poll/trigger/{page}")
+async def trigger_page_poll(page: str, _: str = Depends(require_auth)):
+    """Manually force-refresh a single page (cloud / ls / secondhand / account)."""
+    if page == "account":
+        asyncio.create_task(_run_account_poll())
+    elif page in PAGE_KEYS:
+        asyncio.create_task(run_page_poll(page))
+    else:
+        raise HTTPException(400, f"Unknown page: {page}")
+    return {"status": "triggered", "page": page}
 
 
 @app.post("/api/token/refresh")
@@ -491,13 +518,20 @@ async def refresh_account(_: str = Depends(require_auth), db: AsyncSession = Dep
 
 @app.post("/api/checkin")
 async def manual_checkin(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
-    """Manually trigger the daily AK-coin checkin, returning Akile's raw response."""
+    """Manually trigger the daily AK-coin checkin, returning Akile's raw response
+    plus parsed ak_coin_earned from the status_msg."""
     settings = await get_all_settings(db)
     token = settings.get("akile_token", "")
     if not token:
         return {"error": "No token configured"}
     try:
-        return await akile_client.checkin(token)
+        result = await akile_client.checkin(token)
+        status_msg = result.get("status_msg", "")
+        # Parse coin amount from messages like "签到成功，获得 5 AK 币" or "签到成功，获得5AK"
+        import re
+        m = re.search(r'(\d+\.?\d*)', status_msg)
+        result["ak_coin_earned"] = float(m.group(1)) if m else None
+        return result
     except httpx.HTTPError as e:
         return {"error": str(e)}
 

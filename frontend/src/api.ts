@@ -204,6 +204,8 @@ export interface AppSettings {
   score_w_traffic: number
   // Logging
   log_level: 'INFO' | 'DEBUG'
+  auto_checkin_enabled: boolean
+  random_jitter_enabled: boolean
   // System
   event_retention_days: number
   timezone: string
@@ -235,6 +237,9 @@ export const api = {
 
   triggerPoll: () =>
     http.post('/api/poll/trigger').then(r => r.data),
+
+  triggerPagePoll: (page: string) =>
+    http.post(`/api/poll/trigger/${page}`).then(r => r.data),
 
   buyMachine: (plan_id: string) =>
     http.post(`/api/buy/${plan_id}`).then(r => r.data),
@@ -277,7 +282,7 @@ export const api = {
 
   // --- Checkin ---
   checkin: () =>
-    http.post<{ status_code: number; status_msg: string }>('/api/checkin').then(r => r.data),
+    http.post<{ status_code: number; status_msg: string; ak_coin_earned?: number }>('/api/checkin').then(r => r.data),
 }
 
 export interface AccountProfile {
