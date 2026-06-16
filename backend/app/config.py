@@ -18,8 +18,9 @@ DEFAULTS: dict[str, Any] = {
     # --- API & connection ---
     "akile_token": "",
     "refresh_interval": 60,          # seconds
-    "auto_refresh_token": True,       # keep token alive automatically
-    "refresh_margin_hours": 6,        # refresh when validity drops below this
+    "auto_refresh_token": True,         # keep token alive automatically
+    "refresh_margin_min_seconds": 60,   # min random refresh margin (seconds)
+    "refresh_margin_max_seconds": 21600, # max random refresh margin (seconds, default 6h)
     "request_timeout": 15,            # seconds per upstream request
     "request_retries": 2,             # retries on transient upstream failure
     "account_refresh_interval": 300,  # seconds; how often the account page cache (balance/servers) is refreshed
