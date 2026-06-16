@@ -369,9 +369,9 @@ async def akile_login(body: AkileLoginBody, _: str = Depends(require_auth),
     if not body.username or not body.password:
         raise HTTPException(status_code=400, detail="用户名和密码不能为空")
 
-    login_payload: dict = {"username": body.username, "password": body.password}
+    login_payload: dict = {"email": body.username, "password": body.password}
     if body.ga_code.strip():
-        login_payload["ga_code"] = body.ga_code.strip()
+        login_payload["ga"] = body.ga_code.strip()
 
     headers = {
         "Origin": "https://akile.ai",
@@ -404,12 +404,12 @@ async def akile_login(body: AkileLoginBody, _: str = Depends(require_auth),
     status_code = data.get("status_code")
     status_msg = data.get("status_msg", "")
 
-    if status_code != 0:
-        # Detect 2FA requirement — return need_2fa instead of error
-        # so the frontend can show a modal (only when ga_code was NOT provided)
-        if not body.ga_code.strip() and _is_2fa_required(status_msg):
-            return {"need_2fa": True, "message": status_msg or "请输入二次验证码"}
+    # Detect 2FA requirement BEFORE checking status_code — Akile returns
+    # status_code=0 even when 2FA is pending (only status_msg indicates it).
+    if not body.ga_code.strip() and _is_2fa_required(status_msg):
+        return {"need_2fa": True, "message": status_msg or "请输入二次验证码"}
 
+    if status_code != 0:
         # Map known error messages to user-friendly hints
         detail = status_msg or "登录失败"
         if "密码" in detail:
