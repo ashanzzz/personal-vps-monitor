@@ -143,7 +143,8 @@ export interface AppSettings {
   akile_token: string
   refresh_interval: number
   auto_refresh_token: boolean
-  refresh_margin_hours: number
+  refresh_margin_min_seconds: number
+  refresh_margin_max_seconds: number
   request_timeout: number
   request_retries: number
   account_refresh_interval: number
@@ -245,7 +246,7 @@ export const api = {
     http.post<{ status: string }>('/api/token/refresh').then(r => r.data),
 
   akileLogin: (username: string, password: string, ga_code?: string) =>
-    http.post<TokenStatus>('/api/akile-login', { username, password, ga_code: ga_code || '' }).then(r => r.data),
+    http.post<TokenStatus & { need_2fa?: boolean; message?: string }>('/api/akile-login', { username, password, ga_code: ga_code || '' }).then(r => r.data),
 
   // --- Auth ---
   authStatus: () =>

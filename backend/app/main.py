@@ -351,16 +351,20 @@ async def get_token_status(_: str = Depends(require_auth)):
 class AkileLoginBody(BaseModel):
     username: str
     password: str
-    ga_code: str = ""  # optional 2FA code
+    ga_code: str = ""  # optional 2FA code (step 2 only)
 
 
 @app.post("/api/akile-login")
 async def akile_login(body: AkileLoginBody, _: str = Depends(require_auth),
                       db: AsyncSession = Depends(get_db)):
-    """Log into Akile with username/password (+ optional 2FA) and save the token.
+    """Log into Akile with username/password (+ optional 2FA code).
 
-    Calls Akile's /api/v1/user/login, extracts the JWT from the response,
-    persists it as the akile_token setting, and returns the new token status.
+    Two-step flow when 2FA is enabled:
+      1. POST with username+password only → if Akile requires 2FA, returns
+         {need_2fa: true, message: "..."} so the frontend can show a modal.
+      2. POST again with username+password+ga_code → completes login.
+
+    On success the JWT is persisted as the akile_token setting.
     """
     if not body.username or not body.password:
         raise HTTPException(status_code=400, detail="用户名和密码不能为空")
@@ -401,12 +405,15 @@ async def akile_login(body: AkileLoginBody, _: str = Depends(require_auth),
     status_msg = data.get("status_msg", "")
 
     if status_code != 0:
+        # Detect 2FA requirement — return need_2fa instead of error
+        # so the frontend can show a modal (only when ga_code was NOT provided)
+        if not body.ga_code.strip() and _is_2fa_required(status_msg):
+            return {"need_2fa": True, "message": status_msg or "请输入二次验证码"}
+
         # Map known error messages to user-friendly hints
         detail = status_msg or "登录失败"
         if "密码" in detail:
             detail = "密码错误，请检查后重试"
-        elif "验证" in detail or "2FA" in detail or "GA" in detail.upper():
-            detail = f"需要二次验证码（GA code）：{detail}"
         elif "用户" in detail or "不存在" in detail:
             detail = "用户名不存在"
         raise HTTPException(status_code=400, detail=detail)
@@ -424,6 +431,14 @@ async def akile_login(body: AkileLoginBody, _: str = Depends(require_auth),
 
     # Return fresh token status
     return await token_status()
+
+
+def _is_2fa_required(msg: str) -> bool:
+    """Heuristic: does the Akile status_msg indicate 2FA is needed?"""
+    if not msg:
+        return False
+    keywords = ["验证", "2FA", "GA", "ga", "两步", "动态码", "authenticator", "totp"]
+    return any(kw in msg for kw in keywords)
 
 
 @app.get("/api/account")

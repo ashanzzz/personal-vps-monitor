@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   Card, Form, Input, InputNumber, Switch, Select, Button, Collapse,
-  Divider, message, Typography, Slider, Radio, TimePicker, Space, Affix,
+  Divider, message, Typography, Slider, Radio, TimePicker, Space, Affix, Modal,
 } from 'antd'
 import {
   SaveOutlined, SendOutlined, ReloadOutlined, CheckCircleTwoTone,
@@ -26,6 +26,12 @@ function fmtLeft(sec: number): string {
   const h = sec / 3600
   if (h >= 1) return `${h.toFixed(1)} 小时`
   return `${Math.round(sec / 60)} 分钟`
+}
+
+function fmtSeconds(sec: number): string {
+  if (sec < 60) return `${sec} 秒`
+  if (sec < 3600) return `${Math.round(sec / 60)} 分钟`
+  return `${(sec / 3600).toFixed(1)} 小时`
 }
 
 function TokenStatusBadge({ status }: { status: TokenStatus | null }) {
@@ -59,8 +65,10 @@ export function SettingsPage({ settings, onSaved }: Props) {
   const [version, setVersion] = useState<VersionInfo | null>(null)
   const [akileUsername, setAkileUsername] = useState('')
   const [akilePassword, setAkilePassword] = useState('')
-  const [akileGaCode, setAkileGaCode] = useState('')
   const [loggingIn, setLoggingIn] = useState(false)
+  const [_2faPending, set2faPending] = useState<{ username: string; password: string } | null>(null)
+  const [_2faCode, set2faCode] = useState('')
+  const [_2faSubmitting, set2faSubmitting] = useState(false)
 
   const loadTokenStatus = useCallback(async () => {
     try {
@@ -77,6 +85,10 @@ export function SettingsPage({ settings, onSaved }: Props) {
         watched_plans: (settings.watched_plans ?? []).join('\n'),
         dnd_start: settings.dnd_start ? dayjs(settings.dnd_start, 'HH:mm') : null,
         dnd_end: settings.dnd_end ? dayjs(settings.dnd_end, 'HH:mm') : null,
+        refresh_margin_range: [
+          settings.refresh_margin_min_seconds ?? 60,
+          settings.refresh_margin_max_seconds ?? 21600,
+        ],
       })
     }
   }, [settings, form])
@@ -96,7 +108,10 @@ export function SettingsPage({ settings, onSaved }: Props) {
         watched_plans: splitLines(vals.watched_plans),
         dnd_start: vals.dnd_start ? dayjs(vals.dnd_start).format('HH:mm') : '23:00',
         dnd_end: vals.dnd_end ? dayjs(vals.dnd_end).format('HH:mm') : '08:00',
+        refresh_margin_min_seconds: vals.refresh_margin_range?.[0] ?? 60,
+        refresh_margin_max_seconds: vals.refresh_margin_range?.[1] ?? 21600,
       }
+      delete (payload as any).refresh_margin_range
       const saved = await api.saveSettings(payload)
       onSaved(saved)
       message.success('设置已保存')
@@ -133,16 +148,42 @@ export function SettingsPage({ settings, onSaved }: Props) {
     }
     setLoggingIn(true)
     try {
-      const status = await api.akileLogin(akileUsername, akilePassword, akileGaCode || undefined)
+      const status = await api.akileLogin(akileUsername, akilePassword)
+      if ((status as any).need_2fa) {
+        // 2FA required — show modal
+        set2faPending({ username: akileUsername, password: akilePassword })
+        set2faCode('')
+        return
+      }
       setTokenStatus(status)
       message.success('登录成功！Token 已自动保存')
       setAkilePassword('')
-      setAkileGaCode('')
       loadTokenStatus()
     } catch (e: any) {
       message.error(e?.response?.data?.detail ?? '登录失败')
     } finally {
       setLoggingIn(false)
+    }
+  }
+
+  const submit2fa = async () => {
+    if (!_2faPending || !_2faCode.trim()) {
+      message.warning('请输入二次验证码')
+      return
+    }
+    set2faSubmitting(true)
+    try {
+      const status = await api.akileLogin(_2faPending.username, _2faPending.password, _2faCode.trim())
+      setTokenStatus(status)
+      message.success('登录成功！Token 已自动保存')
+      setAkilePassword('')
+      set2faPending(null)
+      set2faCode('')
+      loadTokenStatus()
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail ?? '验证失败')
+    } finally {
+      set2faSubmitting(false)
     }
   }
 
@@ -213,14 +254,6 @@ export function SettingsPage({ settings, onSaved }: Props) {
                       style={{ width: 200 }}
                       autoComplete="current-password"
                     />
-                    <Input
-                      placeholder="二次验证码（如有）"
-                      value={akileGaCode}
-                      onChange={e => setAkileGaCode(e.target.value)}
-                      style={{ width: 160 }}
-                      maxLength={6}
-                      autoComplete="one-time-code"
-                    />
                   </Space>
                   <Button
                     type="primary"
@@ -254,10 +287,26 @@ export function SettingsPage({ settings, onSaved }: Props) {
             <Form.Item label="自动续期" name="auto_refresh_token" valuePropName="checked" tooltip="后端拿到首个 Token 后自动续命，无需重新登录">
               <Switch />
             </Form.Item>
-            <Form.Item label="提前续期阈值 (小时)" name="refresh_margin_hours">
-              <InputNumber min={1} max={23} style={{ width: 120 }} />
-            </Form.Item>
           </Space>
+
+          <Form.Item
+            label={<span>提前续期随机范围 <Text type="secondary" style={{ fontSize: 12 }}>每次检查时在该范围内随机取一个值，更自然不易被识别</Text></span>}
+            name="refresh_margin_range"
+          >
+            <Slider
+              range
+              min={60}
+              max={21600}
+              step={60}
+              marks={{
+                60: '1 分钟',
+                3600: '1 小时',
+                10800: '3 小时',
+                21600: '6 小时',
+              }}
+              tooltip={{ formatter: (v) => fmtSeconds(v ?? 0) }}
+            />
+          </Form.Item>
 
           <Form.Item
             label={<span>刷新间隔 (秒)<Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>建议 30–300 秒，太短容易触发限频</Text></span>}
@@ -462,6 +511,36 @@ export function SettingsPage({ settings, onSaved }: Props) {
           </div>
         </Affix>
       </Form>
+
+      <Modal
+        title="二次验证"
+        open={_2faPending !== null}
+        onCancel={() => { set2faPending(null); setLoggingIn(false) }}
+        footer={[
+          <Button key="cancel" onClick={() => { set2faPending(null); setLoggingIn(false) }}>
+            取消
+          </Button>,
+          <Button key="submit" type="primary" loading={_2faSubmitting} onClick={submit2fa}>
+            验证
+          </Button>,
+        ]}
+        destroyOnClose
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Text type="secondary">
+            Akile 要求二次验证，请输入你的验证器 App 中的 6 位动态码：
+          </Text>
+        </div>
+        <Input
+          placeholder="6 位验证码"
+          value={_2faCode}
+          onChange={e => set2faCode(e.target.value)}
+          maxLength={6}
+          autoComplete="one-time-code"
+          style={{ width: 200 }}
+          onPressEnter={submit2fa}
+        />
+      </Modal>
 
       <ChangePasswordCard />
     </div>

@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import random
 import time
 
 from . import akile_client as api
@@ -27,8 +28,10 @@ from .notify import send_custom
 
 logger = logging.getLogger(__name__)
 
-# Refresh when the token has this much (or less) validity remaining.
-REFRESH_MARGIN_SECONDS = 6 * 3600  # 6 hours
+# Refresh margin range (seconds). Each check picks a random value in this range
+# so the refresh timing appears more natural to the upstream API.
+DEFAULT_MARGIN_MIN = 60        # 1 minute
+DEFAULT_MARGIN_MAX = 6 * 3600  # 6 hours
 
 RELOGIN_HINT = (
     "请打开 https://akile.ai/console/pushshop 登录后，F12 → Console 执行 "
@@ -152,9 +155,18 @@ async def ensure_fresh() -> None:
         return
 
     try:
-        margin = int(settings.get("refresh_margin_hours", 6)) * 3600
+        margin_min = int(settings.get("refresh_margin_min_seconds", DEFAULT_MARGIN_MIN))
+        margin_max = int(settings.get("refresh_margin_max_seconds", DEFAULT_MARGIN_MAX))
     except (TypeError, ValueError):
-        margin = REFRESH_MARGIN_SECONDS
+        margin_min = DEFAULT_MARGIN_MIN
+        margin_max = DEFAULT_MARGIN_MAX
+
+    # Clamp and ensure min <= max
+    margin_min = max(60, min(margin_min, 23 * 3600))
+    margin_max = max(margin_min, min(margin_max, 24 * 3600))
+
+    # Pick a random margin within the range for natural-looking timing
+    margin = random.randint(margin_min, margin_max)
 
     left = _seconds_left(token)
     if left == -1:
