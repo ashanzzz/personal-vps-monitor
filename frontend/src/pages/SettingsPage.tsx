@@ -28,10 +28,11 @@ function fmtLeft(sec: number): string {
   return `${Math.round(sec / 60)} 分钟`
 }
 
-function fmtSeconds(sec: number): string {
-  if (sec < 60) return `${sec} 秒`
-  if (sec < 3600) return `${Math.round(sec / 60)} 分钟`
-  return `${(sec / 3600).toFixed(1)} 小时`
+function fmtLeft(sec: number): string {
+  if (sec <= 0) return '已过期'
+  const h = sec / 3600
+  if (h >= 1) return `${h.toFixed(1)} 小时`
+  return `${Math.round(sec / 60)} 分钟`
 }
 
 function TokenStatusBadge({ status }: { status: TokenStatus | null }) {
@@ -85,10 +86,8 @@ export function SettingsPage({ settings, onSaved }: Props) {
         watched_plans: (settings.watched_plans ?? []).join('\n'),
         dnd_start: settings.dnd_start ? dayjs(settings.dnd_start, 'HH:mm') : null,
         dnd_end: settings.dnd_end ? dayjs(settings.dnd_end, 'HH:mm') : null,
-        refresh_margin_range: [
-          settings.refresh_margin_min_seconds ?? 60,
-          settings.refresh_margin_max_seconds ?? 21600,
-        ],
+        refresh_margin_min: settings.refresh_margin_min_seconds ?? 60,
+        refresh_margin_max: settings.refresh_margin_max_seconds ?? 21600,
       })
     }
   }, [settings, form])
@@ -108,10 +107,9 @@ export function SettingsPage({ settings, onSaved }: Props) {
         watched_plans: splitLines(vals.watched_plans),
         dnd_start: vals.dnd_start ? dayjs(vals.dnd_start).format('HH:mm') : '23:00',
         dnd_end: vals.dnd_end ? dayjs(vals.dnd_end).format('HH:mm') : '08:00',
-        refresh_margin_min_seconds: vals.refresh_margin_range?.[0] ?? 60,
-        refresh_margin_max_seconds: vals.refresh_margin_range?.[1] ?? 21600,
+        refresh_margin_min_seconds: vals.refresh_margin_min ?? 60,
+        refresh_margin_max_seconds: vals.refresh_margin_max ?? 21600,
       }
-      delete (payload as any).refresh_margin_range
       const saved = await api.saveSettings(payload)
       onSaved(saved)
       message.success('设置已保存')
@@ -290,29 +288,68 @@ export function SettingsPage({ settings, onSaved }: Props) {
           </Space>
 
           <Form.Item
-            label={<span>提前续期随机范围 <Text type="secondary" style={{ fontSize: 12 }}>每次检查时在该范围内随机取一个值，更自然不易被识别</Text></span>}
-            name="refresh_margin_range"
+            label={<span>提前续期时间窗口 <Text type="secondary" style={{ fontSize: 12 }}>Token 到期前多少秒到多少秒之间随机续期（避免固定时间被识别）</Text></span>}
+            style={{ marginBottom: 4 }}
           >
-            <Slider
-              range
-              min={60}
-              max={21600}
-              step={60}
-              marks={{
-                60: '1 分钟',
-                3600: '1 小时',
-                10800: '3 小时',
-                21600: '6 小时',
-              }}
-              tooltip={{ formatter: (v) => fmtSeconds(v ?? 0) }}
-            />
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <div>
+                <Text type="secondary" style={{ fontSize: 12 }}>快捷选择</Text>
+                <Space wrap style={{ marginTop: 4, display: 'flex' }}>
+                  {[
+                    { label: '1 分钟', min: 60, max: 60 },
+                    { label: '5 分钟', min: 300, max: 300 },
+                    { label: '30 分钟', min: 1800, max: 1800 },
+                    { label: '1 小时', min: 60, max: 3600 },
+                    { label: '3 小时', min: 60, max: 10800 },
+                    { label: '6 小时', min: 60, max: 21600 },
+                  ].map(p => (
+                    <Button
+                      key={p.label}
+                      size="small"
+                      onClick={() => form.setFieldsValue({ refresh_margin_min: p.min, refresh_margin_max: p.max })}
+                    >{p.label}</Button>
+                  ))}
+                </Space>
+              </div>
+              <Space wrap>
+                <Form.Item name="refresh_margin_min" noStyle>
+                  <InputNumber
+                    min={60}
+                    max={21600}
+                    step={60}
+                    addonBefore="最小"
+                    addonAfter="秒"
+                    style={{ width: 160 }}
+                    placeholder="60"
+                  />
+                </Form.Item>
+                <Form.Item name="refresh_margin_max" noStyle>
+                  <InputNumber
+                    min={60}
+                    max={21600}
+                    step={60}
+                    addonBefore="最大"
+                    addonAfter="秒"
+                    style={{ width: 160 }}
+                    placeholder="21600"
+                  />
+                </Form.Item>
+              </Space>
+            </Space>
           </Form.Item>
 
           <Form.Item
-            label={<span>刷新间隔 (秒)<Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>建议 30–300 秒，太短容易触发限频</Text></span>}
+            label={<span>页面轮询间隔 (秒)<Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>每页（新机VPS / 轻量 / 二手）各自独立轮询 Akile 的间隔；建议 30–300 秒，太短触发限频</Text></span>}
             name="refresh_interval"
           >
             <Slider min={15} max={600} step={5} marks={{ 30: '30s', 60: '1min', 300: '5min', 600: '10min' }} />
+          </Form.Item>
+
+          <Form.Item
+            label={<span>账户信息刷新间隔 (秒)<Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>「我的账户」页面（余额 / 服务器列表）从缓存读取，按此间隔后台刷新；默认 300 秒</Text></span>}
+            name="account_refresh_interval"
+          >
+            <Slider min={30} max={3600} step={30} marks={{ 60: '1min', 300: '5min', 1800: '30min', 3600: '60min' }} />
           </Form.Item>
 
           <Collapse ghost items={[{
@@ -340,13 +377,6 @@ export function SettingsPage({ settings, onSaved }: Props) {
           </Space>
           <Form.Item label="轻量机监控区域" name="ls_regions">
             <Select mode="multiple" options={LS_REGION_OPTIONS} placeholder="默认全部" />
-          </Form.Item>
-
-          <Form.Item
-            label={<span>我的账户刷新间隔 (秒)<Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>账户页（余额 / 服务器）从缓存读取，按此间隔后台刷新；默认 300 秒</Text></span>}
-            name="account_refresh_interval"
-          >
-            <Slider min={30} max={3600} step={30} marks={{ 60: '1min', 300: '5min', 1800: '30min', 3600: '60min' }} />
           </Form.Item>
 
           <Divider style={{ margin: '12px 0' }}>筛选条件（仅影响推送，面板始终展示全部）</Divider>
