@@ -244,6 +244,9 @@ export const api = {
   refreshToken: () =>
     http.post<{ status: string }>('/api/token/refresh').then(r => r.data),
 
+  akileLogin: (username: string, password: string, ga_code?: string) =>
+    http.post<TokenStatus>('/api/akile-login', { username, password, ga_code: ga_code || '' }).then(r => r.data),
+
   // --- Auth ---
   authStatus: () =>
     http.get<{ initialized: boolean }>('/api/auth/status').then(r => r.data),

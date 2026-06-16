@@ -312,6 +312,84 @@ async def get_token_status(_: str = Depends(require_auth)):
     return await token_status()
 
 
+class AkileLoginBody(BaseModel):
+    username: str
+    password: str
+    ga_code: str = ""  # optional 2FA code
+
+
+@app.post("/api/akile-login")
+async def akile_login(body: AkileLoginBody, _: str = Depends(require_auth),
+                      db: AsyncSession = Depends(get_db)):
+    """Log into Akile with username/password (+ optional 2FA) and save the token.
+
+    Calls Akile's /api/v1/user/login, extracts the JWT from the response,
+    persists it as the akile_token setting, and returns the new token status.
+    """
+    if not body.username or not body.password:
+        raise HTTPException(status_code=400, detail="用户名和密码不能为空")
+
+    login_payload: dict = {"username": body.username, "password": body.password}
+    if body.ga_code.strip():
+        login_payload["ga_code"] = body.ga_code.strip()
+
+    headers = {
+        "Origin": "https://akile.ai",
+        "Referer": "https://akile.ai/",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "Chrome/126.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=25) as c:
+            r = await c.post(
+                "https://api.akile.ai/api/v1/user/login",
+                json=login_payload,
+                headers=headers,
+            )
+            r.raise_for_status()
+            data = r.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Akile 登录接口返回错误 (HTTP {e.response.status_code})",
+        )
+    except httpx.RequestError:
+        raise HTTPException(status_code=502, detail="无法连接 Akile 登录接口")
+
+    status_code = data.get("status_code")
+    status_msg = data.get("status_msg", "")
+
+    if status_code != 0:
+        # Map known error messages to user-friendly hints
+        detail = status_msg or "登录失败"
+        if "密码" in detail:
+            detail = "密码错误，请检查后重试"
+        elif "验证" in detail or "2FA" in detail or "GA" in detail.upper():
+            detail = f"需要二次验证码（GA code）：{detail}"
+        elif "用户" in detail or "不存在" in detail:
+            detail = "用户名不存在"
+        raise HTTPException(status_code=400, detail=detail)
+
+    token = (data.get("data") or {}).get("token", "")
+    if not token or token.count(".") != 2:
+        raise HTTPException(
+            status_code=502,
+            detail=f"登录成功但未获取到有效 Token，响应：{status_msg}",
+        )
+
+    # Persist the new token
+    from .config import set_setting
+    await set_setting(db, "akile_token", token)
+
+    # Return fresh token status
+    return await token_status()
+
+
 @app.get("/api/account")
 async def get_account(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     """Return the cached account snapshot (profile + balance + own servers).

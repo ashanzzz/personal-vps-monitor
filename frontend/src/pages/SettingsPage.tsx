@@ -5,7 +5,7 @@ import {
 } from 'antd'
 import {
   SaveOutlined, SendOutlined, ReloadOutlined, CheckCircleTwoTone,
-  WarningTwoTone, CloseCircleTwoTone,
+  WarningTwoTone, CloseCircleTwoTone, LoginOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import type { AppSettings, TokenStatus, VersionInfo } from '../api'
@@ -57,6 +57,10 @@ export function SettingsPage({ settings, onSaved }: Props) {
   const [tokenStatus, setTokenStatus] = useState<TokenStatus | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [version, setVersion] = useState<VersionInfo | null>(null)
+  const [akileUsername, setAkileUsername] = useState('')
+  const [akilePassword, setAkilePassword] = useState('')
+  const [akileGaCode, setAkileGaCode] = useState('')
+  const [loggingIn, setLoggingIn] = useState(false)
 
   const loadTokenStatus = useCallback(async () => {
     try {
@@ -122,6 +126,26 @@ export function SettingsPage({ settings, onSaved }: Props) {
     }
   }
 
+  const akileLogin = async () => {
+    if (!akileUsername || !akilePassword) {
+      message.warning('请输入 Akile 用户名和密码')
+      return
+    }
+    setLoggingIn(true)
+    try {
+      const status = await api.akileLogin(akileUsername, akilePassword, akileGaCode || undefined)
+      setTokenStatus(status)
+      message.success('登录成功！Token 已自动保存')
+      setAkilePassword('')
+      setAkileGaCode('')
+      loadTokenStatus()
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail ?? '登录失败')
+    } finally {
+      setLoggingIn(false)
+    }
+  }
+
   const testTelegram = async () => {
     const vals = form.getFieldsValue()
     if (!vals.tg_bot_token || !vals.tg_chat_id) {
@@ -164,6 +188,66 @@ export function SettingsPage({ settings, onSaved }: Props) {
                 立即续期
               </Button>
             </Space>
+          </Form.Item>
+
+          <Collapse
+            ghost
+            style={{ marginBottom: 12 }}
+            items={[{
+              key: 'auto-login',
+              label: '自动登录获取 Token（用户名 + 密码）',
+              children: (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <Space wrap>
+                    <Input
+                      placeholder="Akile 用户名/邮箱"
+                      value={akileUsername}
+                      onChange={e => setAkileUsername(e.target.value)}
+                      style={{ width: 200 }}
+                      autoComplete="username"
+                    />
+                    <Input.Password
+                      placeholder="密码"
+                      value={akilePassword}
+                      onChange={e => setAkilePassword(e.target.value)}
+                      style={{ width: 200 }}
+                      autoComplete="current-password"
+                    />
+                    <Input
+                      placeholder="二次验证码（如有）"
+                      value={akileGaCode}
+                      onChange={e => setAkileGaCode(e.target.value)}
+                      style={{ width: 160 }}
+                      maxLength={6}
+                      autoComplete="one-time-code"
+                    />
+                  </Space>
+                  <Button
+                    type="primary"
+                    icon={<LoginOutlined />}
+                    loading={loggingIn}
+                    onClick={akileLogin}
+                    style={{ alignSelf: 'flex-start' }}
+                  >
+                    登录获取 Token
+                  </Button>
+                </div>
+              ),
+            }]}
+          />
+
+          <Form.Item label=" ">
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              💡 如何手动获取 Token？打开{' '}
+              <a href="https://akile.ai/console/pushshop" target="_blank" rel="noopener noreferrer">
+                akile.ai/console/pushshop
+              </a>{' '}
+              登录后，按 F12 打开开发者工具 → Console 标签页，输入：
+              <Text code copyable style={{ fontSize: 12, marginLeft: 4 }}>
+                localStorage.getItem('akile-token')
+              </Text>
+              ，复制输出的值粘贴到上方 Token 输入框即可。
+            </Text>
           </Form.Item>
 
           <Space size="large" wrap>
