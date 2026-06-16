@@ -3,7 +3,6 @@ WebSocket connection manager – broadcast JSON messages to all connected client
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from typing import Any

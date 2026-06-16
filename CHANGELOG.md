@@ -2,6 +2,17 @@
 
 本项目遵循语义化版本。日期为发布日。
 
+## v0.9.0
+
+每日签到 + AK 币展示。
+
+### 新增
+- **后端每日自动签到**：`main.py` 新增 scheduler job `daily_checkin`，每天 08:01（Asia/Shanghai，跟随 `timezone` 设置）调 `akile_client.checkin(token)`；签到成功 / 今日已签均 info 日志，异常 warning。先 `ensure_fresh()` 保活 token 再签。
+- **手动签到接口**：新增 `POST /api/checkin`（需鉴权），手动触发签到并原样返回 akile 响应（成功 `status_code=0`，已签 `status_code=1`）。
+- **AK 币余额展示**：`poller.poll_account` 在抓 `GET /v1/user/info` 后额外调 `get_ak_coin_info(token)`，把 `ak_coin` 写入账户缓存 payload 的 profile 字段（独立降级，失败不影响其余账户数据）。`GET /api/account` 响应的 `profile.ak_coin` 随之返回。
+- **签到相关 API 客户端**：`akile_client.py` 新增 `BASE_AI = "https://api.akile.ai/api"` 及 `_ai_headers`，新增 `checkin()`（`GET /v1/user/Checkin`）与 `get_ak_coin_info()`（`GET /v1/user/index`）两方法。签到与 AK 币两端点强制走 akile.ai 主机（akilecloud.com 对此两端点高概率 401）。
+- **账户页 AK 币卡片 + 签到按钮**：账户页余额卡旁新增「AK 币」统计卡片（金币图标 + 数值 + 单位）；右上新增「签到」按钮，点击调 `api.checkin()` 并 toast 返回消息，成功后刷新账户数据；依据 `last_checkin_time` 判断今日是否已签，已签则按钮置灰显示「今日已签到」。
+
 ## v0.8.0
 
 数据库并发加固 + 二手全量分页 + 我的账户缓存 + 三页排序/列宽 + 评分系统 + 抢购规则化 + 高级筛选。

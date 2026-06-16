@@ -10,6 +10,10 @@ on:
         required: false
         default: 'latest'
 
+concurrency:
+  group: akile-build-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/akile-monitor
@@ -41,6 +45,7 @@ jobs:
           # Read version from backend/app/version.py (__version__ = "X.Y.Z")
           VER=$(grep -oP '__version__\s*=\s*"\K[^"]+' backend/app/version.py || echo "")
           BASE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          SHA_SHORT="$(echo "${{ github.sha }}" | cut -c1-7)"
           INPUT_TAG="${{ github.event.inputs.tag }}"
           if [ -n "$INPUT_TAG" ]; then
             # Manual dispatch: honour the requested tag, plus the version tag if available
@@ -51,6 +56,8 @@ jobs:
             TAGS="${BASE}:latest"
             if [ -n "$VER" ]; then TAGS="${TAGS},${BASE}:v${VER}"; fi
           fi
+          # Always add an immutable commit-SHA tag for rollback traceability
+          TAGS="${TAGS},${BASE}:sha-${SHA_SHORT}"
           echo "version=${VER}" >> $GITHUB_OUTPUT
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
           echo "Resolved tags: ${TAGS}"

@@ -7,6 +7,7 @@ from __future__ import annotations
 import httpx
 
 BASE = "https://api.akilecloud.com/api"
+BASE_AI = "https://api.akile.ai/api"
 TIMEOUT = 15
 
 # Token refresh uses a different host (the console API gateway).
@@ -16,6 +17,20 @@ REFRESH_TIMEOUT = 25
 
 def _headers(token: str) -> dict:
     return {"Authorization": token, "Content-Type": "application/json"}
+
+
+def _ai_headers(token: str) -> dict:
+    """Headers for endpoints that require the akile.ai host."""
+    return {
+        "Authorization": token,
+        "Origin": "https://akile.ai",
+        "Referer": "https://akile.ai/",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "Chrome/126.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/plain, */*",
+    }
 
 
 async def refresh_token(token: str) -> str:
@@ -129,3 +144,26 @@ async def get_my_servers(token: str) -> list[dict]:
         r.raise_for_status()
         data = r.json().get("data") or {}
         return data.get("list") or []
+
+
+async def checkin(token: str) -> dict:
+    """GET /v1/user/Checkin – daily sign-in for AK coins.
+
+    Returns the raw JSON response dict.  Successful: status_code=0,
+    already signed: status_code=1.
+    """
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        r = await c.get(f"{BASE_AI}/v1/user/Checkin", headers=_ai_headers(token))
+        r.raise_for_status()
+        return r.json()
+
+
+async def get_ak_coin_info(token: str) -> dict:
+    """GET /v1/user/index – account dashboard including AK coin balance.
+
+    Returns the data dict (contains ak_coin, money, vps_num, order_num, etc.).
+    """
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        r = await c.get(f"{BASE_AI}/v1/user/index", headers=_ai_headers(token))
+        r.raise_for_status()
+        return r.json().get("data") or {}
