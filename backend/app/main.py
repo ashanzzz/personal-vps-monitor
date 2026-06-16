@@ -369,9 +369,9 @@ async def akile_login(body: AkileLoginBody, _: str = Depends(require_auth),
     if not body.username or not body.password:
         raise HTTPException(status_code=400, detail="用户名和密码不能为空")
 
-    login_payload: dict = {"email": body.username, "password": body.password}
+    login_payload: dict = {"email": body.username, "password": body.password, "token": ""}
     if body.ga_code.strip():
-        login_payload["ga"] = body.ga_code.strip()
+        login_payload["verifyCode"] = body.ga_code.strip()
 
     headers = {
         "Origin": "https://akile.ai",
