@@ -1,0 +1,21 @@
+name: Cleanup stale GHCR images
+
+on:
+  schedule:
+    - cron: "0 4 * * 0"  # Sundays 04:00 UTC
+  workflow_dispatch:
+
+permissions:
+  packages: write
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete untagged container versions older than 30 days
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: akile-monitor
+          package-type: container
+          min-versions-to-keep: 10
+          delete-only-untagged-versions: true

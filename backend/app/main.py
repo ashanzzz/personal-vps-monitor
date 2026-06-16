@@ -101,8 +101,6 @@ async def lifespan(app: FastAPI):
     async with SessionLocal() as db:
         settings = await get_all_settings(db)
 
-    interval = settings.get("refresh_interval", 60)
-
     # If token is available in env (first run), save it
     env_token = os.getenv("AKILE_TOKEN", "")
     if env_token and not settings.get("akile_token"):
