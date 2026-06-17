@@ -133,11 +133,6 @@ export default function App() {
     }
   }, [])
 
-  const handleRefresh = useCallback(() => {
-    api.triggerPoll().catch(() => {})
-    setTimeout(loadAll, 1500)
-  }, [loadAll])
-
   // Not logged in → show the gatekeeper (login or first-time setup).
   if (!authed) {
     return (
@@ -244,17 +239,17 @@ export default function App() {
                   {page === 'account'  && <AccountPage />}
                   {page === 'cloud'  && (
                     <CategoryPage pageKey="cloud" machines={machines} settings={settings}
-                      onBuy={handleBuy} onRefresh={handleRefresh} onSaveBuyConfig={handleSaveBuyConfig}
+                      onBuy={handleBuy} onSaveBuyConfig={handleSaveBuyConfig}
                       onSaveColWidths={handleSaveColWidths} onSaveScoreRules={handleSaveScoreRules} />
                   )}
                   {page === 'lightweight'  && (
                     <CategoryPage pageKey="lightweight" machines={machines} settings={settings}
-                      onBuy={handleBuy} onRefresh={handleRefresh} onSaveBuyConfig={handleSaveBuyConfig}
+                      onBuy={handleBuy} onSaveBuyConfig={handleSaveBuyConfig}
                       onSaveColWidths={handleSaveColWidths} onSaveScoreRules={handleSaveScoreRules} />
                   )}
                   {page === 'secondhand'  && (
                     <CategoryPage pageKey="secondhand" machines={machines} settings={settings}
-                      onBuy={handleBuy} onRefresh={handleRefresh} onSaveBuyConfig={handleSaveBuyConfig}
+                      onBuy={handleBuy} onSaveBuyConfig={handleSaveBuyConfig}
                       onSaveColWidths={handleSaveColWidths} onSaveScoreRules={handleSaveScoreRules} />
                   )}
                   {page === 'alerts'   && <AlertHistory events={events} />}

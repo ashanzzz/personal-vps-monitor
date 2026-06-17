@@ -4,7 +4,7 @@ import { SyncOutlined, ShoppingCartOutlined, ColumnWidthOutlined, FilterOutlined
 import type { ColumnsType } from 'antd/es/table'
 import type { ResizeCallbackData } from 'react-resizable'
 import type { Machine, AppSettings, PageBuyConfig, ScoreRules } from '../api'
-import { fmtPrice, fmtMemory } from '../api'
+import { fmtPrice, fmtMemory, api } from '../api'
 import { BuyRulesEditor } from '../components/BuyRulesEditor'
 import { ScoreRulesEditor } from '../components/ScoreRulesEditor'
 import { ResizableTitle } from '../components/ResizableTitle'
@@ -47,7 +47,6 @@ interface Props {
   machines: Machine[]
   settings: AppSettings | null
   onBuy: (planId: string) => void
-  onRefresh: () => void
   onSaveBuyConfig: (buyKey: keyof AppSettings, cfg: PageBuyConfig) => void
   onSaveColWidths: (
     widthKey: 'col_widths_cloud' | 'col_widths_ls' | 'col_widths_secondhand',
@@ -59,7 +58,7 @@ interface Props {
   ) => void
 }
 
-export function CategoryPage({ pageKey, machines, settings, onBuy, onRefresh, onSaveBuyConfig, onSaveColWidths, onSaveScoreRules }: Props) {
+export function CategoryPage({ pageKey, machines, settings, onBuy, onSaveBuyConfig, onSaveColWidths, onSaveScoreRules }: Props) {
   const { modal } = AntApp.useApp()
   const meta = PAGE_MAP[pageKey]
   const [search, setSearch] = useState('')
@@ -295,7 +294,12 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onRefresh, on
           <span style={{ color: '#aaa', fontSize: 13 }}>仅有货</span>
           <Switch size="small" checked={availOnly} onChange={setAvailOnly} />
         </Space>
-        <Tooltip title="立即刷新"><Button icon={<SyncOutlined />} size="small" onClick={onRefresh} /></Tooltip>
+        <Tooltip title="立即强制刷新本页面数据">
+          <Button type="primary" icon={<SyncOutlined />} size="small"
+            onClick={() => api.triggerPagePoll(meta.category === 'vps' ? 'cloud' : meta.category === 'ls' ? 'ls' : meta.category)}>
+            强制刷新
+          </Button>
+        </Tooltip>
         <Button size="small" type={showAdvanced ? 'primary' : 'default'} icon={<FilterOutlined />}
           onClick={() => setShowAdvanced(v => !v)}>高级筛选</Button>
         <Tooltip title="恢复默认列宽">

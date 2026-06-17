@@ -28,13 +28,6 @@ function fmtLeft(sec: number): string {
   return `${Math.round(sec / 60)} 分钟`
 }
 
-function fmtLeft(sec: number): string {
-  if (sec <= 0) return '已过期'
-  const h = sec / 3600
-  if (h >= 1) return `${h.toFixed(1)} 小时`
-  return `${Math.round(sec / 60)} 分钟`
-}
-
 function TokenStatusBadge({ status }: { status: TokenStatus | null }) {
   if (!status) return <Text type="secondary">加载中…</Text>
   if (!status.configured) {
@@ -351,6 +344,17 @@ export function SettingsPage({ settings, onSaved }: Props) {
           >
             <Slider min={30} max={3600} step={30} marks={{ 60: '1min', 300: '5min', 1800: '30min', 3600: '60min' }} />
           </Form.Item>
+
+          <Space size="large" wrap>
+            <Form.Item label="📅 每日自动签到" name="auto_checkin_enabled" valuePropName="checked"
+              tooltip="开启后每天 08:01（中国时区）自动签到领取 AK 币">
+              <Switch />
+            </Form.Item>
+            <Form.Item label="🎲 随机化轮询间隔" name="random_jitter_enabled" valuePropName="checked"
+              tooltip="开启后轮询间隔在设定值附近随机波动（±20%），避免固定间隔被识别为机器人">
+              <Switch />
+            </Form.Item>
+          </Space>
 
           <Collapse ghost items={[{
             key: 'adv',
