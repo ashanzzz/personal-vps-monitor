@@ -205,6 +205,8 @@ export interface AppSettings {
   // Logging
   log_level: 'INFO' | 'DEBUG'
   auto_checkin_enabled: boolean
+  checkin_time_start: string
+  checkin_time_end: string
   random_jitter_enabled: boolean
   // System
   event_retention_days: number

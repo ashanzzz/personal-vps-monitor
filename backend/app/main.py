@@ -139,19 +139,56 @@ async def lifespan(app: FastAPI):
     # Prune old events daily to keep the DB lean.
     scheduler.add_job(_prune_events, "interval", hours=24, id="prune_events",
                       next_run_time=datetime.now())
-    # Daily checkin for AK coins (08:01 Asia/Shanghai).
-    from apscheduler.triggers.cron import CronTrigger
-    tz = settings.get("timezone", "Asia/Shanghai")
-    scheduler.add_job(
-        _daily_checkin, CronTrigger(hour=8, minute=1, timezone=tz),
-        id="daily_checkin",
-    )
+    # Daily checkin for AK coins at a random time within the configured window.
+    await _schedule_daily_checkin(settings)
     scheduler.start()
     logger.info("Scheduler started (per-page pollers active)")
 
     yield
 
     scheduler.shutdown()
+
+
+async def _schedule_daily_checkin(settings: dict) -> None:
+    """Schedule (or reschedule) the daily checkin job at a random time within
+    the configured window [checkin_time_start, checkin_time_end]."""
+    import random
+
+    tz = settings.get("timezone", "Asia/Shanghai")
+    start = settings.get("checkin_time_start", "08:00")
+    end = settings.get("checkin_time_end", "09:00")
+
+    # Parse HH:MM
+    def _to_minutes(hhmm: str) -> int:
+        try:
+            h, m = hhmm.split(":")
+            return int(h) * 60 + int(m)
+        except Exception:
+            return 8 * 60 + 1  # fallback 08:01
+
+    start_min = _to_minutes(start)
+    end_min = _to_minutes(end)
+    if end_min <= start_min:
+        end_min = start_min + 60  # ensure at least 1h window
+
+    pick_min = random.randint(start_min, end_min)
+    pick_h = pick_min // 60
+    pick_m = pick_min % 60
+
+    job_id = "daily_checkin"
+    if scheduler.get_job(job_id):
+        scheduler.remove_job(job_id)
+
+    from apscheduler.triggers.cron import CronTrigger
+    scheduler.add_job(
+        _daily_checkin,
+        CronTrigger(hour=pick_h, minute=pick_m, timezone=tz),
+        id=job_id,
+    )
+    logger.info(
+        "daily_checkin scheduled at %02d:%02d (window %s–%s, tz=%s)",
+        pick_h, pick_m, start, end, tz,
+    )
 
 
 async def _daily_checkin() -> None:
@@ -327,6 +364,9 @@ async def save_settings(data: dict, _: str = Depends(require_auth), db: AsyncSes
 
     # Apply log level live.
     set_level(result.get("log_level", "INFO"))
+
+    # Reschedule daily checkin (time range may have changed).
+    await _schedule_daily_checkin(result)
 
     return result
 
