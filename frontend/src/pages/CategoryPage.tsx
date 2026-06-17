@@ -47,7 +47,6 @@ interface Props {
   machines: Machine[]
   settings: AppSettings | null
   onBuy: (planId: string) => void
-  onRefresh: () => void
   onSaveBuyConfig: (buyKey: keyof AppSettings, cfg: PageBuyConfig) => void
   onSaveColWidths: (
     widthKey: 'col_widths_cloud' | 'col_widths_ls' | 'col_widths_secondhand',
@@ -59,7 +58,7 @@ interface Props {
   ) => void
 }
 
-export function CategoryPage({ pageKey, machines, settings, onBuy, onRefresh, onSaveBuyConfig, onSaveColWidths, onSaveScoreRules }: Props) {
+export function CategoryPage({ pageKey, machines, settings, onBuy, onSaveBuyConfig, onSaveColWidths, onSaveScoreRules }: Props) {
   const { modal } = AntApp.useApp()
   const meta = PAGE_MAP[pageKey]
   const [search, setSearch] = useState('')
@@ -297,7 +296,7 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onRefresh, on
         </Space>
         <Tooltip title="立即强制刷新本页面数据">
           <Button type="primary" icon={<SyncOutlined />} size="small"
-            onClick={() => api.triggerPagePoll(meta.category === 'vps' ? 'cloud' : meta.category === 'ls' ? 'lightweight' : meta.category)}>
+            onClick={() => api.triggerPagePoll(meta.category === 'vps' ? 'cloud' : meta.category === 'ls' ? 'ls' : meta.category)}>
             强制刷新
           </Button>
         </Tooltip>
