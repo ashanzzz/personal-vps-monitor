@@ -24,7 +24,7 @@ from .config import PAGE_KEYS, get_all_settings, update_settings
 from .database import AccountCache, AlertEvent, MachineSnapshot, PriceHistory, get_db, init_db
 from .logging_setup import read_log_tail, set_level, setup_logging
 from .match import find_official_equivalent
-from .poller import poll_account, run_page_poll, run_poll
+from .poller import poll_account, run_page_poll, run_poll, run_store_refresh
 from .scoring import compute_score
 from .token_manager import ensure_fresh, refresh_now, token_status
 from .version import __version__, get_version_info
@@ -297,6 +297,11 @@ class ChangePwBody(BaseModel):
     new_password: str
 
 
+class StoreRefreshBody(BaseModel):
+    page: str | None = None
+    limit: int | None = None
+
+
 @app.get("/api/auth/status")
 async def auth_status():
     """Whether an admin exists yet — drives login vs first-time setup screen."""
@@ -407,16 +412,15 @@ async def trigger_poll(_: str = Depends(require_auth)):
     return {"status": "triggered"}
 
 
-@app.post("/api/poll/trigger/{page}")
-async def trigger_page_poll(page: str, _: str = Depends(require_auth)):
-    """Manually force-refresh a single page (cloud / ls / secondhand / account)."""
-    if page == "account":
-        asyncio.create_task(_run_account_poll())
-    elif page in PAGE_KEYS:
-        asyncio.create_task(run_page_poll(page))
-    else:
+@app.post("/api/store/refresh")
+async def refresh_store(body: StoreRefreshBody, _: str = Depends(require_auth)):
+    """Manually refresh store listings (batch-limited by default)."""
+    page = body.page.strip() if body.page else None
+    if page and page not in PAGE_KEYS:
         raise HTTPException(400, f"Unknown page: {page}")
-    return {"status": "triggered", "page": page}
+    limit = body.limit if body.limit and body.limit > 0 else 100
+    asyncio.create_task(run_store_refresh(page, limit=limit))
+    return {"status": "triggered", "page": page or "all", "limit": limit}
 
 
 @app.post("/api/token/refresh")

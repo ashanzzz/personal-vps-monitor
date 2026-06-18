@@ -108,6 +108,7 @@ DEFAULTS: dict[str, Any] = {
     "checkin_time_start": "08:00",     # earliest random checkin time (HH:MM)
     "checkin_time_end": "09:00",       # latest random checkin time (HH:MM)
     "random_jitter_enabled": True,      # add random jitter to poll intervals (±20%)
+    "store_last_refresh": None,          # last time store data was refreshed (ISO8601)
     "timezone": "Asia/Shanghai",
 }
 
