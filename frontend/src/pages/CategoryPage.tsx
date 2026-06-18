@@ -75,6 +75,7 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onSaveBuyConf
   const [memRange, setMemRange] = useState<[number, number]>([0, 0])   // MB
   const [diskRange, setDiskRange] = useState<[number, number]>([0, 0]) // GB
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 0]) // 元/月
+  const [scoreRange, setScoreRange] = useState<[number, number]>([0, 0]) // 评分
   const [salePriceMax, setSalePriceMax] = useState(0)                  // 元
 
   // Column widths: seed once from defaults overlaid with whatever was persisted
@@ -122,6 +123,7 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onSaveBuyConf
     setMemRange([0, 0])
     setDiskRange([0, 0])
     setPriceRange([0, 0])
+    setScoreRange([0, 0])
     setSalePriceMax(0)
   }
 
@@ -156,13 +158,14 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onSaveBuyConf
     if (!inRange(m.memory_mb, memRange[0], memRange[1])) return false
     if (!inRange(m.disk_gb, diskRange[0], diskRange[1])) return false
     if (!inRange(m.price_monthly, priceRange[0] * 100, priceRange[1] * 100)) return false
+    if (!inRange(m.score ?? 0, scoreRange[0], scoreRange[1])) return false
     if (salePriceMax) {
       // sale_price isn't always present; only exclude rows that carry one.
       const sale = (m as { sale_price?: number }).sale_price
       if (sale != null && sale > salePriceMax * 100) return false
     }
     return true
-  }), [rows, areaFilter, availOnly, search, tagFilter, ipFilter, cpuRange, memRange, diskRange, priceRange, salePriceMax])
+  }), [rows, areaFilter, availOnly, search, tagFilter, ipFilter, cpuRange, memRange, diskRange, priceRange, scoreRange, salePriceMax])
 
   const buyCfg: PageBuyConfig = (settings?.[meta.buyKey] as PageBuyConfig) ?? pageBuyDefaults()
 
@@ -367,6 +370,15 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onSaveBuyConf
                     onChange={v => setPriceRange([Number(v) || 0, priceRange[1]])} />
                   <InputNumber min={0} value={priceRange[1]} style={{ width: 80 }} placeholder="max"
                     onChange={v => setPriceRange([priceRange[0], Number(v) || 0])} />
+                </Space.Compact>
+              </span>
+              <span>
+                <span style={advLbl}>评分 min-max</span>
+                <Space.Compact>
+                  <InputNumber step={0.1} value={scoreRange[0]} style={{ width: 80 }} placeholder="min"
+                    onChange={v => setScoreRange([Number(v) || 0, scoreRange[1]])} />
+                  <InputNumber step={0.1} value={scoreRange[1]} style={{ width: 80 }} placeholder="max"
+                    onChange={v => setScoreRange([scoreRange[0], Number(v) || 0])} />
                 </Space.Compact>
               </span>
               <span>
