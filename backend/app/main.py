@@ -25,7 +25,7 @@ from .database import AccountCache, AlertEvent, MachineSnapshot, PriceHistory, g
 from .logging_setup import read_log_tail, set_level, setup_logging
 from .match import find_official_equivalent
 from .poller import poll_account, run_page_poll, run_poll
-from .scoring import compute_score
+from .scoring import compute_score, compute_star_rating, price_recommendation
 from .token_manager import ensure_fresh, refresh_now, token_status
 from .version import __version__, get_version_info
 from .ws import broadcast, connect, disconnect
@@ -584,6 +584,9 @@ async def list_machines(
 
 def _machine_dict(r: MachineSnapshot, official_match: dict | None = None,
                   score: float = 0.0) -> dict:
+    from .scoring import compute_star_rating, price_recommendation
+    star = compute_star_rating(score)
+    recommendation = price_recommendation(score, r.price_monthly, r.price_yearly)
     return {
         "id": r.id,
         "category": r.category,
@@ -603,6 +606,8 @@ def _machine_dict(r: MachineSnapshot, official_match: dict | None = None,
         "available": r.available,
         "ip_status": getattr(r, "ip_status", "") or "",
         "score": score,
+        "star_rating": star,
+        "price_recommendation": recommendation,
         "official_match": official_match,
         "updated_at": r.updated_at.isoformat() if r.updated_at else None,
     }
