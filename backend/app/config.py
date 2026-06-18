@@ -106,6 +106,7 @@ DEFAULTS: dict[str, Any] = {
     "event_retention_days": 90,       # auto-prune events older than this
     "auto_checkin_enabled": True,       # daily auto sign-in for AK coins
     "random_jitter_enabled": True,      # add random jitter to poll intervals (±20%)
+    "store_last_refresh": None,          # last time store data was refreshed (ISO8601)
     "timezone": "Asia/Shanghai",
 }
 
