@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Card, Statistic, Row, Col, Button, Space, Tag, Empty, Table, Spin,
-  Descriptions, Alert, Typography, App as AntApp,
+  Descriptions, Alert, Typography, App as AntApp, Switch, Modal, TimePicker,
 } from 'antd'
 import {
   ReloadOutlined, WalletOutlined, CloudServerOutlined, CheckCircleTwoTone,
-  CloseCircleTwoTone, GoldOutlined,
+  CloseCircleTwoTone, GoldOutlined, SettingOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
+import dayjs from 'dayjs'
 import { api, fmtPrice } from '../api'
-import type { AccountInfo, MyServer } from '../api'
+import type { AccountInfo, MyServer, AppSettings } from '../api'
 
 const { Text } = Typography
 
@@ -57,6 +58,21 @@ export function AccountPage() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [checkingIn, setCheckingIn] = useState(false)
+  const [settings, setSettings] = useState<AppSettings | null>(null)
+  const [checkinModalOpen, setCheckinModalOpen] = useState(false)
+  const [checkinStart, setCheckinStart] = useState<dayjs.Dayjs | null>(null)
+  const [checkinEnd, setCheckinEnd] = useState<dayjs.Dayjs | null>(null)
+  const [savingCheckin, setSavingCheckin] = useState(false)
+
+  // Load settings for auto-checkin controls
+  const loadSettings = useCallback(async () => {
+    try {
+      const s = await api.getSettings()
+      setSettings(s)
+      setCheckinStart(s.checkin_time_start ? dayjs(s.checkin_time_start, 'HH:mm') : dayjs('08:00', 'HH:mm'))
+      setCheckinEnd(s.checkin_time_end ? dayjs(s.checkin_time_end, 'HH:mm') : dayjs('09:00', 'HH:mm'))
+    } catch { /* ignore */ }
+  }, [])
 
   // Initial load reads the cached snapshot — instant, no upstream call.
   const load = useCallback(async () => {
@@ -108,7 +124,39 @@ export function AccountPage() {
     }
   }, [message])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load(); loadSettings() }, [load, loadSettings])
+
+  // Toggle auto-checkin
+  const toggleAutoCheckin = useCallback(async (checked: boolean) => {
+    try {
+      const updated = await api.saveSettings({ auto_checkin_enabled: checked })
+      setSettings(updated)
+      message.success(checked ? '自动签到已开启' : '自动签到已关闭')
+    } catch {
+      message.error('保存失败')
+    }
+  }, [message])
+
+  // Save checkin time range
+  const saveCheckinTime = useCallback(async () => {
+    if (!checkinStart || !checkinEnd) return
+    setSavingCheckin(true)
+    try {
+      const start = checkinStart.format('HH:mm')
+      const end = checkinEnd.format('HH:mm')
+      const updated = await api.saveSettings({
+        checkin_time_start: start,
+        checkin_time_end: end,
+      })
+      setSettings(updated)
+      setCheckinModalOpen(false)
+      message.success(`签到时间已更新：${start} – ${end}`)
+    } catch {
+      message.error('保存失败')
+    } finally {
+      setSavingCheckin(false)
+    }
+  }, [checkinStart, checkinEnd, message])
 
   if (loading && !data) {
     return <Spin size="large" style={{ display: 'block', margin: '120px auto' }} />
@@ -143,7 +191,7 @@ export function AccountPage() {
             数据更新于 {timeAgo(data?.updated_at)}
           </Text>
         </Space>
-        <Space>
+        <Space wrap>
           <Button
             type="primary"
             icon={<GoldOutlined />}
@@ -154,6 +202,21 @@ export function AccountPage() {
             {checkedInToday(profile?.last_checkin_time) ? '今日已签到' : '签到'}
           </Button>
           <Button type="primary" ghost icon={<ReloadOutlined />} loading={refreshing} onClick={refresh}>强制刷新</Button>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <Switch
+              size="small"
+              checked={settings?.auto_checkin_enabled ?? true}
+              onChange={toggleAutoCheckin}
+            />
+            <Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>自动签到</Text>
+          </span>
+          <Button
+            size="small"
+            type="text"
+            icon={<SettingOutlined />}
+            onClick={() => setCheckinModalOpen(true)}
+            style={{ color: '#888' }}
+          />
         </Space>
       </div>
 
@@ -234,6 +297,46 @@ export function AccountPage() {
           />
         )}
       </Card>
+
+      {/* Auto-checkin time range modal */}
+      <Modal
+        title="自动签到设置"
+        open={checkinModalOpen}
+        onCancel={() => setCheckinModalOpen(false)}
+        onOk={saveCheckinTime}
+        confirmLoading={savingCheckin}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <div>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              每天在设定的时间范围内随机选择一个时刻自动签到领取 AK 币，避免固定时间被识别。
+            </Text>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Text>开始时间</Text>
+            <TimePicker
+              format="HH:mm"
+              minuteStep={5}
+              value={checkinStart}
+              onChange={setCheckinStart}
+              style={{ width: 140 }}
+            />
+            <Text>结束时间</Text>
+            <TimePicker
+              format="HH:mm"
+              minuteStep={5}
+              value={checkinEnd}
+              onChange={setCheckinEnd}
+              style={{ width: 140 }}
+            />
+          </div>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            💡 例如设置 08:00 – 09:00，系统每天会在 08:00 到 09:00 之间随机选一个时间点自动签到。
+          </Text>
+        </Space>
+      </Modal>
     </div>
   )
 }

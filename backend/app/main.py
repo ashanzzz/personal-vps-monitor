@@ -139,19 +139,73 @@ async def lifespan(app: FastAPI):
     # Prune old events daily to keep the DB lean.
     scheduler.add_job(_prune_events, "interval", hours=24, id="prune_events",
                       next_run_time=datetime.now())
-    # Daily checkin for AK coins (08:01 Asia/Shanghai).
-    from apscheduler.triggers.cron import CronTrigger
-    tz = settings.get("timezone", "Asia/Shanghai")
-    scheduler.add_job(
-        _daily_checkin, CronTrigger(hour=8, minute=1, timezone=tz),
-        id="daily_checkin",
-    )
+    # Daily checkin for AK coins at a random time within the configured window.
+    await _schedule_daily_checkin(settings)
     scheduler.start()
     logger.info("Scheduler started (per-page pollers active)")
 
     yield
 
     scheduler.shutdown()
+
+
+def _pick_daily_checkin_minute(start: str, end: str) -> tuple[int, int]:
+    """Pick a random HH:MM within an inclusive window.
+
+    Supports cross-midnight windows such as 23:30–00:30 by sampling from the
+    union of [start, 23:59] and [00:00, end]. Invalid inputs fall back to 08:01.
+    """
+    import random
+
+    def _to_minutes(hhmm: str) -> int:
+        try:
+            h, m = hhmm.split(":")
+            h_i = int(h)
+            m_i = int(m)
+            if 0 <= h_i <= 23 and 0 <= m_i <= 59:
+                return h_i * 60 + m_i
+        except Exception:
+            pass
+        return 8 * 60 + 1
+
+    start_min = _to_minutes(start)
+    end_min = _to_minutes(end)
+    if start_min == end_min:
+        pick_min = start_min
+    elif end_min > start_min:
+        pick_min = random.randint(start_min, end_min)
+    else:
+        day = 24 * 60
+        tail_len = day - start_min
+        head_len = end_min + 1
+        pick = random.randrange(tail_len + head_len)
+        pick_min = start_min + pick if pick < tail_len else pick - tail_len
+    return pick_min // 60, pick_min % 60
+
+
+async def _schedule_daily_checkin(settings: dict) -> None:
+    """Schedule (or reschedule) the daily checkin job at a random time within
+    the configured window [checkin_time_start, checkin_time_end]."""
+
+    tz = settings.get("timezone", "Asia/Shanghai")
+    start = settings.get("checkin_time_start", "08:00")
+    end = settings.get("checkin_time_end", "09:00")
+    pick_h, pick_m = _pick_daily_checkin_minute(start, end)
+
+    job_id = "daily_checkin"
+    if scheduler.get_job(job_id):
+        scheduler.remove_job(job_id)
+
+    from apscheduler.triggers.cron import CronTrigger
+    scheduler.add_job(
+        _daily_checkin,
+        CronTrigger(hour=pick_h, minute=pick_m, timezone=tz),
+        id=job_id,
+    )
+    logger.info(
+        "daily_checkin scheduled at %02d:%02d (window %s–%s, tz=%s)",
+        pick_h, pick_m, start, end, tz,
+    )
 
 
 async def _daily_checkin() -> None:
@@ -327,6 +381,9 @@ async def save_settings(data: dict, _: str = Depends(require_auth), db: AsyncSes
 
     # Apply log level live.
     set_level(result.get("log_level", "INFO"))
+
+    # Reschedule daily checkin (time range may have changed).
+    await _schedule_daily_checkin(result)
 
     return result
 
