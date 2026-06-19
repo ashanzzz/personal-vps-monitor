@@ -207,9 +207,12 @@ export interface AppSettings {
   // Logging
   log_level: 'INFO' | 'DEBUG'
   auto_checkin_enabled: boolean
+  checkin_time_start: string
+  checkin_time_end: string
   random_jitter_enabled: boolean
   // System
   event_retention_days: number
+  store_last_refresh: string | null
   timezone: string
 }
 
@@ -240,8 +243,8 @@ export const api = {
   triggerPoll: () =>
     http.post('/api/poll/trigger').then(r => r.data),
 
-  triggerPagePoll: (page: string) =>
-    http.post(`/api/poll/trigger/${page}`).then(r => r.data),
+  refreshStore: (page?: string, limit?: number) =>
+    http.post<{ status: string; page: string; limit: number }>('/api/store/refresh', { page, limit }).then(r => r.data),
 
   buyMachine: (plan_id: string) =>
     http.post(`/api/buy/${plan_id}`).then(r => r.data),

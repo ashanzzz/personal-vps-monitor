@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import akile_client as api
-from .config import get_all_settings
+from .config import get_all_settings, set_setting
 from .database import AccountCache, AlertEvent, MachineSnapshot, PriceHistory, SessionLocal
 from .notify import in_dnd_window, send_telegram, send_webhook
 from .ws import broadcast
@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 # Module-level merge state: last notification time per (channel, event_type).
 # Used to collapse bursts of the same event type when merge_interval_minutes > 0.
 _last_notified: dict[str, float] = {}
+
+STORE_REFRESH_LIMIT = 100
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +172,10 @@ async def _save_events(db: AsyncSession, events: list[dict], settings: dict) -> 
         await broadcast({"type": "events", "data": events})
 
 
+async def _touch_store_last_refresh(db: AsyncSession) -> None:
+    await set_setting(db, "store_last_refresh", datetime.utcnow().isoformat() + "Z")
+
+
 # ---------------------------------------------------------------------------
 # Notification filtering + dispatch
 # ---------------------------------------------------------------------------
@@ -290,7 +296,7 @@ async def _dispatch_event(db: AsyncSession, ev: dict, settings: dict) -> None:
 # Pollers
 # ---------------------------------------------------------------------------
 
-async def poll_vps(token: str, settings: dict) -> None:
+async def poll_vps(token: str, settings: dict, limit: int | None = None) -> None:
     try:
         data = await api.get_vps_store(token)
     except httpx.HTTPError as e:
@@ -308,6 +314,8 @@ async def poll_vps(token: str, settings: dict) -> None:
             for node in area.get("nodes") or []:
                 node_name = node.get("group_name", "")
                 for plan in node.get("plans") or []:
+                    if limit is not None and len(seen) >= limit:
+                        break
                     pid = str(plan["id"])
                     seen.add(pid)
                     price_datas = plan.get("price_datas") or []
@@ -330,13 +338,15 @@ async def poll_vps(token: str, settings: dict) -> None:
                     evs = await _upsert(db, "vps", pid, fields)
                     all_events.extend(evs)
 
-        evs = await _mark_delisted(db, "vps", seen)
-        all_events.extend(evs)
+        if limit is None:
+            evs = await _mark_delisted(db, "vps", seen)
+            all_events.extend(evs)
         await _save_events(db, all_events, settings)
+        await _touch_store_last_refresh(db)
         await broadcast({"type": "refresh", "category": "vps"})
 
 
-async def poll_ls(token: str, settings: dict) -> None:
+async def poll_ls(token: str, settings: dict, limit: int | None = None) -> None:
     ls_regions: list[str] = settings.get("ls_regions") or []
 
     async with SessionLocal() as db:
@@ -352,6 +362,8 @@ async def poll_ls(token: str, settings: dict) -> None:
 
             bundles = (data.get("data") or {}).get("Bundles") or []
             for b in bundles:
+                if limit is not None and len(seen) >= limit:
+                    break
                 pid = f"ls_{region}_{b['BundleId']}"
                 seen.add(pid)
                 fields = {
@@ -373,13 +385,15 @@ async def poll_ls(token: str, settings: dict) -> None:
                 evs = await _upsert(db, "ls", pid, fields)
                 all_events.extend(evs)
 
-        evs = await _mark_delisted(db, "ls", seen)
-        all_events.extend(evs)
+        if limit is None:
+            evs = await _mark_delisted(db, "ls", seen)
+            all_events.extend(evs)
         await _save_events(db, all_events, settings)
+        await _touch_store_last_refresh(db)
         await broadcast({"type": "refresh", "category": "ls"})
 
 
-async def poll_secondhand(token: str, settings: dict) -> None:
+async def poll_secondhand(token: str, settings: dict, limit: int | None = None) -> None:
     # Paginate through the whole market: the API returns ~30 per page by
     # default but the market has ~89 listings. Loop from page=1 accumulating
     # `list` until we've collected `total` rows or a page comes back empty.
@@ -419,6 +433,8 @@ async def poll_secondhand(token: str, settings: dict) -> None:
         all_events: list[dict] = []
 
         for item in listings:
+            if limit is not None and len(seen) >= limit:
+                break
             pid = str(item.get("id", item.get("plan_id", "")))
             if not pid:
                 continue
@@ -455,9 +471,11 @@ async def poll_secondhand(token: str, settings: dict) -> None:
                 logger.warning("Secondhand upsert failed for pid=%s: %s", pid, e)
                 continue
 
-        evs = await _mark_delisted(db, "secondhand", seen)
-        all_events.extend(evs)
+        if limit is None:
+            evs = await _mark_delisted(db, "secondhand", seen)
+            all_events.extend(evs)
         await _save_events(db, all_events, settings)
+        await _touch_store_last_refresh(db)
         await broadcast({"type": "refresh", "category": "secondhand"})
 
 
@@ -489,6 +507,57 @@ async def poll_price_history(token: str) -> None:
                     cycle=item["cycle"],
                 ))
         await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Store refresh helpers
+# ---------------------------------------------------------------------------
+
+async def run_store_refresh(page: str | None = None, limit: int | None = STORE_REFRESH_LIMIT) -> bool:
+    """Refresh store data without running auto-buy.
+
+    Manual refreshes are capped by STORE_REFRESH_LIMIT so the UI can trigger a
+    fast batch update. Returns True if at least one store poll ran.
+    """
+    from .token_manager import ensure_fresh
+
+    try:
+        await ensure_fresh()
+    except Exception:
+        logger.exception("ensure_fresh failed during store refresh (continuing)")
+
+    async with SessionLocal() as db:
+        settings = await get_all_settings(db)
+
+    token = settings.get("akile_token") or ""
+    if not token:
+        logger.info("No Akile token configured, skipping store refresh")
+        return False
+
+    refreshed = False
+    if page is None:
+        if settings.get("vps_enabled"):
+            await poll_vps(token, settings, limit=limit)
+            refreshed = True
+        if settings.get("ls_enabled"):
+            await poll_ls(token, settings, limit=limit)
+            refreshed = True
+        if settings.get("secondhand_enabled"):
+            await poll_secondhand(token, settings, limit=limit)
+            refreshed = True
+    else:
+        entry = _PAGE_POLLERS.get(page)
+        if entry is None:
+            return False
+        enabled_key, fn = entry
+        if not settings.get(enabled_key):
+            return False
+        await fn(token, settings, limit=limit)
+        refreshed = True
+
+    if refreshed:
+        await poll_price_history(token)
+    return refreshed
 
 
 # ---------------------------------------------------------------------------
@@ -636,6 +705,7 @@ async def run_page_poll(page: str) -> None:
     log_event("poll.start", page=page)
     try:
         await fn(token, settings)
+        await poll_price_history(token)
     except Exception:
         logger.exception("poll %s failed", page)
         return

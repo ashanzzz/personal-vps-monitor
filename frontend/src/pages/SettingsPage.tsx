@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   Card, Form, Input, InputNumber, Switch, Select, Button, Collapse,
-  Divider, message, Typography, Slider, Radio, TimePicker, Space, Affix, Modal,
+  Divider, message, Typography, Radio, TimePicker, Space, Affix, Modal,
 } from 'antd'
 import {
   SaveOutlined, SendOutlined, ReloadOutlined, CheckCircleTwoTone,
@@ -335,27 +335,40 @@ export function SettingsPage({ settings, onSaved }: Props) {
             label={<span>页面轮询间隔 (秒)<Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>每页（新机VPS / 轻量 / 二手）各自独立轮询 Akile 的间隔；建议 30–300 秒，太短触发限频</Text></span>}
             name="refresh_interval"
           >
-            <Slider min={15} max={600} step={5} marks={{ 30: '30s', 60: '1min', 300: '5min', 600: '10min' }} />
+            <Space wrap>
+              {[15, 30, 60, 120, 300, 600].map(v => (
+                <Button
+                  key={v}
+                  size="small"
+                  onClick={() => form.setFieldValue('refresh_interval', v)}
+                  type={form.getFieldValue('refresh_interval') === v ? 'primary' : 'default'}
+                >{v >= 60 ? `${v / 60} 分钟` : `${v}s`}</Button>
+              ))}
+            </Space>
           </Form.Item>
 
           <Form.Item
             label={<span>账户信息刷新间隔 (秒)<Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>「我的账户」页面（余额 / 服务器列表）从缓存读取，按此间隔后台刷新；默认 300 秒</Text></span>}
             name="account_refresh_interval"
           >
-            <Slider min={30} max={3600} step={30} marks={{ 60: '1min', 300: '5min', 1800: '30min', 3600: '60min' }} />
+            <Space wrap>
+              {[60, 120, 300, 600, 1800, 3600].map(v => (
+                <Button
+                  key={v}
+                  size="small"
+                  onClick={() => form.setFieldValue('account_refresh_interval', v)}
+                  type={form.getFieldValue('account_refresh_interval') === v ? 'primary' : 'default'}
+                >{v >= 60 ? `${v / 60} 分钟` : `${v}s`}</Button>
+              ))}
+            </Space>
           </Form.Item>
 
           <Space size="large" wrap>
-            <Form.Item label="📅 每日自动签到" name="auto_checkin_enabled" valuePropName="checked"
-              tooltip="开启后每天 08:01（中国时区）自动签到领取 AK 币">
-              <Switch />
-            </Form.Item>
             <Form.Item label="🎲 随机化轮询间隔" name="random_jitter_enabled" valuePropName="checked"
               tooltip="开启后轮询间隔在设定值附近随机波动（±20%），避免固定间隔被识别为机器人">
               <Switch />
             </Form.Item>
           </Space>
-
           <Collapse ghost items={[{
             key: 'adv',
             label: '高级（请求超时 / 重试）',

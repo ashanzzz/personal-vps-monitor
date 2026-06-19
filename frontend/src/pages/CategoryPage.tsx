@@ -15,14 +15,15 @@ const { Text } = Typography
 // Page key -> machine category + buy-config setting key + column-width setting key.
 const PAGE_MAP: Record<string, {
   category: Machine['category']
+  pollKey: 'cloud' | 'ls' | 'secondhand'
   buyKey: keyof AppSettings
   widthKey: 'col_widths_cloud' | 'col_widths_ls' | 'col_widths_secondhand'
   scoreKey: 'score_rules_cloud' | 'score_rules_ls' | 'score_rules_secondhand'
   label: string
 }> = {
-  cloud:       { category: 'vps',        buyKey: 'cloud_buy',      widthKey: 'col_widths_cloud',      scoreKey: 'score_rules_cloud',      label: '云服务器' },
-  lightweight: { category: 'ls',         buyKey: 'ls_buy',         widthKey: 'col_widths_ls',         scoreKey: 'score_rules_ls',         label: '轻量服务器' },
-  secondhand:  { category: 'secondhand', buyKey: 'secondhand_buy', widthKey: 'col_widths_secondhand', scoreKey: 'score_rules_secondhand', label: '二手机' },
+  cloud:       { category: 'vps',        pollKey: 'cloud',      buyKey: 'cloud_buy',      widthKey: 'col_widths_cloud',      scoreKey: 'score_rules_cloud',      label: '云服务器' },
+  lightweight: { category: 'ls',         pollKey: 'ls',         buyKey: 'ls_buy',         widthKey: 'col_widths_ls',         scoreKey: 'score_rules_ls',         label: '轻量服务器' },
+  secondhand:   { category: 'secondhand', pollKey: 'secondhand', buyKey: 'secondhand_buy', widthKey: 'col_widths_secondhand', scoreKey: 'score_rules_secondhand', label: '二手机' },
 }
 
 // Default column widths (px). The "恢复默认宽度" button restores exactly these.
@@ -42,6 +43,7 @@ const DEFAULT_COL_WIDTHS: Record<string, number> = {
 }
 
 const SAVE_DEBOUNCE_MS = 500
+const STORE_REFRESH_LIMIT = 100
 
 interface Props {
   pageKey: 'cloud' | 'lightweight' | 'secondhand'
@@ -60,7 +62,7 @@ interface Props {
 }
 
 export function CategoryPage({ pageKey, machines, settings, onBuy, onSaveBuyConfig, onSaveColWidths, onSaveScoreRules }: Props) {
-  const { modal } = AntApp.useApp()
+  const { modal, message } = AntApp.useApp()
   const meta = PAGE_MAP[pageKey]
   const [search, setSearch] = useState('')
   const [areaFilter, setAreaFilter] = useState<string>('all')
@@ -72,6 +74,7 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onSaveBuyConf
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [tagFilter, setTagFilter] = useState<string[]>([])      // match name/node
   const [ipFilter, setIpFilter] = useState<'all' | 'normal' | 'gfw'>('all')
+  const [refreshing, setRefreshing] = useState(false)
   const [cpuRange, setCpuRange] = useState<[number, number]>([0, 0])
   const [memRange, setMemRange] = useState<[number, number]>([0, 0])   // MB
   const [diskRange, setDiskRange] = useState<[number, number]>([0, 0]) // GB
@@ -114,6 +117,18 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onSaveBuyConf
     setColWidths(DEFAULT_COL_WIDTHS)
     // Clear the per-page override entirely -> backend falls back to {} = defaults.
     onSaveColWidths(meta.widthKey, {})
+  }
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    try {
+      await api.refreshStore(meta.pollKey, STORE_REFRESH_LIMIT)
+      message.success(`已触发${meta.label}刷新，单次最多 ${STORE_REFRESH_LIMIT} 条`)
+    } catch {
+      message.error('刷新失败')
+    } finally {
+      setRefreshing(false)
+    }
   }
 
   // Inline label style + reset for the advanced filter panel.
@@ -172,6 +187,12 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onSaveBuyConf
   }), [rows, areaFilter, availOnly, search, tagFilter, ipFilter, cpuRange, memRange, diskRange, priceRange, scoreRange, starRange, salePriceMax])
 
   const buyCfg: PageBuyConfig = (settings?.[meta.buyKey] as PageBuyConfig) ?? pageBuyDefaults()
+  const lastRefreshText = (() => {
+    const iso = settings?.store_last_refresh
+    if (!iso) return '从未'
+    const dt = new Date(iso)
+    return Number.isNaN(dt.getTime()) ? '未知' : dt.toLocaleString('zh-CN')
+  })()
 
   const baseColumns: ColumnsType<Machine> = [
     {
@@ -319,12 +340,14 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onSaveBuyConf
           <span style={{ color: '#aaa', fontSize: 13 }}>仅有货</span>
           <Switch size="small" checked={availOnly} onChange={setAvailOnly} />
         </Space>
-        <Tooltip title="立即强制刷新本页面数据">
-          <Button type="primary" icon={<SyncOutlined />} size="small"
-            onClick={() => api.triggerPagePoll(meta.category === 'vps' ? 'cloud' : meta.category === 'ls' ? 'ls' : meta.category)}>
+        <Tooltip title={`立即刷新本页商店数据（单次最多 ${STORE_REFRESH_LIMIT} 条）`}>
+          <Button type="primary" ghost icon={<SyncOutlined />} size="small" loading={refreshing} onClick={handleRefresh}>
             强制刷新
           </Button>
         </Tooltip>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          最后刷新 {lastRefreshText} · 手动刷新每批最多 {STORE_REFRESH_LIMIT} 条
+        </Text>
         <Button size="small" type={showAdvanced ? 'primary' : 'default'} icon={<FilterOutlined />}
           onClick={() => setShowAdvanced(v => !v)}>高级筛选</Button>
         <Tooltip title="恢复默认列宽">
