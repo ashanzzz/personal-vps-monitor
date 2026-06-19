@@ -37,6 +37,7 @@ const DEFAULT_COL_WIDTHS: Record<string, number> = {
   traffic: 110,
   price: 140,
   score: 90,
+  star: 120,
   stock: 120,
   action: 80,
 }
@@ -79,6 +80,7 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onSaveBuyConf
   const [diskRange, setDiskRange] = useState<[number, number]>([0, 0]) // GB
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 0]) // 元/月
   const [scoreRange, setScoreRange] = useState<[number, number]>([0, 0]) // 评分
+  const [starRange, setStarRange] = useState<[number, number]>([0, 0])   // 星级
   const [salePriceMax, setSalePriceMax] = useState(0)                  // 元
 
   // Column widths: seed once from defaults overlaid with whatever was persisted
@@ -139,6 +141,7 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onSaveBuyConf
     setDiskRange([0, 0])
     setPriceRange([0, 0])
     setScoreRange([0, 0])
+    setStarRange([0, 0])
     setSalePriceMax(0)
   }
 
@@ -174,13 +177,14 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onSaveBuyConf
     if (!inRange(m.disk_gb, diskRange[0], diskRange[1])) return false
     if (!inRange(m.price_monthly, priceRange[0] * 100, priceRange[1] * 100)) return false
     if (!inRange(m.score ?? 0, scoreRange[0], scoreRange[1])) return false
+    if (!inRange(m.star_rating ?? 0, starRange[0], starRange[1])) return false
     if (salePriceMax) {
       // sale_price isn't always present; only exclude rows that carry one.
       const sale = (m as { sale_price?: number }).sale_price
       if (sale != null && sale > salePriceMax * 100) return false
     }
     return true
-  }), [rows, areaFilter, availOnly, search, tagFilter, ipFilter, cpuRange, memRange, diskRange, priceRange, scoreRange, salePriceMax])
+  }), [rows, areaFilter, availOnly, search, tagFilter, ipFilter, cpuRange, memRange, diskRange, priceRange, scoreRange, starRange, salePriceMax])
 
   const buyCfg: PageBuyConfig = (settings?.[meta.buyKey] as PageBuyConfig) ?? pageBuyDefaults()
   const lastRefreshText = (() => {
@@ -238,12 +242,18 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onSaveBuyConf
     {
       title: '月付 / 年付', key: 'price', width: colWidths.price,
       sorter: (a, b) => a.price_monthly - b.price_monthly,
-      render: (_, m) => (
-        <Space direction="vertical" size={0}>
-          <Text style={{ color: '#52c41a' }}>{fmtPrice(m.price_monthly)}/月</Text>
-          {m.price_yearly ? <Text type="secondary" style={{ fontSize: 11 }}>{fmtPrice(m.price_yearly)}/年</Text> : null}
-        </Space>
-      ),
+      render: (_, m) => {
+        const rec = m.price_recommendation
+        const tip = rec?.reason ? rec.reason : undefined
+        return (
+          <Tooltip title={tip}>
+            <Space direction="vertical" size={0}>
+              <Text style={{ color: '#52c41a' }}>{fmtPrice(m.price_monthly)}/月</Text>
+              {m.price_yearly ? <Text type="secondary" style={{ fontSize: 11 }}>{fmtPrice(m.price_yearly)}/年</Text> : null}
+            </Space>
+          </Tooltip>
+        )
+      },
     },
     {
       title: '评分', key: 'score', width: colWidths.score,
@@ -254,6 +264,18 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onSaveBuyConf
           <Text strong style={{ color: '#faad14' }}>{(m.score ?? 0).toFixed(1)}</Text>
         </Tooltip>
       ),
+    },
+    {
+      title: '星级', key: 'star', width: colWidths.star,
+      sorter: (a, b) => (a.star_rating ?? 0) - (b.star_rating ?? 0),
+      render: (_, m) => {
+        const stars = '★'.repeat(m.star_rating ?? 0) + '☆'.repeat(5 - (m.star_rating ?? 0))
+        return (
+          <Tooltip title={`性价比等级: ${m.star_rating ?? 0}/5 星`}>
+            <Text strong style={{ color: '#faad14', fontSize: 14, letterSpacing: 2 }}>{stars}</Text>
+          </Tooltip>
+        )
+      },
     },
     {
       title: '库存/状态', key: 'stock', width: colWidths.stock,
@@ -402,6 +424,15 @@ export function CategoryPage({ pageKey, machines, settings, onBuy, onSaveBuyConf
                     onChange={v => setScoreRange([Number(v) || 0, scoreRange[1]])} />
                   <InputNumber step={0.1} value={scoreRange[1]} style={{ width: 80 }} placeholder="max"
                     onChange={v => setScoreRange([scoreRange[0], Number(v) || 0])} />
+                </Space.Compact>
+              </span>
+              <span>
+                <span style={advLbl}>星级 1-5 min-max</span>
+                <Space.Compact>
+                  <InputNumber min={1} max={5} value={starRange[0] || undefined} style={{ width: 60 }} placeholder="min"
+                    onChange={v => setStarRange([Number(v) || 0, starRange[1]])} />
+                  <InputNumber min={1} max={5} value={starRange[1] || undefined} style={{ width: 60 }} placeholder="max"
+                    onChange={v => setStarRange([starRange[0], Number(v) || 0])} />
                 </Space.Compact>
               </span>
               <span>

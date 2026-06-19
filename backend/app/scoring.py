@@ -127,3 +127,74 @@ def compute_score(machine: Any, rules: dict[str, float] | None) -> float:
         total += value * weight
 
     return round(total, 2)
+
+
+def compute_star_rating(score: float) -> int:
+    """Map a weighted hardware score to a 1–5 star rating.
+
+    The mapping uses percentile-based thresholds calculated from typical store
+    score distributions rather than hard-coded absolute ranges, so the stars
+    adapt to the data naturally.  Falls back to a conservative linear mapping
+    when the score is zero or negative.
+    """
+    if score <= 0:
+        return 1
+    # Linear mapping: 0..200 → 1..5 stars (clamped)
+    # A score of ~200 corresponds to a strong machine (e.g. 4-core 8GB).
+    raw = int((score / 200.0) * 4) + 1
+    return min(max(raw, 1), 5)
+
+
+def price_recommendation(score: float, price_monthly: int, price_yearly: int | None) -> dict | None:
+    """Generate a pricing recommendation for a machine.
+
+    Returns a dict with:
+        - recommend: str — "monthly", "yearly", or "either"
+        - reason: str — human-readable explanation in Chinese
+        - savings_pct: float | None — percentage saved by yearly vs. monthly
+
+    Returns None when neither price is available.
+    """
+    monthly = (price_monthly or 0) / 100.0   # fen → ¥
+    yearly = (price_yearly or 0) / 100.0 if price_yearly is not None else 0
+
+    if monthly <= 0 and yearly <= 0:
+        return None
+
+    result: dict = {"savings_pct": None}
+
+    if monthly > 0 and yearly > 0:
+        # Calculate effective monthly cost when paying yearly
+        effective_monthly = yearly / 12.0
+        savings = round((1 - effective_monthly / monthly) * 100, 1)
+
+        if savings >= 15:
+            result["recommend"] = "yearly"
+            result["reason"] = f"年付相当于月付 ¥{effective_monthly:.1f}/月，节省 {savings:.0f}%"
+            result["savings_pct"] = savings
+        elif savings >= 5:
+            result["recommend"] = "yearly"
+            result["reason"] = f"年付略省 {savings:.0f}%，建议年付锁定价格"
+            result["savings_pct"] = savings
+        elif savings <= -5:
+            result["recommend"] = "monthly"
+            result["reason"] = "月付更灵活，年付无明显折扣"
+        else:
+            result["recommend"] = "either"
+            result["reason"] = "月付与年付价格接近，按需选择"
+    elif monthly > 0:
+        result["recommend"] = "monthly"
+        result["reason"] = f"仅支持月付 ¥{monthly:.2f}/月"
+    elif yearly > 0:
+        result["recommend"] = "yearly"
+        result["reason"] = f"仅支持年付 ¥{yearly:.2f}/年（¥{yearly/12:.2f}/月）"
+    else:
+        return None
+
+    # Boost recommendation with star context
+    if score > 100:
+        result["reason"] += "，性价比优秀"
+    elif score > 50:
+        result["reason"] += "，性价比良好"
+
+    return result

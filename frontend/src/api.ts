@@ -73,6 +73,8 @@ export interface Machine {
   available: boolean
   ip_status: '' | 'normal' | 'gfw'
   score: number
+  star_rating: number
+  price_recommendation: { recommend: string; reason: string; savings_pct: number | null } | null
   official_match: OfficialMatch | null
   updated_at: string
 }
