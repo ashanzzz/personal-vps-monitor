@@ -663,7 +663,6 @@ def _coerce_optional_fen(raw: object) -> int | None:
 
 def _machine_dict(r: MachineSnapshot, official_match: dict | None = None,
                   score: float = 0.0) -> dict:
-    from .scoring import compute_star_rating, price_recommendation
     star = compute_star_rating(score)
     price_monthly = _coerce_fen_int(getattr(r, "price_monthly", 0))
     price_yearly = _coerce_optional_fen(getattr(r, "price_yearly", None))
