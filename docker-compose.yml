@@ -8,6 +8,7 @@ services:
     environment:
       - AKILE_TOKEN=${AKILE_TOKEN}
       - PUBLIC_READ_TOKEN=${PUBLIC_READ_TOKEN}
+      - PUBLIC_CONTROL_TOKEN=${PUBLIC_CONTROL_TOKEN}
     volumes:
       - akile-data:/app/data
 

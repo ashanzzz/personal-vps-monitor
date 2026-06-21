@@ -31,6 +31,7 @@ from .version import __version__, get_version_info
 from .ws import broadcast, connect, disconnect
 from . import akile_client
 from .public_api import router as public_api_router
+from .control_api import router as control_api_router
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -266,6 +267,7 @@ async def _prune_events() -> None:
 
 app = FastAPI(title="Akile Monitor", lifespan=lifespan)
 app.include_router(public_api_router)
+app.include_router(control_api_router)
 
 # CORS: default to a permissive setup for LAN use, but allow locking down to a
 # comma-separated allowlist via ALLOWED_ORIGINS (e.g. "https://akile.example.com").

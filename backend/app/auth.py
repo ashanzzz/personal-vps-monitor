@@ -155,6 +155,23 @@ async def require_read_api_key(
     return "ok"
 
 
+async def require_control_api_key(
+    x_api_key: str = Header(default="", alias="X-Api-Key"),
+) -> str:
+    """Validate the writable control API key from PUBLIC_CONTROL_TOKEN.
+
+    This is intentionally separate from admin JWT auth and from the public
+    read-only key so automation can control the backend without sharing admin
+    credentials.
+    """
+    control_token = os.getenv("PUBLIC_CONTROL_TOKEN", "").strip()
+    if not control_token:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="控制 API 未启用")
+    if not x_api_key or not secrets.compare_digest(x_api_key, control_token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的控制访问密钥")
+    return "ok"
+
+
 async def verify_ws_token(token: str) -> bool:
     """Validate a token passed as a WebSocket query param. Never raises."""
     if not token:

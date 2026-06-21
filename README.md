@@ -11,6 +11,7 @@
 ```bash
 echo "AKILE_TOKEN=your_token_here" > .env
 echo "PUBLIC_READ_TOKEN=your_read_only_token_here" >> .env
+echo "PUBLIC_CONTROL_TOKEN=your_control_token_here" >> .env
 ```
 
 **2. 启动**
@@ -79,6 +80,7 @@ curl -fsSL https://raw.githubusercontent.com/ashanzzz/akile-monitor/master/unrai
 
 - **Akile Token** — API 鉴权 Token
 - **Public Read Token** — 第三方只读 API 密钥，开启 `/api/read/v1`
+- **Public Control Token** — 第三方可写控制 API 密钥，开启 `/api/control/v1`
 - **轮询间隔** — 新机/轻量机/二手机分别可单独设置
 - **监控范围** — 选择关注的机型、区域
 - **评分阈值** — 可设置最低评分 / 最低星级，控制推送筛选

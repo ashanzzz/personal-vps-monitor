@@ -30,5 +30,7 @@
 
   <Config Name="PUBLIC_READ_TOKEN" Target="PUBLIC_READ_TOKEN" Default="" Mode="" Description="第三方只读 API 密钥（可选）。配置后可通过 /api/read/v1 读取公开机器数据。" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
 
+  <Config Name="PUBLIC_CONTROL_TOKEN" Target="PUBLIC_CONTROL_TOKEN" Default="" Mode="" Description="第三方可写控制 API 密钥（可选）。配置后可通过 /api/control/v1 控制后端刷新与设置。" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+
   <Config Name="TZ" Target="TZ" Default="Asia/Shanghai" Mode="" Description="容器时区（用于日志时间戳和定时任务）" Type="Variable" Display="advanced" Required="false" Mask="false">Asia/Shanghai</Config>
 </Container>
