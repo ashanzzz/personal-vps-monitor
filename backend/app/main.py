@@ -385,8 +385,18 @@ app = FastAPI(
         "persistAuthorization": True,
         "displayRequestDuration": True,
     },
-    openapi_tags=OPENAPI_TAGS,
-    lifespan=lifespan,
+)
+
+# 补全根路径静默分流与前端通信兜底探针，杜绝 SPA 路由死锁
+@app.get("/", include_in_schema=False)
+async def root_fallback():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/api/docs")
+
+@app.get("/api/health", tags=["admin"])
+async def health_check():
+    return {"status": "green", "timestamp": datetime.now().isoformat()}
+
 )
 app.include_router(public_api_router)
 app.include_router(control_api_router)
