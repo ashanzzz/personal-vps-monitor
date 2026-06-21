@@ -19,6 +19,7 @@ from . import akile_client as api
 from .config import get_all_settings, set_setting
 from .database import AccountCache, AlertEvent, MachineSnapshot, PriceHistory, SessionLocal
 from .notify import in_dnd_window, send_telegram, send_webhook
+from .scoring import compute_score, compute_star_rating
 from .ws import broadcast
 
 if TYPE_CHECKING:
@@ -263,6 +264,19 @@ def _passes_filters(ev: dict, machine: MachineSnapshot | None, settings: dict) -
             return False
         if (settings.get("filter_min_traffic_gb") or 0) and (machine.traffic_gb or 0) < settings["filter_min_traffic_gb"]:
             return False
+        min_score = settings.get("filter_min_score") or 0
+        min_star = settings.get("filter_min_star") or 0
+        if min_score or min_star:
+            score_rules = {
+                "vps": settings.get("score_rules_cloud"),
+                "ls": settings.get("score_rules_ls"),
+                "secondhand": settings.get("score_rules_secondhand"),
+            }.get(getattr(machine, "category", ""), settings.get("score_rules_cloud"))
+            score = compute_score(machine, score_rules)
+            if min_score and score < min_score:
+                return False
+            if min_star and compute_star_rating(score) < min_star:
+                return False
 
     return True
 

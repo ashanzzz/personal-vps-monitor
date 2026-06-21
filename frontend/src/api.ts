@@ -164,6 +164,8 @@ export interface AppSettings {
   filter_min_cpu: number
   filter_min_memory_mb: number
   filter_min_traffic_gb: number
+  filter_min_score: number
+  filter_min_star: number
   // Telegram
   tg_bot_token: string
   tg_chat_id: string

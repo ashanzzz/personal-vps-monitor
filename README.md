@@ -81,6 +81,7 @@ curl -fsSL https://raw.githubusercontent.com/ashanzzz/akile-monitor/master/unrai
 - **Public Read Token** — 第三方只读 API 密钥，开启 `/api/read/v1`
 - **轮询间隔** — 新机/轻量机/二手机分别可单独设置
 - **监控范围** — 选择关注的机型、区域
+- **评分阈值** — 可设置最低评分 / 最低星级，控制推送筛选
 - **Telegram 通知** — Bot Token + Chat ID + 各类事件开关
 - **自动抢购** — 预留接口，配置目标套餐 ID 和余额下限
 

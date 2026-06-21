@@ -409,7 +409,7 @@ export function SettingsPage({ settings, onSaved }: Props) {
             key: 'filters',
             label: '进阶筛选（区域 / 关键词 / 价格 / 配置下限）',
             children: (
-              <>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <Form.Item label="只看这些区域" name="filter_areas" tooltip="留空 = 全部区域">
                   <Select mode="tags" placeholder="如 HK、JP，可自定义" />
                 </Form.Item>
@@ -434,8 +434,14 @@ export function SettingsPage({ settings, onSaved }: Props) {
                   <Form.Item label="最低流量 (GB)" name="filter_min_traffic_gb">
                     <InputNumber min={0} step={100} style={{ width: 130 }} />
                   </Form.Item>
+                  <Form.Item label="最低评分" name="filter_min_score" tooltip="0 = 不限">
+                    <InputNumber min={0} step={0.1} style={{ width: 120 }} />
+                  </Form.Item>
+                  <Form.Item label="最低星级" name="filter_min_star" tooltip="0 = 不限">
+                    <InputNumber min={0} max={5} step={1} style={{ width: 120 }} />
+                  </Form.Item>
                 </Space>
-              </>
+              </div>
             ),
           }]} />
         </Card>
