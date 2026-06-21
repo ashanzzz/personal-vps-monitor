@@ -16,18 +16,39 @@ from __future__ import annotations
 import os
 import secrets
 import time
+from typing import Annotated
 
 import bcrypt
 import jwt
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, HTTPException, Security, status
+from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import get_setting, set_setting
 from .database import AdminUser, SessionLocal, get_db
 
+_bearer_scheme = HTTPBearer(
+    auto_error=False,
+    scheme_name="AdminBearer",
+    description="管理员 JWT",
+)
+_read_api_key_scheme = APIKeyHeader(
+    name="X-Api-Key",
+    auto_error=False,
+    scheme_name="PublicReadToken",
+    description="第三方只读 API 密钥，对应 PUBLIC_READ_TOKEN",
+)
+_control_api_key_scheme = APIKeyHeader(
+    name="X-Api-Key",
+    auto_error=False,
+    scheme_name="PublicControlToken",
+    description="第三方控制 API 密钥，对应 PUBLIC_CONTROL_TOKEN",
+)
+
 # Session token lifetime (seconds). Default 7 days.
 TOKEN_TTL_SECONDS = int(os.getenv("AUTH_TOKEN_TTL", str(7 * 24 * 3600)))
+
 _ALGO = "HS256"
 
 
@@ -123,13 +144,21 @@ async def change_password(db: AsyncSession, username: str, new_password: str) ->
 # ---------------------------------------------------------------------------
 
 async def require_auth(
-    authorization: str = Header(default=""),
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Security(_bearer_scheme)] = None,
     db: AsyncSession = Depends(get_db),
 ) -> str:
     """Validate the Authorization: Bearer *** header. Returns the username."""
-    if not authorization.lower().startswith("bearer "):
+    if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录")
-    token = authorization[7:].strip()
+    if isinstance(credentials, str):
+        token = credentials.strip()
+    else:
+        scheme = (credentials.scheme or "").lower()
+        if scheme and scheme != "bearer":
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录")
+        token = (credentials.credentials or "").strip()
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录")
     try:
         payload = await _decode_token(db, token)
     except jwt.ExpiredSignatureError:
@@ -140,7 +169,7 @@ async def require_auth(
 
 
 async def require_read_api_key(
-    x_api_key: str = Header(default="", alias="X-Api-Key"),
+    x_api_key: Annotated[str | None, Security(_read_api_key_scheme)] = None,
 ) -> str:
     """Validate the public read-only API key from PUBLIC_READ_TOKEN.
 
@@ -156,7 +185,7 @@ async def require_read_api_key(
 
 
 async def require_control_api_key(
-    x_api_key: str = Header(default="", alias="X-Api-Key"),
+    x_api_key: Annotated[str | None, Security(_control_api_key_scheme)] = None,
 ) -> str:
     """Validate the writable control API key from PUBLIC_CONTROL_TOKEN.
 

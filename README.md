@@ -74,6 +74,22 @@ curl -fsSL https://raw.githubusercontent.com/ashanzzz/akile-monitor/master/unrai
 
 ---
 
+## Swagger / OpenAPI 文档
+
+如果你要直接“管理 API”，优先看这里：
+
+- Swagger UI：`/docs`
+- ReDoc：`/redoc`
+- 使用说明：`docs/swagger-api-management.md`
+
+Swagger 已开启授权记忆和请求耗时显示，适合直接在页面里完成：
+
+- 只读 API 查询
+- 控制 API 写设置/触发刷新
+- 管理员登录后的内部调试
+
+---
+
 ## 配置说明
 
 所有配置均可在前端页面「设置」中修改，无需重启容器：

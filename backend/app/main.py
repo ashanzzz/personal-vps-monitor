@@ -265,7 +265,38 @@ async def _prune_events() -> None:
         logger.info("Pruned events older than %d days", days)
 
 
-app = FastAPI(title="Akile Monitor", lifespan=lifespan)
+OPENAPI_TAGS = [
+    {
+        "name": "admin",
+        "description": "管理员接口：登录、设置、日志、账户、机器、签到、手动刷新。",
+    },
+    {
+        "name": "read-api",
+        "description": "第三方只读 API：外部系统读取机器快照、评分和版本信息。",
+    },
+    {
+        "name": "control-api",
+        "description": "第三方控制 API：自动化写入设置并触发刷新/同步。",
+    },
+]
+
+app = FastAPI(
+    title="Akile Monitor",
+    description=(
+        "Akile Monitor 的后端 API。访问 /docs 使用 Swagger UI，"
+        "再用 Authorize 输入对应密钥即可管理接口。"
+    ),
+    version=__version__,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+    swagger_ui_parameters={
+        "persistAuthorization": True,
+        "displayRequestDuration": True,
+    },
+    openapi_tags=OPENAPI_TAGS,
+    lifespan=lifespan,
+)
 app.include_router(public_api_router)
 app.include_router(control_api_router)
 
@@ -306,13 +337,13 @@ class StoreRefreshBody(BaseModel):
     limit: int | None = None
 
 
-@app.get("/api/auth/status")
+@app.get("/api/auth/status", tags=["admin"])
 async def auth_status():
     """Whether an admin exists yet — drives login vs first-time setup screen."""
     return {"initialized": await auth.admin_exists()}
 
 
-@app.post("/api/auth/setup")
+@app.post("/api/auth/setup", tags=["admin"])
 async def auth_setup(body: SetupBody, db: AsyncSession = Depends(get_db)):
     """One-time admin creation, only allowed when no admin exists."""
     if await auth.get_admin(db) is not None:
@@ -324,7 +355,7 @@ async def auth_setup(body: SetupBody, db: AsyncSession = Depends(get_db)):
     return {"token": token, "username": body.username}
 
 
-@app.post("/api/auth/login")
+@app.post("/api/auth/login", tags=["admin"])
 async def auth_login(body: LoginBody, db: AsyncSession = Depends(get_db)):
     admin = await auth.get_admin(db)
     # Constant-ish behaviour: don't reveal whether the username exists.
@@ -336,7 +367,7 @@ async def auth_login(body: LoginBody, db: AsyncSession = Depends(get_db)):
     return {"token": token, "username": admin.username}
 
 
-@app.post("/api/auth/change-password")
+@app.post("/api/auth/change-password", tags=["admin"])
 async def auth_change_password(
     body: ChangePwBody,
     user: str = Depends(require_auth),
@@ -373,12 +404,12 @@ async def websocket_endpoint(ws: WebSocket, token: str = ""):
 # Settings
 # ---------------------------------------------------------------------------
 
-@app.get("/api/settings")
+@app.get("/api/settings", tags=["admin"])
 async def get_settings(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     return await get_all_settings(db)
 
 
-@app.post("/api/settings")
+@app.post("/api/settings", tags=["admin"])
 async def save_settings(data: dict, _: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     result = await update_settings(db, data)
 
@@ -397,26 +428,26 @@ async def save_settings(data: dict, _: str = Depends(require_auth), db: AsyncSes
     return result
 
 
-@app.get("/api/version")
+@app.get("/api/version", tags=["admin"])
 async def get_version():
     return get_version_info()
 
 
-@app.get("/api/logs/app")
+@app.get("/api/logs/app", tags=["admin"])
 async def get_app_log(lines: int = 500, _: str = Depends(require_auth)):
     """Return the tail of the persistent app log for in-UI debugging."""
     lines = max(1, min(lines, 5000))
     return {"lines": lines, "content": read_log_tail(lines)}
 
 
-@app.post("/api/poll/trigger")
+@app.post("/api/poll/trigger", tags=["admin"])
 async def trigger_poll(_: str = Depends(require_auth)):
     """Manually trigger a full poll cycle (all pages)."""
     asyncio.create_task(run_poll())
     return {"status": "triggered"}
 
 
-@app.post("/api/store/refresh")
+@app.post("/api/store/refresh", tags=["admin"])
 async def refresh_store(body: StoreRefreshBody, _: str = Depends(require_auth)):
     """Manually refresh store listings (batch-limited by default)."""
     page = body.page.strip() if body.page else None
@@ -427,14 +458,14 @@ async def refresh_store(body: StoreRefreshBody, _: str = Depends(require_auth)):
     return {"status": "triggered", "page": page or "all", "limit": limit}
 
 
-@app.post("/api/token/refresh")
+@app.post("/api/token/refresh", tags=["admin"])
 async def manual_refresh_token(_: str = Depends(require_auth)):
     """Manually force an Akile token refresh (writes new token to DB)."""
     ok = await refresh_now(reason="manual")
     return {"status": "ok" if ok else "failed"}
 
 
-@app.get("/api/token/status")
+@app.get("/api/token/status", tags=["admin"])
 async def get_token_status(_: str = Depends(require_auth)):
     """Report the current token's expiry/health for the UI."""
     return await token_status()
@@ -446,7 +477,7 @@ class AkileLoginBody(BaseModel):
     ga_code: str = ""  # optional 2FA code (step 2 only)
 
 
-@app.post("/api/akile-login")
+@app.post("/api/akile-login", tags=["admin"])
 async def akile_login(body: AkileLoginBody, _: str = Depends(require_auth),
                       db: AsyncSession = Depends(get_db)):
     """Log into Akile with username/password (+ optional 2FA code).
@@ -533,7 +564,7 @@ def _is_2fa_required(msg: str) -> bool:
     return any(kw in msg for kw in keywords)
 
 
-@app.get("/api/account")
+@app.get("/api/account", tags=["admin"])
 async def get_account(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     """Return the cached account snapshot (profile + balance + own servers).
 
@@ -562,7 +593,7 @@ async def get_account(_: str = Depends(require_auth), db: AsyncSession = Depends
     return payload
 
 
-@app.post("/api/account/refresh")
+@app.post("/api/account/refresh", tags=["admin"])
 async def refresh_account(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     """Force an immediate live fetch and update the account cache, then return it."""
     settings = await get_all_settings(db)
@@ -581,7 +612,7 @@ async def refresh_account(_: str = Depends(require_auth), db: AsyncSession = Dep
     return payload
 
 
-@app.post("/api/checkin")
+@app.post("/api/checkin", tags=["admin"])
 async def manual_checkin(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     """Manually trigger the daily AK-coin checkin, returning Akile's raw response
     plus parsed ak_coin_earned from the status_msg."""
@@ -605,7 +636,7 @@ async def manual_checkin(_: str = Depends(require_auth), db: AsyncSession = Depe
 # Machines
 # ---------------------------------------------------------------------------
 
-@app.get("/api/machines")
+@app.get("/api/machines", tags=["admin"])
 async def list_machines(
     category: str | None = None,
     available_only: bool = False,
@@ -701,7 +732,7 @@ def _machine_dict(r: MachineSnapshot, official_match: dict | None = None,
 # Alert Events
 # ---------------------------------------------------------------------------
 
-@app.get("/api/events")
+@app.get("/api/events", tags=["admin"])
 async def list_events(
     limit: int = 100,
     category: str | None = None,
@@ -737,7 +768,7 @@ async def list_events(
 # Price History
 # ---------------------------------------------------------------------------
 
-@app.get("/api/price-history")
+@app.get("/api/price-history", tags=["admin"])
 async def get_price_history(plan_id: str | None = None, _: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     q = select(PriceHistory).order_by(PriceHistory.plan_id, PriceHistory.cycle)
     if plan_id:
@@ -758,7 +789,7 @@ async def get_price_history(plan_id: str | None = None, _: str = Depends(require
 # Auto-buy (secondhand)
 # ---------------------------------------------------------------------------
 
-@app.post("/api/buy/{plan_id}")
+@app.post("/api/buy/{plan_id}", tags=["admin"])
 async def buy_machine(plan_id: str, _: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     """Manually trigger a purchase for a secondhand listing."""
     settings = await get_all_settings(db)
