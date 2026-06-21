@@ -10,6 +10,7 @@
 
 ```bash
 echo "AKILE_TOKEN=your_token_here" > .env
+echo "PUBLIC_READ_TOKEN=your_read_only_token_here" >> .env
 ```
 
 **2. 启动**
@@ -77,6 +78,7 @@ curl -fsSL https://raw.githubusercontent.com/ashanzzz/akile-monitor/master/unrai
 所有配置均可在前端页面「设置」中修改，无需重启容器：
 
 - **Akile Token** — API 鉴权 Token
+- **Public Read Token** — 第三方只读 API 密钥，开启 `/api/read/v1`
 - **轮询间隔** — 新机/轻量机/二手机分别可单独设置
 - **监控范围** — 选择关注的机型、区域
 - **Telegram 通知** — Bot Token + Chat ID + 各类事件开关

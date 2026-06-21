@@ -30,6 +30,7 @@ from .token_manager import ensure_fresh, refresh_now, token_status
 from .version import __version__, get_version_info
 from .ws import broadcast, connect, disconnect
 from . import akile_client
+from .public_api import router as public_api_router
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -264,6 +265,7 @@ async def _prune_events() -> None:
 
 
 app = FastAPI(title="Akile Monitor", lifespan=lifespan)
+app.include_router(public_api_router)
 
 # CORS: default to a permissive setup for LAN use, but allow locking down to a
 # comma-separated allowlist via ALLOWED_ORIGINS (e.g. "https://akile.example.com").
@@ -643,11 +645,30 @@ async def list_machines(
     return result
 
 
+def _coerce_fen_int(raw: object) -> int:
+    if raw in (None, "") or isinstance(raw, bool):
+        return 0
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _coerce_optional_fen(raw: object) -> int | None:
+    value = _coerce_fen_int(raw)
+    if value == 0 and raw not in (0, "0", 0.0):
+        return None
+    return value
+
+
 def _machine_dict(r: MachineSnapshot, official_match: dict | None = None,
                   score: float = 0.0) -> dict:
     from .scoring import compute_star_rating, price_recommendation
     star = compute_star_rating(score)
-    recommendation = price_recommendation(score, r.price_monthly, r.price_yearly)
+    price_monthly = _coerce_fen_int(getattr(r, "price_monthly", 0))
+    price_yearly = _coerce_optional_fen(getattr(r, "price_yearly", None))
+    sale_price = _coerce_optional_fen(getattr(r, "sale_price", None))
+    recommendation = price_recommendation(score, price_monthly, price_yearly)
     return {
         "id": r.id,
         "category": r.category,
@@ -656,8 +677,9 @@ def _machine_dict(r: MachineSnapshot, official_match: dict | None = None,
         "node": r.node,
         "name": r.name,
         "stock": r.stock,
-        "price_monthly": r.price_monthly,
-        "price_yearly": r.price_yearly,
+        "price_monthly": price_monthly,
+        "price_yearly": price_yearly,
+        "sale_price": sale_price,
         "cpu": r.cpu,
         "memory_mb": r.memory_mb,
         "disk_gb": r.disk_gb,

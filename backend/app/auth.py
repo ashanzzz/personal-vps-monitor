@@ -139,6 +139,22 @@ async def require_auth(
     return payload.get("sub", "")
 
 
+async def require_read_api_key(
+    x_api_key: str = Header(default="", alias="X-Api-Key"),
+) -> str:
+    """Validate the public read-only API key from PUBLIC_READ_TOKEN.
+
+    The dependency is intentionally separate from admin JWT auth so third-party
+    consumers can read machine snapshots without receiving an admin session.
+    """
+    read_token = os.getenv("PUBLIC_READ_TOKEN", "").strip()
+    if not read_token:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="只读 API 未启用")
+    if not x_api_key or not secrets.compare_digest(x_api_key, read_token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的只读访问密钥")
+    return "ok"
+
+
 async def verify_ws_token(token: str) -> bool:
     """Validate a token passed as a WebSocket query param. Never raises."""
     if not token:

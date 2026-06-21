@@ -60,6 +60,15 @@ def _get(machine: Any, key: str, default: Any = None) -> Any:
     return getattr(machine, key, default)
 
 
+def _to_float(raw: Any) -> float | None:
+    if raw in (None, "") or isinstance(raw, bool):
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def _dimension_value(machine: Any, dim: str) -> float | None:
     """Resolve a machine's value for a scoring dimension.
 
@@ -67,38 +76,38 @@ def _dimension_value(machine: Any, dim: str) -> float | None:
     case the caller skips it (this is what makes ``latency`` safe when absent).
     """
     if dim == "cpu":
-        return float(_get(machine, "cpu", 0) or 0)
+        return _to_float(_get(machine, "cpu", 0)) or 0.0
     if dim == "memory":
-        return float(_get(machine, "memory_mb", 0) or 0) / 1024.0
+        return (_to_float(_get(machine, "memory_mb", 0)) or 0.0) / 1024.0
     if dim == "disk":
-        return float(_get(machine, "disk_gb", 0) or 0)
+        return _to_float(_get(machine, "disk_gb", 0)) or 0.0
     if dim == "bandwidth":
-        return float(_get(machine, "bandwidth_mbps", 0) or 0)
+        return _to_float(_get(machine, "bandwidth_mbps", 0)) or 0.0
     if dim == "traffic":
-        return float(_get(machine, "traffic_gb", 0) or 0)
+        return _to_float(_get(machine, "traffic_gb", 0)) or 0.0
     if dim == "price_monthly":
-        return float(_get(machine, "price_monthly", 0) or 0) / 100.0
+        raw = _to_float(_get(machine, "price_monthly", 0))
+        if raw is None:
+            return None
+        return raw / 100.0
     if dim == "sale_price":
         # Only some (secondhand) machines carry a distinct sale price; treat a
         # missing field as "no data" so its weight doesn't apply spuriously.
-        raw = _get(machine, "sale_price", None)
-        if raw in (None, ""):
+        raw = _to_float(_get(machine, "sale_price", None))
+        if raw is None:
             return None
-        return float(raw) / 100.0
+        return raw / 100.0
     if dim == "latency":
         # Skip entirely when latency hasn't been measured.
-        raw = _get(machine, "latency", None)
-        if raw in (None, ""):
+        raw = _to_float(_get(machine, "latency", None))
+        if raw is None:
             return None
-        return float(raw)
+        return raw
     # Unknown dimension: try a plain attribute read, else skip.
-    raw = _get(machine, dim, None)
-    if raw in (None, ""):
+    raw = _to_float(_get(machine, dim, None))
+    if raw is None:
         return None
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return None
+    return raw
 
 
 def compute_score(machine: Any, rules: dict[str, float] | None) -> float:
@@ -155,8 +164,10 @@ def price_recommendation(score: float, price_monthly: int, price_yearly: int | N
 
     Returns None when neither price is available.
     """
-    monthly = (price_monthly or 0) / 100.0   # fen → ¥
-    yearly = (price_yearly or 0) / 100.0 if price_yearly is not None else 0
+    monthly_raw = _to_float(price_monthly)
+    yearly_raw = _to_float(price_yearly) if price_yearly is not None else None
+    monthly = (monthly_raw or 0) / 100.0   # fen → ¥
+    yearly = (yearly_raw or 0) / 100.0 if yearly_raw is not None else 0
 
     if monthly <= 0 and yearly <= 0:
         return None
