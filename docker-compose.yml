@@ -1,6 +1,9 @@
 services:
   akile-monitor:
     image: ghcr.io/ashanzzz/akile-monitor:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: akile-monitor
     restart: unless-stopped
     ports:
@@ -11,6 +14,12 @@ services:
       - PUBLIC_CONTROL_TOKEN=${PUBLIC_CONTROL_TOKEN}
     volumes:
       - akile-data:/app/data
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1/api/version', timeout=5).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 volumes:
   akile-data:

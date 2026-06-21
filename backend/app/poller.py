@@ -720,8 +720,6 @@ async def run_poll() -> None:
     if settings.get("secondhand_enabled"):
         await poll_secondhand(token, settings)
 
-    await poll_price_history(token)
-
 
 # ---------------------------------------------------------------------------
 # Per-page poll + auto-buy (each runs on its own independent interval)
@@ -762,7 +760,6 @@ async def run_page_poll(page: str) -> None:
     log_event("poll.start", page=page)
     try:
         await fn(token, settings)
-        await poll_price_history(token)
     except Exception:
         logger.exception("poll %s failed", page)
         return

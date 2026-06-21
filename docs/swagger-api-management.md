@@ -4,9 +4,9 @@
 
 ## 入口
 
-- Swagger UI：`http://<服务器IP>:8080/docs`
-- ReDoc：`http://<服务器IP>:8080/redoc`
-- OpenAPI JSON：`http://<服务器IP>:8080/openapi.json`
+- Swagger UI：`http://<服务器IP>:8080/api/docs`
+- ReDoc：`http://<服务器IP>:8080/api/redoc`
+- OpenAPI JSON：`http://<服务器IP>:8080/api/openapi.json`
 
 > 本项目已开启 `persistAuthorization` 和 `displayRequestDuration`，
 > 也就是：授权会尽量保留，接口耗时会直接显示在 Swagger 页面里。
@@ -118,7 +118,7 @@ GET /api/read/v1/machines?available_only=true&min_score=70&sort=score_desc
 
 ### 改最低评分阈值
 
-1. 打开 `/docs`
+1. 打开 `/api/docs`
 2. `Authorize` → 填 `PublicControlToken`
 3. 找到 `POST /api/control/v1/settings`
 4. 发送类似下面的 JSON：

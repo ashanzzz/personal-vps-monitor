@@ -1,0 +1,36 @@
+flowchart LR
+  subgraph Browser[Operator / Browser]
+    O[Operator]
+    UI[Frontend SPA]
+  end
+
+  N[nginx :80]
+  API[FastAPI app :8000]
+  DB[(SQLite DB)]
+  LOG[(Rotating log file)]
+  SCHED[APScheduler jobs]
+  AKILE[Akile cloud APIs]
+  WS[WebSocket clients]
+
+  O -->|GET /api/docs /api/openapi.json| N
+  O -->|GET /api/logs/app| N
+  UI -->|REST /api/*| N
+  UI -->|WS /ws| N
+
+  N -->|/api/*| API
+  N -->|/ws| API
+  N -->|non-/api fallback| UI
+
+  API -->|read/write| DB
+  API -->|tail| LOG
+  API -->|poll| AKILE
+  API -->|broadcast| WS
+  SCHED -->|scheduled async jobs| API
+
+  note1[Docs moved under /api to avoid SPA fallback]
+  note2[Logs are a first-class admin API for live debugging]
+  note3[Scheduler should be staggered and guarded to avoid overlap]
+
+  note1 -.-> N
+  note2 -.-> API
+  note3 -.-> SCHED

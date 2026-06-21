@@ -8,7 +8,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -24,7 +24,7 @@ from .config import PAGE_KEYS, get_all_settings, update_settings
 from .database import AccountCache, AlertEvent, MachineSnapshot, PriceHistory, get_db, init_db
 from .logging_setup import read_log_tail, set_level, setup_logging
 from .match import find_official_equivalent
-from .poller import poll_account, run_page_poll, run_poll, run_store_refresh
+from .poller import poll_account, poll_price_history, run_page_poll, run_poll, run_store_refresh
 from .scoring import compute_score, compute_star_rating, price_recommendation
 from .token_manager import ensure_fresh, refresh_now, token_status
 from .version import __version__, get_version_info
@@ -39,25 +39,76 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 _poll_interval: int = 60  # seconds, updated from DB on startup
 
+_JOB_DEFAULTS = {
+    "coalesce": True,
+    "max_instances": 1,
+    "misfire_grace_time": 300,
+}
+
+_PAGE_JOB_START_OFFSETS = {
+    "cloud": 0,
+    "ls": 15,
+    "secondhand": 30,
+}
+
+_SUPPORT_JOB_START_OFFSETS = {
+    "token_refresh": 60,
+    "prune_events": 120,
+    "price_history_refresh": 180,
+}
+
+
+def _job_add_kwargs(first_run_delay_seconds: int) -> dict:
+    """Shared APScheduler kwargs for long-running interval jobs."""
+    return {
+        **_JOB_DEFAULTS,
+        "next_run_time": datetime.now() + timedelta(seconds=max(0, first_run_delay_seconds)),
+        "replace_existing": True,
+    }
+
+
+def _schedule_interval_job(
+    job_id: str,
+    func,
+    *,
+    trigger_kwargs: dict,
+    first_run_delay_seconds: int,
+    args: list | tuple = (),
+) -> None:
+    """Add or reschedule a guarded interval job with a staggered first run."""
+    if scheduler.get_job(job_id):
+        scheduler.reschedule_job(job_id, trigger="interval", **trigger_kwargs)
+        return
+
+    scheduler.add_job(
+        func,
+        "interval",
+        id=job_id,
+        args=list(args),
+        **trigger_kwargs,
+        **_job_add_kwargs(first_run_delay_seconds),
+    )
+
 
 def _reschedule_page_jobs(settings: dict) -> None:
     """(Re)schedule one poll job per page using its independent interval.
     When random_jitter_enabled, the interval is multiplied by random(0.8, 1.2)."""
     import random
     jitter = settings.get("random_jitter_enabled", True)
-    for page in PAGE_KEYS:
+    for index, page in enumerate(PAGE_KEYS):
         cfg = settings.get(f"{page}_buy") or {}
         base = max(5, int(cfg.get("refresh_interval", 60) or 60))
         interval = int(base * random.uniform(0.8, 1.2)) if jitter else base
         interval = max(5, interval)
         job_id = f"poll_{page}"
-        if scheduler.get_job(job_id):
-            scheduler.reschedule_job(job_id, trigger="interval", seconds=interval)
-        else:
-            scheduler.add_job(
-                run_page_poll, "interval", seconds=interval, id=job_id,
-                args=[page], next_run_time=datetime.now(),
-            )
+        start_offset = _PAGE_JOB_START_OFFSETS.get(page, index * 15)
+        _schedule_interval_job(
+            job_id,
+            run_page_poll,
+            trigger_kwargs={"seconds": interval},
+            first_run_delay_seconds=start_offset,
+            args=[page],
+        )
         logger.info("page poller %s scheduled interval=%ds (base=%ds, jitter=%s)",
                     page, interval, base, jitter)
 
@@ -91,15 +142,60 @@ def _reschedule_account_job(settings: dict) -> None:
     interval = int(base * random.uniform(0.8, 1.2)) if jitter else base
     interval = max(30, interval)
     job_id = "poll_account"
-    if scheduler.get_job(job_id):
-        scheduler.reschedule_job(job_id, trigger="interval", seconds=interval)
-    else:
-        scheduler.add_job(
-            _run_account_poll, "interval", seconds=interval, id=job_id,
-            next_run_time=datetime.now(),
-        )
+    _schedule_interval_job(
+        job_id,
+        _run_account_poll,
+        trigger_kwargs={"seconds": interval},
+        first_run_delay_seconds=45,
+    )
     logger.info("account poller scheduled interval=%ds (base=%ds, jitter=%s)",
                 interval, base, jitter)
+
+
+async def _run_price_history_refresh() -> None:
+    """Refresh price history on its own low-frequency cadence."""
+    from .database import SessionLocal
+
+    try:
+        await ensure_fresh()
+    except Exception:
+        logger.exception("ensure_fresh failed during price history refresh (continuing)")
+
+    async with SessionLocal() as db:
+        settings = await get_all_settings(db)
+
+    token = settings.get("akile_token") or ""
+    if not token:
+        logger.info("price_history_refresh: no token configured, skipping")
+        return
+
+    try:
+        await poll_price_history(token)
+    except Exception:
+        logger.exception("price history refresh failed")
+
+
+def _schedule_support_jobs() -> None:
+    """Schedule low-frequency maintenance jobs with delayed first runs."""
+    _schedule_interval_job(
+        "token_refresh",
+        ensure_fresh,
+        trigger_kwargs={"hours": 1},
+        first_run_delay_seconds=_SUPPORT_JOB_START_OFFSETS["token_refresh"],
+    )
+    _schedule_interval_job(
+        "prune_events",
+        _prune_events,
+        trigger_kwargs={"hours": 24},
+        first_run_delay_seconds=_SUPPORT_JOB_START_OFFSETS["prune_events"],
+    )
+    _schedule_interval_job(
+        "price_history_refresh",
+        _run_price_history_refresh,
+        trigger_kwargs={"minutes": 30},
+        first_run_delay_seconds=_SUPPORT_JOB_START_OFFSETS["price_history_refresh"],
+    )
+    logger.info("support jobs scheduled (token_refresh, prune_events, price_history_refresh)")
 
 
 @asynccontextmanager
@@ -134,13 +230,8 @@ async def lifespan(app: FastAPI):
     # interval so the account page reads cache instead of hitting akile on load.
     _reschedule_account_job(settings)
 
-    # Keep the Akile token alive entirely inside the backend: check hourly,
-    # refresh when within the expiry margin. Runs an immediate check on startup.
-    scheduler.add_job(ensure_fresh, "interval", hours=1, id="token_refresh",
-                      next_run_time=datetime.now())
-    # Prune old events daily to keep the DB lean.
-    scheduler.add_job(_prune_events, "interval", hours=24, id="prune_events",
-                      next_run_time=datetime.now())
+    # Low-frequency support jobs are staggered to avoid startup storms.
+    _schedule_support_jobs()
     # Daily checkin for AK coins at a random time within the configured window.
     await _schedule_daily_checkin(settings)
     scheduler.start()
@@ -283,13 +374,13 @@ OPENAPI_TAGS = [
 app = FastAPI(
     title="Akile Monitor",
     description=(
-        "Akile Monitor 的后端 API。访问 /docs 使用 Swagger UI，"
+        "Akile Monitor 的后端 API。访问 /api/docs 使用 Swagger UI，"
         "再用 Authorize 输入对应密钥即可管理接口。"
     ),
     version=__version__,
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
     swagger_ui_parameters={
         "persistAuthorization": True,
         "displayRequestDuration": True,

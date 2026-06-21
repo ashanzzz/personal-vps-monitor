@@ -17,7 +17,7 @@ echo "PUBLIC_CONTROL_TOKEN=your_control_token_here" >> .env
 **2. 启动**
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
 访问 `http://你的服务器IP:8080` 即可打开监控页面。
@@ -78,8 +78,8 @@ curl -fsSL https://raw.githubusercontent.com/ashanzzz/akile-monitor/master/unrai
 
 如果你要直接“管理 API”，优先看这里：
 
-- Swagger UI：`/docs`
-- ReDoc：`/redoc`
+- Swagger UI：`/api/docs`
+- ReDoc：`/api/redoc`
 - 使用说明：`docs/swagger-api-management.md`
 
 Swagger 已开启授权记忆和请求耗时显示，适合直接在页面里完成：
