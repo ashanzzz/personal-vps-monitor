@@ -21,12 +21,16 @@
   <DonateText/>
   <DonateLink/>
   <Requires/>
-  
+
   <Config Name="WebUI Port" Target="80" Default="8080" Mode="tcp" Description="Web 界面访问端口" Type="Port" Display="always" Required="true" Mask="false">8080</Config>
-  
+
   <Config Name="Data Volume" Target="/app/data" Default="/mnt/user/appdata/akile-monitor" Mode="rw" Description="数据持久化目录（SQLite 数据库、配置缓存）" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/akile-monitor</Config>
-  
+
   <Config Name="AKILE_TOKEN" Target="AKILE_TOKEN" Default="" Mode="" Description="AkileCloud API Token（必填）。从 https://api.akilecloud.com 获取，用于调用监控 API。" Type="Variable" Display="always" Required="true" Mask="true"></Config>
-  
+
+  <Config Name="PUBLIC_READ_TOKEN" Target="PUBLIC_READ_TOKEN" Default="" Mode="" Description="第三方只读 API 密钥（可选）。配置后可通过 /api/read/v1 读取公开机器数据。" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+
+  <Config Name="PUBLIC_CONTROL_TOKEN" Target="PUBLIC_CONTROL_TOKEN" Default="" Mode="" Description="第三方可写控制 API 密钥（可选）。配置后可通过 /api/control/v1 控制后端刷新与设置。" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+
   <Config Name="TZ" Target="TZ" Default="Asia/Shanghai" Mode="" Description="容器时区（用于日志时间戳和定时任务）" Type="Variable" Display="advanced" Required="false" Mask="false">Asia/Shanghai</Config>
 </Container>

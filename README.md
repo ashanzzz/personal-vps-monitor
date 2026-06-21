@@ -10,6 +10,8 @@
 
 ```bash
 echo "AKILE_TOKEN=your_token_here" > .env
+echo "PUBLIC_READ_TOKEN=your_read_only_token_here" >> .env
+echo "PUBLIC_CONTROL_TOKEN=your_control_token_here" >> .env
 ```
 
 **2. 启动**
@@ -72,13 +74,32 @@ curl -fsSL https://raw.githubusercontent.com/ashanzzz/akile-monitor/master/unrai
 
 ---
 
+## Swagger / OpenAPI 文档
+
+如果你要直接“管理 API”，优先看这里：
+
+- Swagger UI：`/docs`
+- ReDoc：`/redoc`
+- 使用说明：`docs/swagger-api-management.md`
+
+Swagger 已开启授权记忆和请求耗时显示，适合直接在页面里完成：
+
+- 只读 API 查询
+- 控制 API 写设置/触发刷新
+- 管理员登录后的内部调试
+
+---
+
 ## 配置说明
 
 所有配置均可在前端页面「设置」中修改，无需重启容器：
 
 - **Akile Token** — API 鉴权 Token
+- **Public Read Token** — 第三方只读 API 密钥，开启 `/api/read/v1`
+- **Public Control Token** — 第三方可写控制 API 密钥，开启 `/api/control/v1`
 - **轮询间隔** — 新机/轻量机/二手机分别可单独设置
 - **监控范围** — 选择关注的机型、区域
+- **评分阈值** — 可设置最低评分 / 最低星级，控制推送筛选
 - **Telegram 通知** — Bot Token + Chat ID + 各类事件开关
 - **自动抢购** — 预留接口，配置目标套餐 ID 和余额下限
 

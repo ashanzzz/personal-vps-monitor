@@ -13,6 +13,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+def _as_fen_int(raw) -> int:
+    if raw in (None, "") or isinstance(raw, bool):
+        return 0
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0
+
+
 # Bandwidth tolerance: treat plans within one "tier" as equivalent. We bucket by
 # common Akile tiers (Mbps) so 30 vs 50 don't collapse but 1000 vs 1000 match.
 def _bw_tier(mbps: int) -> int:
@@ -81,8 +90,8 @@ def find_official_equivalent(secondhand, official_machines: list) -> dict | None
     candidates.sort(key=lambda m: (not m.available, m.price_monthly or 10**9))
     best = candidates[0]
 
-    sh_price = secondhand.price_monthly or 0
-    off_price = best.price_monthly or 0
+    sh_price = _as_fen_int(secondhand.price_monthly)
+    off_price = _as_fen_int(best.price_monthly)
     delta = off_price - sh_price
     if delta > 0:
         cheaper = "secondhand"

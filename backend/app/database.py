@@ -47,6 +47,9 @@ class MachineSnapshot(Base):
     # Price in fen (1/100 of yuan)
     price_monthly: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     price_yearly: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Secondhand listing/sale price in fen. Distinct from renewal prices,
+    # which are derived from price_datas into price_monthly/price_yearly.
+    sale_price: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     cpu: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     memory_mb: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     disk_gb: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -138,6 +141,10 @@ async def init_db():
         if not await _has_column(conn, "machine_snapshot", "ip_status"):
             await conn.exec_driver_sql(
                 "ALTER TABLE machine_snapshot ADD COLUMN ip_status VARCHAR(16) NOT NULL DEFAULT ''"
+            )
+        if not await _has_column(conn, "machine_snapshot", "sale_price"):
+            await conn.exec_driver_sql(
+                "ALTER TABLE machine_snapshot ADD COLUMN sale_price INTEGER"
             )
 
 

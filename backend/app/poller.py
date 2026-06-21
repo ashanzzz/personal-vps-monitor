@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
+from decimal import Decimal, InvalidOperation
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -17,6 +19,7 @@ from . import akile_client as api
 from .config import get_all_settings, set_setting
 from .database import AccountCache, AlertEvent, MachineSnapshot, PriceHistory, SessionLocal
 from .notify import in_dnd_window, send_telegram, send_webhook
+from .scoring import compute_score, compute_star_rating
 from .ws import broadcast
 
 if TYPE_CHECKING:
@@ -31,6 +34,40 @@ _last_notified: dict[str, float] = {}
 STORE_REFRESH_LIMIT = 100
 
 
+def _coerce_fen(raw: object) -> int:
+    if raw in (None, "") or isinstance(raw, bool):
+        return 0
+    if isinstance(raw, int):
+        return max(raw, 0)
+    if isinstance(raw, float):
+        return max(int(raw), 0)
+    s = str(raw).strip()
+    if s.isdigit():
+        return int(s)
+    return 0
+
+
+def _parse_sale_price(raw: object) -> int | None:
+    if raw in (None, "") or isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        return raw if raw >= 0 else None
+    if isinstance(raw, float):
+        return int(round(raw * 100)) if raw >= 0 else None
+    s = str(raw).strip().replace(",", "")
+    if not s:
+        return None
+    if s.isdigit():
+        return int(s)
+    m = re.search(r"(\d+(?:\.\d+)?)", s)
+    if not m:
+        return None
+    try:
+        return int((Decimal(m.group(1)) * 100).quantize(Decimal("1")))
+    except (InvalidOperation, ValueError):
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -38,14 +75,15 @@ STORE_REFRESH_LIMIT = 100
 def _price_monthly(price_datas: list[dict]) -> int:
     for p in price_datas:
         if p.get("cycle") == 1:
-            return p["price"]
-    return price_datas[0]["price"] if price_datas else 0
+            return _coerce_fen(p.get("price"))
+    return _coerce_fen(price_datas[0].get("price")) if price_datas else 0
 
 
 def _price_yearly(price_datas: list[dict]) -> int | None:
     for p in price_datas:
         if p.get("cycle") == 12:
-            return p["price"]
+            value = _coerce_fen(p.get("price"))
+            return value or None
     return None
 
 
@@ -226,6 +264,19 @@ def _passes_filters(ev: dict, machine: MachineSnapshot | None, settings: dict) -
             return False
         if (settings.get("filter_min_traffic_gb") or 0) and (machine.traffic_gb or 0) < settings["filter_min_traffic_gb"]:
             return False
+        min_score = settings.get("filter_min_score") or 0
+        min_star = settings.get("filter_min_star") or 0
+        if min_score or min_star:
+            score_rules = {
+                "vps": settings.get("score_rules_cloud"),
+                "ls": settings.get("score_rules_ls"),
+                "secondhand": settings.get("score_rules_secondhand"),
+            }.get(getattr(machine, "category", ""), settings.get("score_rules_cloud"))
+            score = compute_score(machine, score_rules)
+            if min_score and score < min_score:
+                return False
+            if min_star and compute_star_rating(score) < min_star:
+                return False
 
     return True
 
@@ -442,17 +493,23 @@ async def poll_secondhand(token: str, settings: dict, limit: int | None = None) 
 
             # Build best fields from whatever the API returns
             price_datas = item.get("price_datas") or item.get("prices") or []
+            sale_price = (
+                _coerce_fen(item.get("sale_price"))
+                or _coerce_fen(item.get("salePrice"))
+                or _parse_sale_price(item.get("price"))
+            )
             fields = {
                 "area": item.get("area_name", item.get("area", "")),
                 "node": item.get("node_name", item.get("node", "")),
                 "name": item.get("plan_name", item.get("name", f"ID:{pid}")),
                 "stock": item.get("stock", 1),
                 "price_monthly": (
-                    item.get("price")
+                    _coerce_fen(item.get("price_monthly"))
                     or _price_monthly(price_datas)
                     or 0
                 ),
                 "price_yearly": _price_yearly(price_datas),
+                "sale_price": sale_price,
                 "cpu": item.get("cpu", 0),
                 "memory_mb": item.get("memory", 0),
                 "disk_gb": item.get("disk", 0),

@@ -40,6 +40,8 @@ DEFAULTS: dict[str, Any] = {
     "filter_min_cpu": 0,
     "filter_min_memory_mb": 0,
     "filter_min_traffic_gb": 0,
+    "filter_min_score": 0,            # backend score threshold for notifications
+    "filter_min_star": 0,             # star threshold for notifications
 
     # --- Telegram notifications ---
     "tg_bot_token": "",
