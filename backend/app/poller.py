@@ -694,7 +694,6 @@ async def poll_account(token: str, settings: dict) -> None:
 async def poll_acck_account(token: str, settings: dict) -> None:
     """Fetch the logged-in ACCK account snapshot and store it in account_cache (id=2)."""
     from . import acck_client
-    from .logging_setup import log_event
 
     errors: list[str] = []
     profile = None
