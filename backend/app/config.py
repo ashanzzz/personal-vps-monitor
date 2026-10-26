@@ -17,6 +17,7 @@ LS_REGIONS = ["HK", "JP", "TW", "US", "SG", "DE", "KR", "MO"]
 DEFAULTS: dict[str, Any] = {
     # --- API & connection ---
     "akile_token": "",
+    "acck_token": "",
     "refresh_interval": 60,          # seconds
     "auto_refresh_token": True,         # keep token alive automatically
     "refresh_margin_min_seconds": 60,   # min random refresh margin (seconds)
@@ -24,6 +25,10 @@ DEFAULTS: dict[str, Any] = {
     "request_timeout": 15,            # seconds per upstream request
     "request_retries": 2,             # retries on transient upstream failure
     "account_refresh_interval": 300,  # seconds; how often the account page cache (balance/servers) is refreshed
+
+    # --- Safety & Anti-Misbuying Protection ---
+    "safe_buy_mode": True,            # 防误购保护模式：默认开启，杜绝自动扣款
+    "real_purchase_enabled": False,   # 真实购买许可：默认关闭，绝不自动付款
 
     # --- Monitor scope ---
     "vps_enabled": True,

@@ -691,6 +691,72 @@ async def poll_account(token: str, settings: dict) -> None:
     await broadcast({"type": "refresh", "category": "account"})
 
 
+async def poll_acck_account(token: str, settings: dict) -> None:
+    """Fetch the logged-in ACCK account snapshot and store it in account_cache (id=2)."""
+    from . import acck_client
+    from .logging_setup import log_event
+
+    errors: list[str] = []
+    profile = None
+    servers: list[dict] = []
+    shop_info = None
+
+    try:
+        info = await acck_client.get_user_info(token)
+        profile = {
+            "username": info.get("username") or info.get("name") or "",
+            "email": info.get("email", ""),
+            "role": info.get("role", "user"),
+            "points": info.get("points") or info.get("balance") or 0,
+            "telegram_id": info.get("telegram_id") or info.get("tg_id"),
+            "created_at": info.get("created_at") or info.get("register_time"),
+            "status": info.get("status", "active"),
+        }
+    except Exception as e:
+        logger.warning("ACCK profile poll failed: %s", e)
+        errors.append(f"profile:{e}")
+
+    try:
+        shop = await acck_client.get_ac_shop(token)
+        shop_info = shop
+        if profile is not None and isinstance(shop, dict):
+            if "points" in shop:
+                profile["points"] = shop["points"]
+            if "coins" in shop:
+                profile["coins"] = shop["coins"]
+            profile["last_checkin_time"] = shop.get("last_checkin_time")
+            profile["checked_in_today"] = shop.get("checked_in_today")
+    except Exception as e:
+        logger.warning("ACCK shop poll failed: %s", e)
+        errors.append(f"shop:{e}")
+
+    try:
+        servers = await acck_client.get_my_servers(token)
+    except Exception as e:
+        logger.warning("ACCK servers poll failed: %s", e)
+        errors.append(f"servers:{e}")
+
+    payload = {
+        "configured": True,
+        "platform": "ACCK",
+        "profile": profile,
+        "servers": servers,
+        "shop": shop_info,
+        "errors": errors,
+    }
+
+    async with SessionLocal() as db:
+        row = await db.scalar(select(AccountCache).where(AccountCache.id == 2))
+        if row is None:
+            db.add(AccountCache(id=2, data=json.dumps(payload)))
+        else:
+            row.data = json.dumps(payload)
+            row.updated_at = datetime.utcnow()
+        await db.commit()
+
+    await broadcast({"type": "refresh", "category": "acck_account"})
+
+
 # ---------------------------------------------------------------------------
 # Master poll entry point (called by scheduler)
 # ---------------------------------------------------------------------------

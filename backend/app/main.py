@@ -314,24 +314,32 @@ async def _daily_checkin() -> None:
         settings = await get_all_settings(db)
     if not settings.get("auto_checkin_enabled", True):
         logger.info("daily_checkin: auto-checkin is disabled, skipping")
-        return
-    token = settings.get("akile_token") or ""
-    if not token:
-        logger.info("daily_checkin: no token configured, skipping")
-        return
+    else:
+        token = settings.get("akile_token") or ""
+        if token:
+            try:
+                result = await akile_client.checkin(token)
+                status_code = result.get("status_code")
+                status_msg = result.get("status_msg", "")
+                if status_code == 0:
+                    logger.info("Akile daily_checkin: success – %s", status_msg)
+                elif status_code == 1:
+                    logger.info("Akile daily_checkin: already signed – %s", status_msg)
+                else:
+                    logger.warning("Akile daily_checkin: unexpected response: %s", result)
+            except Exception:
+                logger.exception("Akile daily_checkin failed")
 
-    try:
-        result = await akile_client.checkin(token)
-        status_code = result.get("status_code")
-        status_msg = result.get("status_msg", "")
-        if status_code == 0:
-            logger.info("daily_checkin: success – %s", status_msg)
-        elif status_code == 1:
-            logger.info("daily_checkin: already signed – %s", status_msg)
-        else:
-            logger.warning("daily_checkin: unexpected response: %s", result)
-    except Exception:
-        logger.exception("daily_checkin failed")
+    # ACCK 自动打卡
+    if settings.get("acck_auto_checkin_enabled", True):
+        acck_token = settings.get("acck_token") or ""
+        if acck_token:
+            from . import acck_client
+            try:
+                acck_res = await acck_client.checkin(acck_token)
+                logger.info("ACCK daily_checkin result: %s", acck_res)
+            except Exception:
+                logger.exception("ACCK daily_checkin failed")
 
 
 async def _prune_events() -> None:
@@ -372,12 +380,12 @@ OPENAPI_TAGS = [
 ]
 
 app = FastAPI(
-    title="Akile Monitor",
+    title="个人工具仓库",
     description=(
-        "Akile Monitor 的后端 API。访问 /api/docs 使用 Swagger UI，"
-        "再用 Authorize 输入对应密钥即可管理接口。"
+        "个人工具仓库后端 API：统一管理 AkileCloud 与 ACCK 双平台账户监控、每日自动打卡、资产管理与选购工具。"
     ),
     version=__version__,
+    openapi_tags=OPENAPI_TAGS,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -397,7 +405,7 @@ async def root_fallback():
 async def health_check():
     return {"status": "green", "timestamp": datetime.now().isoformat()}
 
-)
+
 app.include_router(public_api_router)
 app.include_router(control_api_router)
 
@@ -734,6 +742,105 @@ async def manual_checkin(_: str = Depends(require_auth), db: AsyncSession = Depe
 
 
 # ---------------------------------------------------------------------------
+# ACCK Platform Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/acck/account", tags=["admin"])
+async def get_acck_account(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
+    """Return the cached ACCK account snapshot (profile + points + servers)."""
+    settings = await get_all_settings(db)
+    token = settings.get("acck_token", "")
+    if not token:
+        return {"configured": False, "profile": None, "servers": [],
+                "errors": ["no_token"], "updated_at": None}
+
+    from .poller import poll_acck_account
+    row = await db.scalar(select(AccountCache).where(AccountCache.id == 2))
+    if row is None or not row.data:
+        await poll_acck_account(token, settings)
+        row = await db.scalar(select(AccountCache).where(AccountCache.id == 2))
+        if row is None or not row.data:
+            return {"configured": True, "profile": None, "servers": [],
+                    "errors": ["cache_empty"], "updated_at": None}
+
+    payload = json.loads(row.data)
+    payload["updated_at"] = row.updated_at.isoformat() if row.updated_at else None
+    return payload
+
+
+@app.post("/api/acck/account/refresh", tags=["admin"])
+async def refresh_acck_account(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
+    """Force an immediate live fetch for ACCK account."""
+    settings = await get_all_settings(db)
+    token = settings.get("acck_token", "")
+    if not token:
+        return {"configured": False, "profile": None, "servers": [],
+                "errors": ["no_token"], "updated_at": None}
+
+    from .poller import poll_acck_account
+    await poll_acck_account(token, settings)
+    row = await db.scalar(select(AccountCache).where(AccountCache.id == 2))
+    if row is None or not row.data:
+        return {"configured": True, "profile": None, "servers": [],
+                "errors": ["cache_empty"], "updated_at": None}
+    payload = json.loads(row.data)
+    payload["updated_at"] = row.updated_at.isoformat() if row.updated_at else None
+    return payload
+
+
+@app.post("/api/acck/checkin", tags=["admin"])
+async def manual_acck_checkin(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
+    """Manually trigger daily checkin for ACCK."""
+    settings = await get_all_settings(db)
+    token = settings.get("acck_token", "")
+    if not token:
+        return {"error": "未配置 ACCK Token，请先在系统设置中填入"}
+    from . import acck_client
+    try:
+        res = await acck_client.checkin(token)
+        return res
+    except httpx.HTTPError as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/acck/servers", tags=["admin"])
+async def get_acck_servers(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
+    """Get list of user's own servers from ACCK."""
+    settings = await get_all_settings(db)
+    token = settings.get("acck_token", "")
+    if not token:
+        return []
+    from . import acck_client
+    try:
+        return await acck_client.get_my_servers(token)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/acck/shop", tags=["admin"])
+async def get_acck_shop_data(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
+    """Get ACCK shop balance, items, and checkin logs."""
+    settings = await get_all_settings(db)
+    token = settings.get("acck_token", "")
+    if not token:
+        return {"error": "No token configured"}
+    from . import acck_client
+    try:
+        shop = await acck_client.get_ac_shop(token)
+        logs = await acck_client.get_shop_logs(token)
+        return {"shop": shop, "logs": logs}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/acck/buy-preview", tags=["admin"])
+async def acck_buy_preview_endpoint(payload: dict, _: str = Depends(require_auth)):
+    """【防误购安全模式】安全试算 ACCK 订单信息，严禁发起扣费支付。"""
+    from . import acck_client
+    return await acck_client.buy_preview("", payload)
+
+
+# ---------------------------------------------------------------------------
 # Machines
 # ---------------------------------------------------------------------------
 
@@ -894,6 +1001,16 @@ async def get_price_history(plan_id: str | None = None, _: str = Depends(require
 async def buy_machine(plan_id: str, _: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     """Manually trigger a purchase for a secondhand listing."""
     settings = await get_all_settings(db)
+
+    # 严格防误购保护锁：除非显式开启 real_purchase_enabled，否则一律仅作为安全模拟，严禁发起扣费下单
+    if not settings.get("real_purchase_enabled", False):
+        return {
+            "status_code": 1,
+            "status_msg": "【防误购安全保护锁已开启】未发起真实支付扣费。已拦截下单动作！",
+            "dry_run": True,
+            "plan_id": plan_id,
+        }
+
     token = settings.get("akile_token", "")
     if not token:
         return {"error": "No token configured"}

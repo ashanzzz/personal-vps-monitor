@@ -290,6 +290,58 @@ export const api = {
   // --- Checkin ---
   checkin: () =>
     http.post<{ status_code: number; status_msg: string; ak_coin_earned?: number }>('/api/checkin').then(r => r.data),
+
+  // --- ACCK Platform ---
+  getAcckAccount: () =>
+    http.get<AcckAccountInfo>('/api/acck/account').then(r => r.data),
+
+  refreshAcckAccount: () =>
+    http.post<AcckAccountInfo>('/api/acck/account/refresh').then(r => r.data),
+
+  checkinAcck: () =>
+    http.post<Record<string, unknown>>('/api/acck/checkin').then(r => r.data),
+
+  getAcckServers: () =>
+    http.get<AcckServer[]>('/api/acck/servers').then(r => r.data),
+
+  getAcckShop: () =>
+    http.get<{ shop: Record<string, unknown>; logs: Array<Record<string, unknown>> }>('/api/acck/shop').then(r => r.data),
+
+  acckBuyPreview: (payload: Record<string, unknown>) =>
+    http.post<Record<string, unknown>>('/api/acck/buy-preview', payload).then(r => r.data),
+}
+
+export interface AcckProfile {
+  username: string
+  email: string
+  role: string
+  points: number | null
+  coins?: number | null
+  telegram_id?: string | number | null
+  created_at?: string | null
+  status?: string
+  last_checkin_time?: number | null
+  checked_in_today?: boolean
+}
+
+export interface AcckServer {
+  id?: string | number
+  name?: string
+  ip?: string
+  node?: string
+  status?: string
+  expired_at?: string
+  [key: string]: unknown
+}
+
+export interface AcckAccountInfo {
+  configured: boolean
+  platform: string
+  profile: AcckProfile | null
+  servers: AcckServer[]
+  shop?: Record<string, unknown> | null
+  errors: string[]
+  updated_at: string | null
 }
 
 export interface AccountProfile {

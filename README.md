@@ -1,6 +1,18 @@
-# Akile Monitor
+# 个人工具仓库 (Personal Tools Hub)
 
-一键部署的 AkileCloud 监控工具，支持新机 VPS、轻量机、二手机上架/下架/价格变化实时告警，内置 Telegram 推送，预留自动抢购接口。
+统一管理 **AkileCloud** 与 **ACCK** 双平台的个人服务器自动化工具箱。支持双平台账户资产看板、每日自动打卡签到、新机与二手机监控告警、以及具备安全防误购保护锁的选购与订单试算模块。
+
+## 核心功能
+
+* **多平台每日自动打卡**：
+  * **AkileCloud**：每日随机时间自动签到获取 AK 币，打卡时自动调用 `/v1/user/refreshToken` 顺带延长 Token 有效期（实现 Token 永续）；
+  * **ACCK**：自动打卡获取 AC 积分与权益，同步拉取积分流水与日志。
+* **双平台资产看板**：
+  * 聚合展示 Akile 与 ACCK 的账户余额、积分、实名状态、到期服务器实例。
+* **市场监控与告警（Akile）**：
+  * 支持新机 VPS、轻量机、二手机上架/下架/价格变化实时告警，支持 Telegram 推送。
+* **安全防误购保护机制（Safe Dry-Run）**：
+  * 内置**防误购保护锁**（`safe_buy_mode=True`，`real_purchase_enabled=False`），默认全面拦截所有自动扣费与下单动作，购买相关逻辑仅在模拟模式下运行，杜绝资金损失。
 
 ## 快速部署
 
@@ -9,7 +21,8 @@
 **1. 创建 `.env` 文件（填入你的 Token）**
 
 ```bash
-echo "AKILE_TOKEN=your_token_here" > .env
+echo "AKILE_TOKEN=your_akile_token" > .env
+echo "ACCK_TOKEN=your_acck_token" >> .env
 echo "PUBLIC_READ_TOKEN=your_read_only_token_here" >> .env
 echo "PUBLIC_CONTROL_TOKEN=your_control_token_here" >> .env
 ```

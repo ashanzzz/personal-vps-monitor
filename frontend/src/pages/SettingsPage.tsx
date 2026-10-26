@@ -213,7 +213,21 @@ export function SettingsPage({ settings, onSaved }: Props) {
             <Input.Password placeholder="your-token" autoComplete="off" />
           </Form.Item>
 
-          <Form.Item label="Token 状态">
+          <Form.Item label="ACCK Token (auth_token)" name="acck_token">
+            <Input.Password placeholder="Bearer eyJ..." autoComplete="off" />
+          </Form.Item>
+
+          <Form.Item label="ACCK Token 获取方式">
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              打开 <a href="https://acck.io" target="_blank" rel="noopener noreferrer">acck.io</a> 登录后，按 F12 打开开发者工具 → Console，输入：
+              <Text code copyable style={{ fontSize: 12, marginLeft: 4 }}>
+                localStorage.getItem('auth_token')
+              </Text>
+              ，将复制的内容粘贴到上方即可。
+            </Text>
+          </Form.Item>
+
+          <Form.Item label="Akile Token 状态">
             <Space wrap>
               <TokenStatusBadge status={tokenStatus} />
               <Button size="small" icon={<ReloadOutlined />} loading={refreshing} onClick={manualRefresh}>

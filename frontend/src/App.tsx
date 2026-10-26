@@ -6,6 +6,7 @@ import {
 import {
   DashboardOutlined, CloudServerOutlined, ThunderboltOutlined, ShoppingOutlined,
   BellOutlined, SettingOutlined, LogoutOutlined, FileTextOutlined, WalletOutlined,
+  SafetyCertificateOutlined,
 } from '@ant-design/icons'
 
 import { api, clearToken, getToken, setUnauthorizedHandler } from './api'
@@ -18,13 +19,14 @@ import { SettingsPage }  from './pages/SettingsPage'
 import { LoginPage }     from './pages/LoginPage'
 import { LogsPage }      from './pages/LogsPage'
 import { AccountPage }   from './pages/AccountPage'
+import { AcckAccountPage } from './pages/AcckAccountPage'
 
 import './App.css'
 
 const { Header, Sider, Content } = Layout
 const { Title } = Typography
 
-type PageKey = 'overview' | 'account' | 'cloud' | 'lightweight' | 'secondhand' | 'alerts' | 'logs' | 'settings'
+type PageKey = 'overview' | 'account' | 'acck' | 'cloud' | 'lightweight' | 'secondhand' | 'alerts' | 'logs' | 'settings'
 
 export default function App() {
   const [authed, setAuthed]       = useState<boolean>(!!getToken())
@@ -166,7 +168,7 @@ export default function App() {
           >
             <div style={{ padding: '16px 12px', borderBottom: '1px solid #1f1f1f' }}>
               <Title level={5} style={{ color: '#e0e0e0', margin: 0, fontSize: collapsed ? 0 : 14 }}>
-                {!collapsed && '🖥 Akile Monitor'}
+                {!collapsed && '个人工具仓库'}
               </Title>
             </div>
             <Menu
@@ -179,11 +181,12 @@ export default function App() {
               }}
               style={{ background: '#111', borderRight: 0 }}
               items={[
-                { key: 'overview',  icon: <DashboardOutlined />,   label: '总览' },
-                { key: 'account',     icon: <WalletOutlined />,       label: '我的账户' },
-                { key: 'cloud',       icon: <CloudServerOutlined />,  label: '云服务器' },
-                { key: 'lightweight', icon: <ThunderboltOutlined />,  label: '轻量服务器' },
-                { key: 'secondhand',  icon: <ShoppingOutlined />,     label: '二手机' },
+                { key: 'overview',    icon: <DashboardOutlined />,         label: '总览' },
+                { key: 'account',     icon: <WalletOutlined />,            label: 'Akile 平台' },
+                { key: 'acck',        icon: <SafetyCertificateOutlined />, label: 'ACCK 平台' },
+                { key: 'cloud',       icon: <CloudServerOutlined />,        label: '云服务器' },
+                { key: 'lightweight', icon: <ThunderboltOutlined />,        label: '轻量服务器' },
+                { key: 'secondhand',  icon: <ShoppingOutlined />,           label: '二手机' },
                 {
                   key: 'alerts',
                   icon: <BellOutlined />,
@@ -201,7 +204,7 @@ export default function App() {
 
           <Layout>
             <Header style={{
-              background: '#161616',
+              background: '#111',
               padding: '0 20px',
               borderBottom: '1px solid #1f1f1f',
               display: 'flex',
@@ -209,7 +212,7 @@ export default function App() {
               justifyContent: 'space-between',
             }}>
               <Typography.Text style={{ color: '#ccc', margin: 0 }}>
-                {{ overview: '总览', account: '我的账户', cloud: '云服务器', lightweight: '轻量服务器', secondhand: '二手机', alerts: '预警历史', logs: '调试日志', settings: '系统设置' }[page]}
+                {{ overview: '总览', account: 'Akile 平台', acck: 'ACCK 平台', cloud: '云服务器', lightweight: '轻量服务器', secondhand: '二手机', alerts: '预警历史', logs: '调试日志', settings: '系统设置' }[page]}
               </Typography.Text>
               <span style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                 <Typography.Text style={{ color: '#555', fontSize: 12 }}>
@@ -237,6 +240,7 @@ export default function App() {
                 <>
                   {page === 'overview'  && <Overview machines={machines} events={events} />}
                   {page === 'account'  && <AccountPage />}
+                  {page === 'acck'     && <AcckAccountPage />}
                   {page === 'cloud'  && (
                     <CategoryPage pageKey="cloud" machines={machines} settings={settings}
                       onBuy={handleBuy} onSaveBuyConfig={handleSaveBuyConfig}

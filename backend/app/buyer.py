@@ -112,6 +112,15 @@ async def run_autobuy(page: str) -> None:
 
 
 async def _purchase(token, page, category, m, rule, rid, cycle, settings) -> None:
+    # 严格防误购保护锁：除非显式开启 real_purchase_enabled，否则一律仅作为安全模拟与审计，严禁自动扣费下单
+    if not settings.get("real_purchase_enabled", False):
+        log_event(
+            "autobuy.dry_run_blocked", page=page, rule=rid, plan_id=m.plan_id,
+            name=m.name, price=m.price_monthly, cycle=cycle,
+            msg="【防误购安全保护锁开启中】已识别匹配机器，已安全拦截扣款下单动作",
+        )
+        return
+
     log_event(
         "autobuy.attempt", page=page, rule=rid, plan_id=m.plan_id,
         name=m.name, price=m.price_monthly, cycle=cycle,
