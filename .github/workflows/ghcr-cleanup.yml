@@ -15,7 +15,7 @@ jobs:
       - name: Delete untagged container versions older than 30 days
         uses: actions/delete-package-versions@v5
         with:
-          package-name: akile-monitor
+          package-name: servers-checkin-hub
           package-type: container
           min-versions-to-keep: 10
           delete-only-untagged-versions: true

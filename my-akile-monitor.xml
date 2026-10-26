@@ -1,19 +1,19 @@
 <?xml version="1.0"?>
 <Container version="2">
-  <Name>akile-monitor</Name>
-  <Repository>ghcr.io/ashanzzz/akile-monitor:latest</Repository>
+  <Name>servers-checkin-hub</Name>
+  <Repository>ghcr.io/ashanzzz/servers-checkin-hub:latest</Repository>
   <Registry>https://ghcr.io</Registry>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/ashanzzz/akile-monitor/issues</Support>
-  <Project>https://github.com/ashanzzz/akile-monitor</Project>
+  <Support>https://github.com/ashanzzz/servers-checkin-hub/issues</Support>
+  <Project>https://github.com/ashanzzz/servers-checkin-hub</Project>
   <Overview>个人工具仓库 — 统一管理 AkileCloud 与 ACCK 双平台自动化工具箱：支持双平台每日自动打卡与 Token 续期、账户资产看板、新机与二手机监控告警、以及具备安全防误购保护锁的选购与试算接口。</Overview>
   <Category>Tools: Status:Stable</Category>
-  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/ashanzzz/akile-monitor/master/my-akile-monitor.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/ashanzzz/akile-monitor/master/frontend/public/favicon.svg</Icon>
+  <WebUI>http://[IP]:[PORT:80]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/ashanzzz/servers-checkin-hub/master/my-servers-checkin-hub.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/ashanzzz/servers-checkin-hub/master/frontend/public/favicon.svg</Icon>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>
@@ -22,7 +22,7 @@
   <DonateLink/>
   <Requires/>
 
-  <Config Name="WebUI Port" Target="80" Default="8080" Mode="tcp" Description="Web 界面访问端口" Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="WebUI Port" Target="80" Default="3338" Mode="tcp" Description="Web 界面访问端口" Type="Port" Display="always" Required="true" Mask="false">3338</Config>
 
   <Config Name="Data Volume" Target="/app/data" Default="/mnt/user/appdata/akile-monitor" Mode="rw" Description="数据持久化目录（SQLite 数据库、配置缓存）" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/akile-monitor</Config>
 
