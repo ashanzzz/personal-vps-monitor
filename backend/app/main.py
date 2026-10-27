@@ -277,13 +277,26 @@ def _pick_daily_checkin_minute(start: str, end: str) -> tuple[int, int]:
 
 
 async def _schedule_daily_checkin(settings: dict) -> None:
-    """Schedule (or reschedule) the daily checkin job at a random time within
-    the configured window [checkin_time_start, checkin_time_end]."""
+    """Schedule (or reschedule) the daily checkin job.
 
+    Supports either a fixed daily time (e.g. 08:00) or a randomized time
+    within a window [checkin_time_start, checkin_time_end].
+    """
     tz = settings.get("timezone", "Asia/Shanghai")
-    start = settings.get("checkin_time_start", "08:00")
-    end = settings.get("checkin_time_end", "09:00")
-    pick_h, pick_m = _pick_daily_checkin_minute(start, end)
+    mode = settings.get("checkin_mode", "fixed")
+
+    if mode == "fixed":
+        fixed = settings.get("checkin_fixed_time", "08:00")
+        try:
+            pick_h, pick_m = [int(x) for x in fixed.split(":")]
+        except Exception:
+            pick_h, pick_m = 8, 0
+        desc = f"fixed at {pick_h:02d}:{pick_m:02d}"
+    else:
+        start = settings.get("checkin_time_start", "08:00")
+        end = settings.get("checkin_time_end", "09:00")
+        pick_h, pick_m = _pick_daily_checkin_minute(start, end)
+        desc = f"randomized at {pick_h:02d}:{pick_m:02d} (window {start}–{end})"
 
     job_id = "daily_checkin"
     if scheduler.get_job(job_id):
@@ -295,15 +308,15 @@ async def _schedule_daily_checkin(settings: dict) -> None:
         CronTrigger(hour=pick_h, minute=pick_m, timezone=tz),
         id=job_id,
     )
-    logger.info(
-        "daily_checkin scheduled at %02d:%02d (window %s–%s, tz=%s)",
-        pick_h, pick_m, start, end, tz,
-    )
+    logger.info("daily_checkin scheduled %s (tz=%s)", desc, tz)
 
 
 async def _daily_checkin() -> None:
-    """Automatic daily checkin for AK coins."""
-    from .database import SessionLocal
+    """Automatic daily checkin for Akile & ACCK platforms with status recording."""
+    from .database import SessionLocal, CheckinLog
+    from datetime import date
+
+    today_str = date.today().isoformat()
 
     try:
         await ensure_fresh()
@@ -312,8 +325,10 @@ async def _daily_checkin() -> None:
 
     async with SessionLocal() as db:
         settings = await get_all_settings(db)
+
+    # 1. Akile 自动打卡
     if not settings.get("auto_checkin_enabled", True):
-        logger.info("daily_checkin: auto-checkin is disabled, skipping")
+        logger.info("daily_checkin: Akile auto-checkin is disabled, skipping")
     else:
         token = settings.get("akile_token") or ""
         if token:
@@ -322,24 +337,78 @@ async def _daily_checkin() -> None:
                 status_code = result.get("status_code")
                 status_msg = result.get("status_msg", "")
                 if status_code == 0:
+                    status = "success"
                     logger.info("Akile daily_checkin: success – %s", status_msg)
                 elif status_code == 1:
+                    status = "already_signed"
                     logger.info("Akile daily_checkin: already signed – %s", status_msg)
                 else:
+                    status = "failed"
                     logger.warning("Akile daily_checkin: unexpected response: %s", result)
-            except Exception:
-                logger.exception("Akile daily_checkin failed")
 
-    # ACCK 自动打卡
-    if settings.get("acck_auto_checkin_enabled", True):
+                async with SessionLocal() as db:
+                    db.add(CheckinLog(
+                        platform="akile",
+                        checkin_date=today_str,
+                        status=status,
+                        message=status_msg or str(result),
+                        details=json.dumps(result, ensure_ascii=False),
+                    ))
+                    await db.commit()
+            except Exception as e:
+                logger.exception("Akile daily_checkin failed")
+                async with SessionLocal() as db:
+                    db.add(CheckinLog(
+                        platform="akile",
+                        checkin_date=today_str,
+                        status="failed",
+                        message=str(e),
+                        details=None,
+                    ))
+                    await db.commit()
+
+    # 2. ACCK 自动打卡
+    if not settings.get("acck_auto_checkin_enabled", True):
+        logger.info("daily_checkin: ACCK auto-checkin is disabled, skipping")
+    else:
         acck_token = settings.get("acck_token") or ""
         if acck_token:
             from . import acck_client
             try:
                 acck_res = await acck_client.checkin(acck_token)
                 logger.info("ACCK daily_checkin result: %s", acck_res)
-            except Exception:
+                # Parse ACCK result status
+                text_repr = str(acck_res)
+                if acck_res.get("code") == 0 or "成功" in text_repr or "已签到" in text_repr or acck_res.get("status") == 200:
+                    if "已签到" in text_repr or "already" in text_repr.lower():
+                        acck_status = "already_signed"
+                    else:
+                        acck_status = "success"
+                elif "失败" in text_repr or "error" in text_repr.lower():
+                    acck_status = "failed"
+                else:
+                    acck_status = "success"
+
+                async with SessionLocal() as db:
+                    db.add(CheckinLog(
+                        platform="acck",
+                        checkin_date=today_str,
+                        status=acck_status,
+                        message=text_repr[:500],
+                        details=json.dumps(acck_res, ensure_ascii=False) if isinstance(acck_res, (dict, list)) else str(acck_res),
+                    ))
+                    await db.commit()
+            except Exception as e:
                 logger.exception("ACCK daily_checkin failed")
+                async with SessionLocal() as db:
+                    db.add(CheckinLog(
+                        platform="acck",
+                        checkin_date=today_str,
+                        status="failed",
+                        message=str(e),
+                        details=None,
+                    ))
+                    await db.commit()
 
 
 async def _prune_events() -> None:
@@ -736,6 +805,20 @@ async def manual_checkin(_: str = Depends(require_auth), db: AsyncSession = Depe
         import re
         m = re.search(r'(\d+\.?\d*)', status_msg)
         result["ak_coin_earned"] = float(m.group(1)) if m else None
+
+        from .database import CheckinLog
+        from datetime import date
+        status_code = result.get("status_code")
+        status = "success" if status_code == 0 else ("already_signed" if status_code == 1 else "failed")
+        db.add(CheckinLog(
+            platform="akile",
+            checkin_date=date.today().isoformat(),
+            status=status,
+            message=status_msg or str(result),
+            details=json.dumps(result, ensure_ascii=False),
+        ))
+        await db.commit()
+
         return result
     except httpx.HTTPError as e:
         return {"error": str(e)}
@@ -796,11 +879,81 @@ async def manual_acck_checkin(_: str = Depends(require_auth), db: AsyncSession =
     if not token:
         return {"error": "未配置 ACCK Token，请先在系统设置中填入"}
     from . import acck_client
+    from .database import CheckinLog
+    from datetime import date
     try:
         res = await acck_client.checkin(token)
+        text_repr = str(res)
+        if res.get("code") == 0 or "成功" in text_repr or "已签到" in text_repr or res.get("status") == 200:
+            acck_status = "already_signed" if ("已签到" in text_repr or "already" in text_repr.lower()) else "success"
+        else:
+            acck_status = "failed"
+        db.add(CheckinLog(
+            platform="acck",
+            checkin_date=date.today().isoformat(),
+            status=acck_status,
+            message=text_repr[:500],
+            details=json.dumps(res, ensure_ascii=False) if isinstance(res, (dict, list)) else str(res),
+        ))
+        await db.commit()
         return res
     except httpx.HTTPError as e:
         return {"error": str(e)}
+
+
+@app.get("/api/checkin/status")
+async def get_checkin_status(db: AsyncSession = Depends(get_db)):
+    """Return the checkin status for today (Akile & ACCK) and recent history (public/admin readable)."""
+    from datetime import date
+    from .database import CheckinLog
+    today_str = date.today().isoformat()
+
+    settings = await get_all_settings(db)
+    q_today = select(CheckinLog).where(CheckinLog.checkin_date == today_str).order_by(CheckinLog.id.desc())
+    today_rows = (await db.execute(q_today)).scalars().all()
+
+    akile_today = next((r for r in today_rows if r.platform == "akile"), None)
+    acck_today = next((r for r in today_rows if r.platform == "acck"), None)
+
+    q_hist = select(CheckinLog).order_by(CheckinLog.id.desc()).limit(30)
+    hist_rows = (await db.execute(q_hist)).scalars().all()
+
+    def serialize_log(l):
+        if not l:
+            return None
+        return {
+            "id": l.id,
+            "platform": l.platform,
+            "checkin_date": l.checkin_date,
+            "status": l.status,
+            "message": l.message,
+            "created_at": l.created_at.isoformat() if l.created_at else None,
+        }
+
+    return {
+        "today": today_str,
+        "config": {
+            "mode": settings.get("checkin_mode", "fixed"),
+            "fixed_time": settings.get("checkin_fixed_time", "08:00"),
+            "time_start": settings.get("checkin_time_start", "08:00"),
+            "time_end": settings.get("checkin_time_end", "09:00"),
+            "akile_enabled": settings.get("auto_checkin_enabled", True),
+            "acck_enabled": settings.get("acck_auto_checkin_enabled", True),
+        },
+        "status": {
+            "akile": {
+                "checked_in": akile_today.status in ("success", "already_signed") if akile_today else False,
+                "status": akile_today.status if akile_today else "pending",
+                "last_log": serialize_log(akile_today),
+            },
+            "acck": {
+                "checked_in": acck_today.status in ("success", "already_signed") if acck_today else False,
+                "status": acck_today.status if acck_today else "pending",
+                "last_log": serialize_log(acck_today),
+            }
+        },
+        "history": [serialize_log(r) for r in hist_rows]
+    }
 
 
 @app.get("/api/acck/servers", tags=["admin"])

@@ -2,10 +2,11 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   Card, Statistic, Row, Col, Button, Space, Tag, Empty, Table, Spin,
   Descriptions, Alert, Typography, App as AntApp, Switch, Modal, TimePicker,
+  Radio, Badge,
 } from 'antd'
 import {
   ReloadOutlined, WalletOutlined, CloudServerOutlined, CheckCircleTwoTone,
-  CloseCircleTwoTone, GoldOutlined, SettingOutlined,
+  CloseCircleTwoTone, GoldOutlined, SettingOutlined, HistoryOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
@@ -60,15 +61,29 @@ export function AccountPage() {
   const [checkingIn, setCheckingIn] = useState(false)
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [checkinModalOpen, setCheckinModalOpen] = useState(false)
+  const [checkinMode, setCheckinMode] = useState<'fixed' | 'random'>('fixed')
+  const [checkinFixedTime, setCheckinFixedTime] = useState<dayjs.Dayjs | null>(dayjs('08:00', 'HH:mm'))
   const [checkinStart, setCheckinStart] = useState<dayjs.Dayjs | null>(null)
   const [checkinEnd, setCheckinEnd] = useState<dayjs.Dayjs | null>(null)
   const [savingCheckin, setSavingCheckin] = useState(false)
+  const [checkinStatusData, setCheckinStatusData] = useState<any>(null)
+  const [historyModalOpen, setHistoryModalOpen] = useState(false)
+
+  // Load checkin status & history
+  const loadCheckinStatus = useCallback(async () => {
+    try {
+      const res = await api.getCheckinStatus()
+      setCheckinStatusData(res)
+    } catch { /* ignore */ }
+  }, [])
 
   // Load settings for auto-checkin controls
   const loadSettings = useCallback(async () => {
     try {
       const s = await api.getSettings()
       setSettings(s)
+      setCheckinMode(s.checkin_mode || 'fixed')
+      setCheckinFixedTime(s.checkin_fixed_time ? dayjs(s.checkin_fixed_time, 'HH:mm') : dayjs('08:00', 'HH:mm'))
       setCheckinStart(s.checkin_time_start ? dayjs(s.checkin_time_start, 'HH:mm') : dayjs('08:00', 'HH:mm'))
       setCheckinEnd(s.checkin_time_end ? dayjs(s.checkin_time_end, 'HH:mm') : dayjs('09:00', 'HH:mm'))
     } catch { /* ignore */ }
@@ -124,7 +139,7 @@ export function AccountPage() {
     }
   }, [message])
 
-  useEffect(() => { load(); loadSettings() }, [load, loadSettings])
+  useEffect(() => { load(); loadSettings(); loadCheckinStatus() }, [load, loadSettings, loadCheckinStatus])
 
   // Toggle auto-checkin
   const toggleAutoCheckin = useCallback(async (checked: boolean) => {
@@ -137,26 +152,35 @@ export function AccountPage() {
     }
   }, [message])
 
-  // Save checkin time range
+  // Save checkin time range / fixed time
   const saveCheckinTime = useCallback(async () => {
-    if (!checkinStart || !checkinEnd) return
     setSavingCheckin(true)
     try {
-      const start = checkinStart.format('HH:mm')
-      const end = checkinEnd.format('HH:mm')
-      const updated = await api.saveSettings({
-        checkin_time_start: start,
-        checkin_time_end: end,
-      })
+      const payload: Partial<AppSettings> = {
+        checkin_mode: checkinMode,
+      }
+      if (checkinMode === 'fixed') {
+        if (!checkinFixedTime) return
+        const fixed = checkinFixedTime.format('HH:mm')
+        payload.checkin_fixed_time = fixed
+      } else {
+        if (!checkinStart || !checkinEnd) return
+        const start = checkinStart.format('HH:mm')
+        const end = checkinEnd.format('HH:mm')
+        payload.checkin_time_start = start
+        payload.checkin_time_end = end
+      }
+      const updated = await api.saveSettings(payload)
       setSettings(updated)
       setCheckinModalOpen(false)
-      message.success(`签到时间已更新：${start} – ${end}`)
+      loadCheckinStatus()
+      message.success('签到配置已更新')
     } catch {
       message.error('保存失败')
     } finally {
       setSavingCheckin(false)
     }
-  }, [checkinStart, checkinEnd, message])
+  }, [checkinMode, checkinFixedTime, checkinStart, checkinEnd, loadCheckinStatus, message])
 
   if (loading && !data) {
     return <Spin size="large" style={{ display: 'block', margin: '120px auto' }} />
@@ -202,6 +226,17 @@ export function AccountPage() {
             {checkedInToday(profile?.last_checkin_time) ? '今日已签到' : '签到'}
           </Button>
           <Button type="primary" ghost icon={<ReloadOutlined />} loading={refreshing} onClick={refresh}>强制刷新</Button>
+          <Button
+            icon={<HistoryOutlined />}
+            onClick={() => { loadCheckinStatus(); setHistoryModalOpen(true) }}
+          >
+            打卡状态
+            {checkinStatusData?.status?.akile?.checked_in ? (
+              <Badge status="success" style={{ marginLeft: 6 }} />
+            ) : (
+              <Badge status="warning" style={{ marginLeft: 6 }} />
+            )}
+          </Button>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <Switch
               size="small"
@@ -300,7 +335,7 @@ export function AccountPage() {
 
       {/* Auto-checkin time range modal */}
       <Modal
-        title="自动签到设置"
+        title="每日自动签到设置"
         open={checkinModalOpen}
         onCancel={() => setCheckinModalOpen(false)}
         onOk={saveCheckinTime}
@@ -311,30 +346,153 @@ export function AccountPage() {
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           <div>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              每天在设定的时间范围内随机选择一个时刻自动签到领取 AK 币，避免固定时间被识别。
+              设置每天自动打卡的时间规则。支持每天固定时刻打卡，或在时间窗口内随机打卡以模拟真实访问。
             </Text>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <Text>开始时间</Text>
-            <TimePicker
-              format="HH:mm"
-              minuteStep={5}
-              value={checkinStart}
-              onChange={setCheckinStart}
-              style={{ width: 140 }}
-            />
-            <Text>结束时间</Text>
-            <TimePicker
-              format="HH:mm"
-              minuteStep={5}
-              value={checkinEnd}
-              onChange={setCheckinEnd}
-              style={{ width: 140 }}
+
+          <div>
+            <Text strong style={{ marginRight: 12 }}>打卡模式：</Text>
+            <Radio.Group
+              value={checkinMode}
+              onChange={e => setCheckinMode(e.target.value)}
+              buttonStyle="solid"
+            >
+              <Radio.Button value="fixed">固定时间打卡</Radio.Button>
+              <Radio.Button value="random">随机时间窗口</Radio.Button>
+            </Radio.Group>
+          </div>
+
+          {checkinMode === 'fixed' ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Text>打卡时间：</Text>
+              <TimePicker
+                format="HH:mm"
+                minuteStep={1}
+                value={checkinFixedTime}
+                onChange={setCheckinFixedTime}
+                style={{ width: 140 }}
+              />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                每天将在该时刻准时打卡
+              </Text>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Text>开始时间：</Text>
+              <TimePicker
+                format="HH:mm"
+                minuteStep={5}
+                value={checkinStart}
+                onChange={setCheckinStart}
+                style={{ width: 120 }}
+              />
+              <Text>结束时间：</Text>
+              <TimePicker
+                format="HH:mm"
+                minuteStep={5}
+                value={checkinEnd}
+                onChange={setCheckinEnd}
+                style={{ width: 120 }}
+              />
+            </div>
+          )}
+
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            💡 提示：该配置将同时作用于 AkileCloud 与 ACCK 平台。后台每天会自动执行签到并记录打卡状态。
+          </Text>
+        </Space>
+      </Modal>
+
+      {/* Checkin Status & History Modal */}
+      <Modal
+        title={<Space><HistoryOutlined />双平台打卡状态与历史记录</Space>}
+        open={historyModalOpen}
+        onCancel={() => setHistoryModalOpen(false)}
+        footer={[
+          <Button key="close" onClick={() => setHistoryModalOpen(false)}>关闭</Button>,
+          <Button key="refresh" icon={<ReloadOutlined />} onClick={loadCheckinStatus}>刷新状态</Button>,
+        ]}
+        width={720}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <Row gutter={16}>
+            <Col span={12}>
+              <Card size="small" title="AkileCloud 今日打卡">
+                <Space orientation="vertical" size={4}>
+                  <div>
+                    <Text strong>今日状态：</Text>
+                    {checkinStatusData?.status?.akile?.checked_in ? (
+                      <Tag color="success">已打卡完成</Tag>
+                    ) : (
+                      <Tag color="warning">今日未打卡 / 待执行</Tag>
+                    )}
+                  </div>
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {checkinStatusData?.status?.akile?.last_log?.message || '今日尚无打卡日志'}
+                    </Text>
+                  </div>
+                </Space>
+              </Card>
+            </Col>
+            <Col span={12}>
+              <Card size="small" title="ACCK 今日打卡">
+                <Space orientation="vertical" size={4}>
+                  <div>
+                    <Text strong>今日状态：</Text>
+                    {checkinStatusData?.status?.acck?.checked_in ? (
+                      <Tag color="success">已打卡完成</Tag>
+                    ) : (
+                      <Tag color="warning">今日未打卡 / 待执行</Tag>
+                    )}
+                  </div>
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {checkinStatusData?.status?.acck?.last_log?.message || '今日尚无打卡日志'}
+                    </Text>
+                  </div>
+                </Space>
+              </Card>
+            </Col>
+          </Row>
+
+          <div>
+            <Text strong>最近打卡执行日志</Text>
+            <Table
+              size="small"
+              rowKey="id"
+              dataSource={checkinStatusData?.history || []}
+              pagination={{ pageSize: 5 }}
+              columns={[
+                {
+                  title: '平台',
+                  dataIndex: 'platform',
+                  key: 'platform',
+                  render: (p: string) => <Tag color={p === 'akile' ? 'blue' : 'purple'}>{p.toUpperCase()}</Tag>,
+                },
+                { title: '日期', dataIndex: 'checkin_date', key: 'checkin_date', width: 110 },
+                {
+                  title: '状态',
+                  dataIndex: 'status',
+                  key: 'status',
+                  width: 100,
+                  render: (s: string) => {
+                    if (s === 'success') return <Tag color="success">打卡成功</Tag>
+                    if (s === 'already_signed') return <Tag color="processing">已签过</Tag>
+                    return <Tag color="error">失败</Tag>
+                  },
+                },
+                { title: '说明', dataIndex: 'message', key: 'message', ellipsis: true },
+                {
+                  title: '执行时间',
+                  dataIndex: 'created_at',
+                  key: 'created_at',
+                  width: 160,
+                  render: (t: string) => t ? dayjs(t).format('YYYY-MM-DD HH:mm:ss') : '—',
+                },
+              ]}
             />
           </div>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            💡 例如设置 08:00 – 09:00，系统每天会在 08:00 到 09:00 之间随机选一个时间点自动签到。
-          </Text>
         </Space>
       </Modal>
     </div>

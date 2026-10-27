@@ -79,6 +79,12 @@ export function SettingsPage({ settings, onSaved }: Props) {
         watched_plans: (settings.watched_plans ?? []).join('\n'),
         dnd_start: settings.dnd_start ? dayjs(settings.dnd_start, 'HH:mm') : null,
         dnd_end: settings.dnd_end ? dayjs(settings.dnd_end, 'HH:mm') : null,
+        checkin_fixed_time: settings.checkin_fixed_time ? dayjs(settings.checkin_fixed_time, 'HH:mm') : dayjs('08:00', 'HH:mm'),
+        checkin_time_start: settings.checkin_time_start ? dayjs(settings.checkin_time_start, 'HH:mm') : dayjs('08:00', 'HH:mm'),
+        checkin_time_end: settings.checkin_time_end ? dayjs(settings.checkin_time_end, 'HH:mm') : dayjs('09:00', 'HH:mm'),
+        checkin_mode: settings.checkin_mode ?? 'fixed',
+        auto_checkin_enabled: settings.auto_checkin_enabled ?? true,
+        acck_auto_checkin_enabled: settings.acck_auto_checkin_enabled ?? true,
         refresh_margin_min: settings.refresh_margin_min_seconds ?? 60,
         refresh_margin_max: settings.refresh_margin_max_seconds ?? 21600,
       })
@@ -100,6 +106,9 @@ export function SettingsPage({ settings, onSaved }: Props) {
         watched_plans: splitLines(vals.watched_plans),
         dnd_start: vals.dnd_start ? dayjs(vals.dnd_start).format('HH:mm') : '23:00',
         dnd_end: vals.dnd_end ? dayjs(vals.dnd_end).format('HH:mm') : '08:00',
+        checkin_fixed_time: vals.checkin_fixed_time ? dayjs(vals.checkin_fixed_time).format('HH:mm') : '08:00',
+        checkin_time_start: vals.checkin_time_start ? dayjs(vals.checkin_time_start).format('HH:mm') : '08:00',
+        checkin_time_end: vals.checkin_time_end ? dayjs(vals.checkin_time_end).format('HH:mm') : '09:00',
         refresh_margin_min_seconds: vals.refresh_margin_min ?? 60,
         refresh_margin_max_seconds: vals.refresh_margin_max ?? 21600,
       }
@@ -397,6 +406,54 @@ export function SettingsPage({ settings, onSaved }: Props) {
               </Space>
             ),
           }]} />
+        </Card>
+
+        {/* ── Card: Checkin schedule ── */}
+        <Card size="small" title="每日自动打卡与时间设置" style={{ marginBottom: 16 }}>
+          <Space size="large" wrap style={{ marginBottom: 16 }}>
+            <Form.Item label="Akile 自动签到" name="auto_checkin_enabled" valuePropName="checked" style={{ marginBottom: 0 }}>
+              <Switch />
+            </Form.Item>
+            <Form.Item label="ACCK 自动签到" name="acck_auto_checkin_enabled" valuePropName="checked" style={{ marginBottom: 0 }}>
+              <Switch />
+            </Form.Item>
+          </Space>
+
+          <Form.Item label="打卡时间模式" name="checkin_mode">
+            <Radio.Group buttonStyle="solid">
+              <Radio.Button value="fixed">固定每天指定时间打卡</Radio.Button>
+              <Radio.Button value="random">随机时间窗口打卡</Radio.Button>
+            </Radio.Group>
+          </Form.Item>
+
+          <Form.Item
+            noStyle
+            shouldUpdate={(prev, cur) => prev.checkin_mode !== cur.checkin_mode}
+          >
+            {() => {
+              const mode = form.getFieldValue('checkin_mode') ?? 'fixed'
+              if (mode === 'fixed') {
+                return (
+                  <Form.Item label="固定打卡时刻 (每天)" name="checkin_fixed_time">
+                    <TimePicker format="HH:mm" minuteStep={1} style={{ width: 140 }} />
+                  </Form.Item>
+                )
+              }
+              return (
+                <Space size="middle" align="center">
+                  <Form.Item label="打卡窗口开始" name="checkin_time_start" style={{ marginBottom: 12 }}>
+                    <TimePicker format="HH:mm" minuteStep={5} style={{ width: 120 }} />
+                  </Form.Item>
+                  <Form.Item label="打卡窗口结束" name="checkin_time_end" style={{ marginBottom: 12 }}>
+                    <TimePicker format="HH:mm" minuteStep={5} style={{ width: 120 }} />
+                  </Form.Item>
+                </Space>
+              )
+            }}
+          </Form.Item>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            💡 系统每天会准时（或在随机窗口内）自动向 AkileCloud 和 ACCK 发起打卡领币，并延长 Token 有效期。
+          </Text>
         </Card>
 
         {/* ── Card 2: Monitor scope ── */}

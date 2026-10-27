@@ -112,8 +112,11 @@ DEFAULTS: dict[str, Any] = {
     # --- System ---
     "event_retention_days": 90,       # auto-prune events older than this
     "auto_checkin_enabled": True,       # daily auto sign-in for AK coins
-    "checkin_time_start": "08:00",     # earliest random checkin time (HH:MM)
-    "checkin_time_end": "09:00",       # latest random checkin time (HH:MM)
+    "acck_auto_checkin_enabled": True,  # daily auto sign-in for ACCK
+    "checkin_mode": "fixed",           # "fixed" (固定几点) | "random" (随机时间窗口)
+    "checkin_fixed_time": "08:00",     # 固定打卡时间 (HH:MM)
+    "checkin_time_start": "08:00",     # random checkin window start (HH:MM)
+    "checkin_time_end": "09:00",       # random checkin window end (HH:MM)
     "random_jitter_enabled": True,      # add random jitter to poll intervals (±20%)
     "store_last_refresh": None,          # last time store data was refreshed (ISO8601)
     "timezone": "Asia/Shanghai",

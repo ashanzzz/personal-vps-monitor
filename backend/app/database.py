@@ -124,6 +124,19 @@ class AccountCache(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class CheckinLog(Base):
+    """Daily checkin status and history for Akile & ACCK."""
+    __tablename__ = "checkin_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)  # "akile" | "acck"
+    checkin_date: Mapped[str] = mapped_column(String(16), nullable=False)  # "YYYY-MM-DD"
+    status: Mapped[str] = mapped_column(String(32), nullable=False)  # "success" | "already_signed" | "failed"
+    message: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON blob
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 async def init_db():
     async with engine.begin() as conn:
         # SQLite concurrency hardening: WAL lets readers and a writer coexist

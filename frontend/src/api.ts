@@ -209,6 +209,9 @@ export interface AppSettings {
   // Logging
   log_level: 'INFO' | 'DEBUG'
   auto_checkin_enabled: boolean
+  acck_auto_checkin_enabled?: boolean
+  checkin_mode?: 'fixed' | 'random'
+  checkin_fixed_time?: string
   checkin_time_start: string
   checkin_time_end: string
   random_jitter_enabled: boolean
@@ -288,6 +291,31 @@ export const api = {
     http.post<AccountInfo>('/api/account/refresh').then(r => r.data),
 
   // --- Checkin ---
+  getCheckinStatus: () =>
+    http.get<{
+      today: string
+      config: {
+        mode: 'fixed' | 'random'
+        fixed_time: string
+        time_start: string
+        time_end: string
+        akile_enabled: boolean
+        acck_enabled: boolean
+      }
+      status: {
+        akile: { checked_in: boolean; status: string; last_log: any }
+        acck: { checked_in: boolean; status: string; last_log: any }
+      }
+      history: Array<{
+        id: number
+        platform: string
+        checkin_date: string
+        status: string
+        message: string
+        created_at: string | null
+      }>
+    }>('/api/checkin/status').then(r => r.data),
+
   checkin: () =>
     http.post<{ status_code: number; status_msg: string; ak_coin_earned?: number }>('/api/checkin').then(r => r.data),
 

@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Card, Statistic, Row, Col, Button, Space, Empty, Table, Spin,
-  Descriptions, Alert, Typography, App as AntApp,
+  Descriptions, Alert, Typography, App as AntApp, Modal, Tag, Badge,
 } from 'antd'
 import {
   ReloadOutlined, WalletOutlined, CloudServerOutlined, CheckCircleTwoTone,
-  CloseCircleTwoTone, GoldOutlined, SafetyCertificateOutlined,
+  CloseCircleTwoTone, GoldOutlined, SafetyCertificateOutlined, HistoryOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
+import dayjs from 'dayjs'
 import { api } from '../api'
 import type { AcckAccountInfo, AcckServer } from '../api'
 
@@ -43,6 +44,15 @@ export function AcckAccountPage() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [checkingIn, setCheckingIn] = useState(false)
+  const [checkinStatusData, setCheckinStatusData] = useState<any>(null)
+  const [historyModalOpen, setHistoryModalOpen] = useState(false)
+
+  const loadCheckinStatus = useCallback(async () => {
+    try {
+      const res = await api.getCheckinStatus()
+      setCheckinStatusData(res)
+    } catch { /* ignore */ }
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -81,7 +91,7 @@ export function AcckAccountPage() {
     }
   }, [message])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load(); loadCheckinStatus() }, [load, loadCheckinStatus])
 
   if (loading && !data) {
     return <Spin size="large" style={{ display: 'block', margin: '120px auto' }} />
@@ -126,6 +136,17 @@ export function AcckAccountPage() {
           </Button>
           <Button type="primary" ghost icon={<ReloadOutlined />} loading={refreshing} onClick={refresh}>
             强制刷新
+          </Button>
+          <Button
+            icon={<HistoryOutlined />}
+            onClick={() => { loadCheckinStatus(); setHistoryModalOpen(true) }}
+          >
+            打卡状态
+            {checkinStatusData?.status?.acck?.checked_in ? (
+              <Badge status="success" style={{ marginLeft: 6 }} />
+            ) : (
+              <Badge status="warning" style={{ marginLeft: 6 }} />
+            )}
           </Button>
         </Space>
       </div>
@@ -207,6 +228,99 @@ export function AcckAccountPage() {
           />
         )}
       </Card>
+
+      {/* Checkin Status & History Modal */}
+      <Modal
+        title={<Space><HistoryOutlined />双平台打卡状态与历史记录</Space>}
+        open={historyModalOpen}
+        onCancel={() => setHistoryModalOpen(false)}
+        footer={[
+          <Button key="close" onClick={() => setHistoryModalOpen(false)}>关闭</Button>,
+          <Button key="refresh" icon={<ReloadOutlined />} onClick={loadCheckinStatus}>刷新状态</Button>,
+        ]}
+        width={720}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <Row gutter={16}>
+            <Col span={12}>
+              <Card size="small" title="ACCK 今日打卡">
+                <Space direction="vertical" size={4}>
+                  <div>
+                    <Text strong>今日状态：</Text>
+                    {checkinStatusData?.status?.acck?.checked_in ? (
+                      <Tag color="success">已打卡完成</Tag>
+                    ) : (
+                      <Tag color="warning">今日未打卡 / 待执行</Tag>
+                    )}
+                  </div>
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {checkinStatusData?.status?.acck?.last_log?.message || '今日尚无打卡日志'}
+                    </Text>
+                  </div>
+                </Space>
+              </Card>
+            </Col>
+            <Col span={12}>
+              <Card size="small" title="AkileCloud 今日打卡">
+                <Space direction="vertical" size={4}>
+                  <div>
+                    <Text strong>今日状态：</Text>
+                    {checkinStatusData?.status?.akile?.checked_in ? (
+                      <Tag color="success">已打卡完成</Tag>
+                    ) : (
+                      <Tag color="warning">今日未打卡 / 待执行</Tag>
+                    )}
+                  </div>
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {checkinStatusData?.status?.akile?.last_log?.message || '今日尚无打卡日志'}
+                    </Text>
+                  </div>
+                </Space>
+              </Card>
+            </Col>
+          </Row>
+
+          <div>
+            <Text strong>最近打卡执行日志</Text>
+            <Table
+              size="small"
+              rowKey="id"
+              dataSource={checkinStatusData?.history || []}
+              pagination={{ pageSize: 5 }}
+              columns={[
+                {
+                  title: '平台',
+                  dataIndex: 'platform',
+                  key: 'platform',
+                  render: (p: string) => <Tag color={p === 'akile' ? 'blue' : 'purple'}>{p.toUpperCase()}</Tag>,
+                },
+                { title: '日期', dataIndex: 'checkin_date', key: 'checkin_date', width: 110 },
+                {
+                  title: '状态',
+                  dataIndex: 'status',
+                  key: 'status',
+                  width: 100,
+                  render: (s: string) => {
+                    if (s === 'success') return <Tag color="success">打卡成功</Tag>
+                    if (s === 'already_signed') return <Tag color="processing">已签过</Tag>
+                    return <Tag color="error">失败</Tag>
+                  },
+                },
+                { title: '说明', dataIndex: 'message', key: 'message', ellipsis: true },
+                {
+                  title: '执行时间',
+                  dataIndex: 'created_at',
+                  key: 'created_at',
+                  width: 160,
+                  render: (t: string) => t ? dayjs(t).format('YYYY-MM-DD HH:mm:ss') : '—',
+                },
+              ]}
+            />
+          </div>
+        </Space>
+      </Modal>
     </div>
   )
 }
