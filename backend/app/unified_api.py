@@ -284,24 +284,35 @@ async def renew_server(
     if req.platform == "acck":
         if not acck_tok:
             raise HTTPException(400, "ACCK token not configured")
-        # 1. Create renew order
-        order_res = await acck_client.create_renew_order(acck_tok, req.server_id, req.cycle)
-        order_info = order_res.get("order") or order_res
-        order_id = order_info.get("id")
+        
+        # ACCK renews in 1-month increments; loop cycle times if requested
+        cycle_count = max(1, req.cycle)
+        orders_created = []
+        paid_count = 0
+        last_pay_res = None
 
-        pay_res = None
-        if req.auto_pay and order_id:
-            try:
-                pay_res = await acck_client.pay_order(acck_tok, order_id, payment_method="balance")
-            except Exception as e:
-                pay_res = {"error": f"Auto-pay failed: {e}"}
+        for i in range(cycle_count):
+            order_res = await acck_client.create_renew_order(acck_tok, req.server_id, 1)
+            order_info = order_res.get("order") or order_res
+            order_id = order_info.get("id")
+            orders_created.append(order_res)
+
+            if req.auto_pay and order_id:
+                try:
+                    last_pay_res = await acck_client.pay_order(acck_tok, order_id, payment_method="balance")
+                    if last_pay_res.get("result", {}).get("new_status") == "paid" or "成功" in str(last_pay_res):
+                        paid_count += 1
+                except Exception as e:
+                    last_pay_res = {"error": f"Auto-pay failed: {e}"}
 
         return {
             "platform": "acck",
             "server_id": req.server_id,
-            "order": order_res,
-            "paid": pay_res is not None and "error" not in pay_res,
-            "pay_result": pay_res,
+            "cycle_requested": cycle_count,
+            "orders": orders_created,
+            "paid": paid_count == cycle_count,
+            "paid_count": paid_count,
+            "pay_result": last_pay_res,
         }
     elif req.platform == "akile":
         if not akile_tok:
