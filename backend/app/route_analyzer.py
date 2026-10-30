@@ -448,18 +448,21 @@ def evaluate_cost_effectiveness(
         # 如日本 IIJ 这种高配机器（2G口径+2G内存+20G盘+1000G流量，月折合13.25元）
         ltv_score = 18.0
         reasons.append(f"大带宽({bandwidth_mbps}M)+大内存({int(ram_gb)}G)+大硬盘({disk_gb}G) (优质高配生产力机型，¥{monthly_renew:.2f}/月超高价值 +18)")
-    elif monthly_renew <= 22.0:
+    elif monthly_renew <= 20.0:
         ltv_score = 12.0
         reasons.append(f"月供¥{monthly_renew:.2f}/月 (好线路20元档成交价一般/平价 +12)")
+    elif monthly_renew <= 22.0:
+        ltv_score = 7.0
+        reasons.append(f"月供¥{monthly_renew:.2f}/月略微超出平价线 (+7)")
+    elif monthly_renew <= 25.0:
+        ltv_score = 2.0
+        reasons.append(f"月供¥{monthly_renew:.2f}/月已偏高，长期养机持续失血负担大 (+2)")
     elif is_high_spec_powerhouse:
-        ltv_score = 15.0
-        reasons.append(f"高配生产力机型({int(ram_gb)}G内存/{disk_gb}G盘/{bandwidth_mbps}M口) (大容量多流量，月供良好 +15)")
-    elif monthly_renew <= 45.0:
-        ltv_score = 8.0
-        reasons.append(f"月供¥{monthly_renew:.2f}/月偏贵 (-4)")
+        ltv_score = 10.0
+        reasons.append(f"高配生产力机型({int(ram_gb)}G内存/{disk_gb}G盘/{bandwidth_mbps}M口) (大容量多流量，月供尚可 +10)")
     else:
-        ltv_score = 4.0
-        reasons.append(f"月续费¥{monthly_renew:.2f}/月过高，缺乏长期持有性价比 (-6)")
+        ltv_score = 0.0
+        reasons.append(f"月续费¥{monthly_renew:.2f}/月过高，缺乏长期持有性价比 (0)")
 
     # 针对山哥业务场景专属硬件加分（FRP反代/大流量/超大口径）：
     # 2000Mbps (2.5G口) 是市面稀缺硬实力！
@@ -484,17 +487,18 @@ def evaluate_cost_effectiveness(
         elif is_high_spec_powerhouse and monthly_renew <= 20.0:
             price_score = 14.0
             reasons.append(f"一手高配生产力机型月续费¥{monthly_renew:.2f}/月极具性价比 (+14)")
-        elif monthly_renew <= 22.0:
+        elif monthly_renew <= 20.0:
             price_score = 10.0
             reasons.append(f"一手月续费¥{monthly_renew:.2f}/月 (20元档一般价位 +10)")
-        elif is_high_spec_powerhouse:
-            price_score = 12.0
-            reasons.append("优质高配生产力机型续费价值良好 (+12)")
-        elif monthly_renew <= 40.0:
-            price_score = 7.0
-        else:
+        elif monthly_renew <= 25.0:
             price_score = 4.0
-            reasons.append(f"一手月续费¥{monthly_renew:.2f}/月偏高 (-4)")
+            reasons.append(f"一手月续费¥{monthly_renew:.2f}/月偏贵 (-4)")
+        elif is_high_spec_powerhouse:
+            price_score = 10.0
+            reasons.append("优质高配生产力机型续费价值良好 (+10)")
+        else:
+            price_score = 2.0
+            reasons.append(f"一手月续费¥{monthly_renew:.2f}/月过高 (-6)")
     else:
         # 二手商品：双轮驱动（销售价看折价捡漏，续费价看养机压力）
         ask_score = 8.0
@@ -521,23 +525,71 @@ def evaluate_cost_effectiveness(
         elif is_high_spec_powerhouse and monthly_renew <= 20.0:
             price_score = 14.0
             reasons.append(f"入手¥{price_cny:.1f}，高配生产力机型续费价值极高 (+{int(price_score)})")
-        elif monthly_renew <= 22.0:
+        elif monthly_renew <= 20.0:
             price_score = min(11.0, ask_score)
             reasons.append(f"入手¥{price_cny:.1f}，月续费¥{monthly_renew:.1f} (好线路20元档成交价一般 +{int(price_score)})")
+        elif monthly_renew <= 25.0:
+            price_score = min(3.0, ask_score)
+            reasons.append(f"入手¥{price_cny:.1f}，但月续费¥{monthly_renew:.1f}偏贵压低价格分 (+{int(price_score)})")
         elif is_high_spec_powerhouse:
-            price_score = min(13.0, ask_score)
+            price_score = min(10.0, ask_score)
             reasons.append(f"入手¥{price_cny:.1f}，高配生产力机型长线价值良好 (+{int(price_score)})")
-        elif monthly_renew > 50.0:
-            # 入手虽然可能便宜，但月续费昂贵，适度压制价格分
-            price_score = max(4.0, ask_score - 5.0)
-            reasons.append(f"注意：入手¥{price_cny:.1f}虽低但月续费¥{monthly_renew:.1f}较高 (修正得分+{int(price_score)})")
         else:
-            price_score = ask_score
+            price_score = 1.0
+            reasons.append(f"注意：月续费¥{monthly_renew:.1f}过高，缺乏二手长期持有性价比 (+1)")
 
-    raw_total = network_score + traffic_score + ltv_score + price_score
-    final_score = max(0, min(100, int(round(raw_total))))
+    # 5. 续费致命失血惩罚 (Renewal Drain Penalty)
+    # 严格遵照山哥铁律：优化比较好、续费 25、流量 1000 的，只能打三四十分！
+    # 超过 20 元平价线的机器，每多 1 元月供产生强烈失血惩罚
+    renew_drain_penalty = 0.0
+    if not is_high_spec_powerhouse and monthly_renew > 20.0:
+        renew_drain_penalty = (monthly_renew - 20.0) * 4.2
+        reasons.append(f"高月租失血惩罚：月供¥{monthly_renew:.1f}/月严重透支性价比 (-{int(renew_drain_penalty)})")
+
+    raw_total = network_score + traffic_score + ltv_score + price_score - renew_drain_penalty
+    final_score = max(5, min(100, int(round(raw_total))))
 
     USD_RATE = 7.25
+
+    # 6. 山哥传家宝资产化估值模型 (Annualized Arbitrage Fair Valuation)
+    # 以市场等效 1000G 月租作为机会成本锚点：
+    # 1. 传家宝 (月供 <= 2元):
+    #    - 普通烂网: 市场月租 8~10元/月 -> 年化公允转让身价: ¥80 左右
+    #    - 优化好网(A级/软银/4837/CMI): 市场月租 18~22元/月 -> 年化公允转让身价: ¥180~¥200 左右
+    #    - 顶级好网(S级/9929/GIA/双ISP): 市场月租 25~30元/月 -> 年化公允转让身价: ¥220~¥250 左右 (相当于10倍年供)
+    # 2. 高配生产力优良机型: 年化公允身价约 ¥120
+    # 3. 普通/高月租机型: 缺乏长期套利溢价，转让价值趋于零
+    fair_market_value_cny = 0.0
+    valuation_rationale = ""
+    flow_multiplier = min(1.3, max(0.6, flow_total_gb / 1000.0))
+    p_route = route_info.get("primary_route", "")
+    is_native = bool(route_info.get("native_ip"))
+
+    if monthly_renew <= 2.5:
+        if route_info.get("tier") == "S" or "双ISP" in p_route or "9929" in p_route or "GIA" in p_route:
+            base_v = 220.0 + (30.0 if is_native else 0.0)
+            fair_market_value_cny = round(base_v * flow_multiplier, 1)
+            valuation_rationale = f"顶级好线路传家宝 (市场等效月租¥25-30/月，年化公允身价¥{fair_market_value_cny}，约10倍年供)"
+        elif route_info.get("tier") == "A" or "软银" in p_route or "4837" in p_route or "CMI" in p_route:
+            base_v = 180.0 + (20.0 if is_native else 0.0)
+            fair_market_value_cny = round(base_v * flow_multiplier, 1)
+            valuation_rationale = f"优质好线路传家宝 (市场等效月租¥18-20/月，年化公允身价¥{fair_market_value_cny}，约10倍年供)"
+        else:
+            base_v = 80.0
+            fair_market_value_cny = round(base_v * flow_multiplier, 1)
+            valuation_rationale = f"普通/非优化线路传家宝 (市场等效月租¥8-10/月，年化公允身价¥{fair_market_value_cny}，约10倍年供)"
+    elif is_high_spec_powerhouse and monthly_renew <= 15.0:
+        fair_market_value_cny = 120.0
+        valuation_rationale = "高配生产力优质机型 (2.5G口+2G内存，年化公允转让身价¥120)"
+    elif monthly_renew <= 10.0:
+        fair_market_value_cny = 25.0
+        valuation_rationale = "轻量超值月租机 (公允二手转让身价¥20-30)"
+    elif monthly_renew <= 20.0:
+        fair_market_value_cny = 10.0
+        valuation_rationale = "平价月租机 (建议折价转让，公允身价约¥10)"
+    else:
+        fair_market_value_cny = 5.0
+        valuation_rationale = "高月租失血机型 (无长期套利溢价，转让价值趋于0)"
 
     # 5. 指数函数调整价格敏感度 (Exponential Price Sensitivity Model)
     # 遵照山哥指导：
@@ -592,6 +644,8 @@ def evaluate_cost_effectiveness(
         "cost_per_point_cny": cost_per_point_cny,
         "monthly_points_per_yuan": monthly_points_per_yuan,
         "monthly_points_per_usd": monthly_points_per_usd,
+        "fair_market_value_cny": fair_market_value_cny,
+        "valuation_rationale": valuation_rationale,
         "breakdown": {
             "network_score": max(0, int(network_score)),
             "ltv_score": int(ltv_score),

@@ -498,6 +498,8 @@ export interface CostEffectiveness {
   cost_per_point_cny?: number
   monthly_points_per_yuan?: number
   monthly_points_per_usd?: number
+  fair_market_value_cny?: number
+  valuation_rationale?: string
   breakdown: {
     network_score: number
     ltv_score: number

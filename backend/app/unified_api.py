@@ -759,6 +759,8 @@ async def get_unified_secondhand(
                     "badge_color": eval_res["cost_effectiveness"]["badge_color"],
                     "points_per_yuan": eval_res["cost_effectiveness"]["points_per_yuan"],
                     "points_per_usd": eval_res["cost_effectiveness"]["points_per_usd"],
+                    "fair_market_value_cny": eval_res["cost_effectiveness"].get("fair_market_value_cny", 0.0),
+                    "valuation_rationale": eval_res["cost_effectiveness"].get("valuation_rationale", ""),
                     "reasons": eval_res["cost_effectiveness"]["reasons"],
                     "raw": item,
                 })
@@ -839,6 +841,8 @@ async def get_unified_secondhand(
                 "badge_color": eval_res["cost_effectiveness"]["badge_color"],
                 "points_per_yuan": eval_res["cost_effectiveness"]["points_per_yuan"],
                 "points_per_usd": eval_res["cost_effectiveness"]["points_per_usd"],
+                "fair_market_value_cny": eval_res["cost_effectiveness"].get("fair_market_value_cny", 0.0),
+                "valuation_rationale": eval_res["cost_effectiveness"].get("valuation_rationale", ""),
                 "reasons": eval_res["cost_effectiveness"]["reasons"],
                 "raw": item,
             })

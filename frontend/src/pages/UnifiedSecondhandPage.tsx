@@ -238,6 +238,12 @@ export const UnifiedSecondhandPage: React.FC = () => {
                       • 长线月供比: {ce.monthly_points_per_yuan} 分/元·月 (${ce.monthly_points_per_usd}/$)
                     </div>
                   ) : null}
+                  {ce?.fair_market_value_cny ? (
+                    <div style={{ color: '#4ade80', marginBottom: 4, fontWeight: 600 }}>
+                      💰 公允转让估值: ¥{ce.fair_market_value_cny}
+                      {ce.valuation_rationale ? <div style={{ fontSize: 11, color: '#cbd5e1', fontWeight: 400 }}>{ce.valuation_rationale}</div> : null}
+                    </div>
+                  ) : null}
                   {ce?.cost_per_point_cny ? (
                     <div style={{ color: '#94a3b8', marginBottom: 4 }}>
                       • 单位品质成本: ¥{ce.cost_per_point_cny} / 分
