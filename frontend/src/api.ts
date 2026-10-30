@@ -494,7 +494,7 @@ export interface CostEffectiveness {
   badge_color: string
   breakdown: {
     network_score: number
-    hardware_score: number
+    ltv_score: number
     traffic_score: number
     price_score: number
   }

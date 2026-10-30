@@ -230,10 +230,10 @@ export const UnifiedSecondhandPage: React.FC = () => {
                   </div>
                   {ce?.breakdown && (
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 8px', margin: '4px 0' }}>
-                      <div>• 线路网络: <b>{ce.breakdown.network_score}/35</b></div>
-                      <div>• 硬件产出: <b>{ce.breakdown.hardware_score}/25</b></div>
-                      <div>• 流量资产: <b>{ce.breakdown.traffic_score}/20</b></div>
-                      <div>• 价格与折扣: <b>{ce.breakdown.price_score}/20</b></div>
+                      <div>• 线路网络: <b>{ce.breakdown.network_score}/30</b></div>
+                      <div>• 长期持有: <b>{ce.breakdown.ltv_score}/25</b></div>
+                      <div>• 周期配额: <b>{ce.breakdown.traffic_score}/25</b></div>
+                      <div>• 入手门槛: <b>{ce.breakdown.price_score}/20</b></div>
                     </div>
                   )}
                   {pr?.intrinsic_value_cny ? (

@@ -243,20 +243,25 @@ def evaluate_secondhand_listing(
     days_left: int = 30,
 ) -> Dict[str, Any]:
     """
-    Full multidimensional evaluation for secondhand arbitrage and sniping safety.
+    Full multidimensional evaluation for secondhand arbitrage, long-term asset value, and sniping safety.
     """
     route_info = analyze_route(name=name, node_name=node_name, detail=detail, intro=intro, area=area)
     traffic_info = analyze_traffic(flow_total_gb, flow_used_gb, reset_price_cny)
 
     price_cny = max(0.0, float(price_cny or 0))
     renew_price_cny = max(0.0, float(renew_price_cny or 0))
+    monthly_renew = renew_price_cny if renew_price_cny > 0 else price_cny
 
-    # Real acquisition cost = asking price + reset traffic fee (if depleted)
-    traffic_penalty = traffic_info["reset_price_cny"] if traffic_info["is_depleted"] else 0.0
+    # Check if budget/perpetual asset (low entry price or low recurring monthly fee)
+    # 核心：流量是每月自动重置刷新的资产。如果价格够低，当期流量用尽可忽略，因为我们要的是长远价值！
+    is_budget_asset = (monthly_renew <= 10.0) or (price_cny <= 10.0)
+
+    # For budget assets, buyers hold for the perpetual monthly quota (waits for monthly cycle reset),
+    # so immediate traffic reset penalty is OPTIONAL and NOT forced into acquisition cost.
+    traffic_penalty = 0.0 if is_budget_asset else (traffic_info["reset_price_cny"] if traffic_info["is_depleted"] else 0.0)
     real_total_cost = round(price_cny + traffic_penalty, 2)
 
     # Intrinsic value baseline
-    # S-tier: high intrinsic value (0.8x renewal price + native bonus)
     tier_multipliers = {"S": 0.85, "A": 0.70, "B": 0.50, "C": 0.35}
     base_multiplier = tier_multipliers.get(route_info["tier"], 0.35)
 
@@ -272,50 +277,17 @@ def evaluate_secondhand_listing(
         block_reasons.append("IP已被阻断/被墙，严禁买入")
 
     if traffic_info["is_depleted"]:
-        # If traffic is 0 and real total cost >= 70% of renew price
-        if real_total_cost >= renew_price_cny * 0.7 and renew_price_cny > 0:
-            snipable = False
-            block_reasons.append(f"流量已用光(0G/重置需¥{traffic_penalty})，加上重置费后总成本¥{real_total_cost}过高，缺乏套利空间")
+        if not is_budget_asset:
+            # High cost machine depleted of traffic
+            if real_total_cost >= renew_price_cny * 0.75 and renew_price_cny > 0:
+                snipable = False
+                block_reasons.append(f"中高价位机型流量用尽(重置需¥{traffic_info['reset_price_cny']})，到手成本¥{real_total_cost}偏高")
         else:
-            block_reasons.append(f"注意：流量已耗尽(需¥{traffic_penalty}重置)")
+            block_reasons.append("当期流量已用尽（低持有成本机型，静待月度重置满血复活）")
 
-    if route_info["tier"] == "C" and price_cny > 10.0:
+    if route_info["tier"] == "C" and price_cny > 15.0:
         snipable = False
         block_reasons.append("普通非优化线路，转售价超标缺乏捡漏价值")
-
-    # Score calculation (0 to 100)
-    score = 50.0
-    if route_info["tier"] == "S":
-        score += 30.0
-    elif route_info["tier"] == "A":
-        score += 20.0
-    elif route_info["tier"] == "B":
-        score += 10.0
-
-    if route_info["native_ip"]:
-        score += 10.0
-    if not route_info["ip_clean"]:
-        score -= 40.0
-
-    # Traffic contribution
-    if traffic_info["is_depleted"]:
-        score -= 25.0
-    elif traffic_info["is_low"]:
-        score -= 10.0
-    else:
-        score += 10.0
-
-    # Discount score
-    if renew_price_cny > 0 and price_cny > 0:
-        discount = price_cny / renew_price_cny
-        if discount <= 0.3:
-            score += 20.0
-        elif discount <= 0.5:
-            score += 10.0
-        elif discount > 0.9:
-            score -= 15.0
-
-    final_score = max(0, min(100, round(score, 1)))
 
     # Cost-effectiveness evaluation
     cost_eff = evaluate_cost_effectiveness(
@@ -336,6 +308,8 @@ def evaluate_secondhand_listing(
         area=area,
     )
 
+    final_score = cost_eff["score"]
+
     return {
         "route": route_info,
         "traffic": traffic_info,
@@ -345,6 +319,7 @@ def evaluate_secondhand_listing(
             "reset_traffic_fee_cny": traffic_penalty,
             "real_total_cost_cny": real_total_cost,
             "intrinsic_value_cny": intrinsic_value,
+            "is_budget_asset": is_budget_asset,
         },
         "cost_effectiveness": cost_eff,
         "sniping_verdict": {
@@ -371,7 +346,7 @@ def evaluate_cost_effectiveness(
     bandwidth_mbps: int = 100,
     flow_total_gb: float = 1000.0,
     flow_used_gb: float = 0.0,
-    reset_price_cny: float = 0.0,
+    reset_price_cny: float = 20.0,
     name: str = "",
     node_name: str = "",
     detail: str = "",
@@ -380,120 +355,125 @@ def evaluate_cost_effectiveness(
 ) -> Dict[str, Any]:
     """
     Multidimensional cost-effectiveness scoring engine (0 - 100).
+    Values long-term recurring efficiency and cyclical quota replenishing.
 
     Dimensions:
-      1. Network & Routing Tier (0-35 points)
-      2. Hardware Output per Yuan (0-25 points)
-      3. Traffic Asset & Usability (0-20 points)
-      4. Pricing / Discount Margin (0-20 points)
+      1. Network & Routing Tier (0-30 points)
+      2. Long-Term Recurring Value / LTV (0-25 points)
+      3. Cyclical Traffic Quota & Reset Health (0-25 points)
+      4. Pricing & Entry Barrier (0-20 points)
     """
     route_info = analyze_route(name=name, node_name=node_name, detail=detail, intro=intro, area=area)
     traffic_info = analyze_traffic(flow_total_gb, flow_used_gb, reset_price_cny)
 
     price_cny = max(0.1, float(price_cny or 0))
     renew_price_cny = max(0.0, float(renew_price_cny or 0))
-    effective_price = price_cny
+    monthly_renew = renew_price_cny if (item_type == "secondhand" and renew_price_cny > 0) else price_cny
+    monthly_renew = max(0.1, monthly_renew)
     reasons: List[str] = []
 
-    # 1. Network & Routing Tier (0 - 35 points)
-    network_score = 10.0
+    # 1. Network & Routing Tier (0 - 30 points)
+    network_score = 8.0
     tier = route_info["tier"]
     if tier == "S":
-        network_score = 35.0
-        reasons.append(f"{route_info['primary_route']} (S级精品线路 +35)")
+        network_score = 30.0
+        reasons.append(f"{route_info['primary_route']} (S级精品线路 +30)")
     elif tier == "A":
-        network_score = 26.0
-        reasons.append(f"{route_info['primary_route']} (A级优化直连 +26)")
+        network_score = 22.0
+        reasons.append(f"{route_info['primary_route']} (A级优化直连 +22)")
     elif tier == "B":
-        network_score = 18.0
-        reasons.append("亚太直连BGP (+18)")
+        network_score = 15.0
+        reasons.append("亚太直连BGP (+15)")
     else:
         network_score = 8.0
         reasons.append("普通国际BGP (+8)")
 
     if route_info["native_ip"]:
-        network_score = min(35.0, network_score + 4.0)
+        network_score = min(30.0, network_score + 4.0)
         reasons.append("原生IP认证 (+4)")
 
     if not route_info["ip_clean"]:
-        network_score = -20.0
+        network_score = -30.0
         reasons.append("IP阻断/被墙严重警告 (-50)")
 
-    # 2. Hardware Resource Score (0 - 25 points)
-    # Output Index: CPU (1.0), RAM GB (1.0), Disk (0.04), BW (0.01)
+    # 2. Long-Term Recurring Value / LTV (0 - 25 points)
+    # 核心：VPS是长期订阅资产，月续费越低，全生命周期成本越低，传家宝价值越高！
+    ltv_score = 10.0
+    if monthly_renew <= 2.0:
+        ltv_score = 25.0
+        reasons.append(f"月供仅¥{monthly_renew:.2f}/月 (绝版传家宝，长期持有近乎零成本 +25)")
+    elif monthly_renew <= 5.0:
+        ltv_score = 22.0
+        reasons.append(f"超低月供¥{monthly_renew:.2f}/月 (极高长线续费价值 +22)")
+    elif monthly_renew <= 12.0:
+        ltv_score = 18.0
+        reasons.append(f"亲民低月供¥{monthly_renew:.2f}/月 (+18)")
+    elif monthly_renew <= 25.0:
+        ltv_score = 14.0
+    elif monthly_renew <= 50.0:
+        ltv_score = 10.0
+    else:
+        ltv_score = 5.0
+        reasons.append("月供偏高，长期持有成本显著 (-5)")
+
+    # Hardware Output Bonus (+1~2 points)
     ram_gb = max(0.25, memory_mb / 1024)
-    hw_units = (cpu * 1.0) + (ram_gb * 1.2) + (disk_gb * 0.04) + (min(bandwidth_mbps, 2000) * 0.008)
-    # Output per dollar
-    # Benchmark: 1 unit per 10 CNY is average
-    monthly_cost = renew_price_cny if (item_type == "secondhand" and renew_price_cny > 0) else price_cny
-    monthly_cost = max(1.0, monthly_cost)
-    hw_ratio = hw_units / (monthly_cost / 10.0)
+    if cpu >= 2 or ram_gb >= 2.0 or bandwidth_mbps >= 500:
+        ltv_score = min(25.0, ltv_score + 2.0)
 
-    if hw_ratio >= 3.0:
-        hw_score = 25.0
-        reasons.append("硬件配置超规格产出 (+25)")
-    elif hw_ratio >= 1.8:
-        hw_score = 20.0
-        reasons.append("硬件配置优良 (+20)")
-    elif hw_ratio >= 1.0:
-        hw_score = 15.0
-    elif hw_ratio >= 0.5:
-        hw_score = 10.0
-    else:
-        hw_score = 5.0
-        reasons.append("硬件产出比偏低 (-5)")
-
-    # 3. Traffic Asset & Usability Score (0 - 20 points)
+    # 3. Cyclical Traffic Quota & Reset Health (0 - 25 points)
+    # 核心：流量是每个月自动重置刷新的资产，重点看每月供给额度与单价效率
     traffic_score = 10.0
-    if flow_total_gb <= 0:
-        # Unlimited traffic
-        traffic_score = 20.0
-        reasons.append("不限流量无限带宽 (+20)")
-    else:
-        if item_type == "secondhand":
-            if traffic_info["is_depleted"]:
-                traffic_score = 0.0
-                reasons.append(f"流量已用尽(重置需¥{traffic_info['reset_price_cny']}) 🛑")
-                effective_price += traffic_info["reset_price_cny"]
-            elif traffic_info["is_low"]:
-                traffic_score = 6.0
-                reasons.append(f"流量余量偏低 ({traffic_info['remaining_ratio_percent']}%) ⚠️")
-            else:
-                traffic_score = 18.0
-                reasons.append(f"流量充沛 ({traffic_info['remaining_gb']}G可用 +18)")
-        else:
-            # Store package
-            flow_per_yuan = flow_total_gb / monthly_cost
-            if flow_per_yuan >= 100:
-                traffic_score = 20.0
-                reasons.append("流量性价比极高 (+20)")
-            elif flow_per_yuan >= 40:
-                traffic_score = 15.0
-            else:
-                traffic_score = 10.0
+    remaining_gb = max(0.0, flow_total_gb - flow_used_gb)
+    is_depleted = (flow_total_gb > 0 and remaining_gb <= 1.0)
+    quota_efficiency = flow_total_gb / monthly_renew if monthly_renew > 0 else 50.0
+    is_budget_asset = (monthly_renew <= 10.0) or (price_cny <= 10.0)
 
-    # 4. Pricing & Discount Score (0 - 20 points)
+    if flow_total_gb <= 0:
+        traffic_score = 25.0
+        reasons.append("不限流量无限带宽 (+25)")
+    elif is_budget_asset:
+        # 低持有成本机型：每月自动满血重置，当期用尽不损长远价值！
+        if quota_efficiency >= 100:
+            traffic_score = 23.0
+            reasons.append(f"长效配额极高({int(quota_efficiency)}G/元·月，每月自动满血重置 +23)")
+        else:
+            traffic_score = 18.0
+            reasons.append(f"周期配额{int(flow_total_gb)}G按月自动刷新 (+18)")
+        if is_depleted:
+            reasons.append("提示：当期流量已用尽，但持有成本极低，静待月度重置即可")
+    else:
+        # 高持有成本机型：需考虑当期即时可用性
+        if is_depleted:
+            traffic_score = 8.0
+            reasons.append(f"当期流量已耗尽(重置需¥{reset_price_cny}) ⚠️")
+        elif remaining_gb / flow_total_gb < 0.2:
+            traffic_score = 12.0
+            reasons.append("当期剩余流量偏低 ⚠️")
+        else:
+            traffic_score = 20.0
+            reasons.append(f"当期流量充沛({int(remaining_gb)}G可用 +20)")
+
+    # 4. Pricing & Entry Barrier (0 - 20 points)
     price_score = 10.0
     if item_type == "secondhand":
-        if renew_price_cny > 0:
-            discount = effective_price / renew_price_cny
-            if discount <= 0.25:
+        if is_budget_asset and price_cny <= 10.0:
+            price_score = 20.0
+            reasons.append(f"入场成本仅¥{price_cny:.2f} (极低试错成本与流动性 +20)")
+        elif renew_price_cny > 0:
+            discount = price_cny / renew_price_cny
+            if discount <= 0.3:
                 price_score = 20.0
                 reasons.append(f"大额骨折转让({int(discount*100)}%折 +20)")
-            elif discount <= 0.50:
-                price_score = 16.0
-                reasons.append(f"半价转让({int(discount*100)}%折 +16)")
-            elif discount <= 0.85:
-                price_score = 12.0
-            elif discount > 1.2:
-                price_score = 0.0
-                reasons.append("转售价倒挂高于官方续费 (-15)")
+            elif discount <= 0.6:
+                price_score = 15.0
+                reasons.append(f"半价实惠转让({int(discount*100)}%折 +15)")
+            elif discount > 1.3:
+                price_score = 5.0
+                reasons.append("溢价过户转让 (-5)")
             else:
-                price_score = 7.0
-        else:
-            price_score = 10.0
+                price_score = 10.0
     else:
-        # Store pricing factor: absolute cheapness
         if price_cny <= 5.0:
             price_score = 20.0
             reasons.append("低至5元内极限底价 (+20)")
@@ -502,12 +482,10 @@ def evaluate_cost_effectiveness(
             reasons.append("百元内亲民低月付 (+16)")
         elif price_cny <= 30.0:
             price_score = 12.0
-        elif price_cny > 100.0:
-            price_score = 5.0
         else:
             price_score = 8.0
 
-    raw_total = network_score + hw_score + traffic_score + price_score
+    raw_total = network_score + ltv_score + traffic_score + price_score
     final_score = max(0, min(100, int(round(raw_total))))
 
     if not route_info["ip_clean"]:
@@ -538,7 +516,7 @@ def evaluate_cost_effectiveness(
         "badge_color": badge_color,
         "breakdown": {
             "network_score": max(0, int(network_score)),
-            "hardware_score": int(hw_score),
+            "ltv_score": int(ltv_score),
             "traffic_score": int(traffic_score),
             "price_score": int(price_score),
         },
