@@ -434,53 +434,74 @@ def evaluate_cost_effectiveness(
     ltv_score = 10.0
     if monthly_renew <= 2.0:
         ltv_score = 20.0
-        reasons.append(f"月供仅¥{monthly_renew:.2f}/月 (绝版传家宝 +20)")
+        reasons.append(f"月供仅¥{monthly_renew:.2f}/月 (绝版传家宝，长期持有近乎零成本 +20)")
     elif monthly_renew <= 5.0:
         ltv_score = 17.0
-        reasons.append(f"超低月供¥{monthly_renew:.2f}/月 (+17)")
+        reasons.append(f"超低月供¥{monthly_renew:.2f}/月 (极高长线续费价值 +17)")
     elif monthly_renew <= 12.0:
         ltv_score = 14.0
         reasons.append(f"亲民低月供¥{monthly_renew:.2f}/月 (+14)")
     elif monthly_renew <= 30.0:
         ltv_score = 10.0
+    elif monthly_renew <= 55.0:
+        ltv_score = 7.0
     else:
-        ltv_score = 6.0
+        ltv_score = 4.0
+        reasons.append("月续费偏高，长期持有成本显著 (-6)")
 
-    # 硬件配置加分 (CPU/内存/硬盘/带宽)
+    # 针对山哥业务场景加分（FRP穿透/自动化/大带宽）
     ram_gb = max(0.25, memory_mb / 1024)
-    if cpu >= 2 or ram_gb >= 2.0 or bandwidth_mbps >= 500:
+    if bandwidth_mbps >= 500:
         ltv_score = min(20.0, ltv_score + 2.0)
+        reasons.append(f"{bandwidth_mbps}Mbps大带宽(契合FRP反代与高速穿透 +2)")
+    elif cpu >= 2 or ram_gb >= 2.0:
+        ltv_score = min(20.0, ltv_score + 1.0)
 
-    # 4. 入手门槛与折价套利 (0 - 15 分)
+    # 4. 入手价格与续费价格双轮驱动 (0 - 15 分)
+    # 核心：全新机只看月续费；二手挂单必须同时看销售价格与续费价格！
     price_score = 8.0
-    if item_type == "secondhand":
-        if is_budget_asset and price_cny <= 10.0:
+    if item_type == "store":
+        # 全新商品：买入即按续费价，纯看续费价格水平
+        if monthly_renew <= 15.0:
             price_score = 15.0
-            reasons.append(f"极低入场门槛¥{price_cny:.2f} (+15)")
+            reasons.append(f"一手超值月续费¥{monthly_renew:.2f}/月 (+15)")
+        elif monthly_renew <= 25.0:
+            price_score = 12.0
+            reasons.append(f"一手适中月续费¥{monthly_renew:.2f}/月 (+12)")
+        elif monthly_renew <= 40.0:
+            price_score = 9.0
+        else:
+            price_score = 5.0
+            reasons.append(f"一手月续费¥{monthly_renew:.2f}/月偏高 (-5)")
+    else:
+        # 二手商品：双轮驱动（销售价看折价捡漏，续费价看养机压力）
+        ask_score = 8.0
+        if is_budget_asset and price_cny <= 10.0:
+            ask_score = 15.0
         elif renew_price_cny > 0:
             discount = price_cny / renew_price_cny
             if discount <= 0.3:
-                price_score = 15.0
-                reasons.append(f"大额骨折转让({int(discount*100)}%折 +15)")
+                ask_score = 15.0
             elif discount <= 0.6:
-                price_score = 12.0
-                reasons.append(f"半价实惠转让({int(discount*100)}%折 +12)")
+                ask_score = 12.0
             elif discount > 1.3:
-                price_score = 4.0
-                reasons.append("溢价过户转让 (-4)")
+                ask_score = 4.0
             else:
-                price_score = 8.0
-    else:
-        if price_cny <= 5.0:
-            price_score = 15.0
-            reasons.append("低至5元内极限底价 (+15)")
-        elif price_cny <= 15.0:
-            price_score = 12.0
-            reasons.append("百元内亲民低月付 (+12)")
-        elif price_cny <= 30.0:
-            price_score = 9.0
+                ask_score = 8.0
+
+        # 续费价对二手价格分的调节权重
+        if monthly_renew <= 5.0:
+            price_score = ask_score
+            reasons.append(f"双优：入手¥{price_cny:.1f} + 超低月续费¥{monthly_renew:.1f} (+{int(price_score)})")
+        elif monthly_renew <= 20.0:
+            price_score = min(15.0, ask_score)
+            reasons.append(f"入手¥{price_cny:.1f}，月续费¥{monthly_renew:.1f}亲民 (+{int(price_score)})")
+        elif monthly_renew > 50.0:
+            # 入手虽然可能便宜，但月续费昂贵，适度压制价格分
+            price_score = max(4.0, ask_score - 4.0)
+            reasons.append(f"注意：入手¥{price_cny:.1f}虽低但月续费¥{monthly_renew:.1f}较高 (修正得分+{int(price_score)})")
         else:
-            price_score = 6.0
+            price_score = ask_score
 
     raw_total = network_score + traffic_score + ltv_score + price_score
     final_score = max(0, min(100, int(round(raw_total))))
