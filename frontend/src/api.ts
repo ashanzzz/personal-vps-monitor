@@ -476,6 +476,7 @@ export interface PricingAnalysis {
   ask_price_cny: number
   renew_price_cny: number
   reset_traffic_fee_cny: number
+  ip_repair_fee_cny?: number
   real_total_cost_cny: number
   intrinsic_value_cny: number
 }

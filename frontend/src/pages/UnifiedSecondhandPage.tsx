@@ -254,6 +254,11 @@ export const UnifiedSecondhandPage: React.FC = () => {
                   {pr?.intrinsic_value_cny ? (
                     <div style={{ marginTop: 2 }}>内在评估基准价值: <b>¥{pr.intrinsic_value_cny}</b></div>
                   ) : null}
+                  {pr?.ip_repair_fee_cny ? (
+                    <div style={{ color: '#fbbf24', marginTop: 2 }}>
+                      • 换新IP成本: <b>¥{pr.ip_repair_fee_cny}</b> (或 1500 AK币)
+                    </div>
+                  ) : null}
                   {r.reasons && r.reasons.length > 0 && (
                     <div style={{ marginTop: 4, borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: 4, color: '#e2e8f0' }}>
                       {r.reasons.join('；')}
