@@ -607,6 +607,24 @@ def evaluate_cost_effectiveness(
     # IIJ: 成本¥350，出售底价¥500，买入目标≤¥200
     # ISP: 目标售价¥400，买入目标¥200-250
     # SB:  目标售价¥250-300，买入目标¥100-170
+    t_ratio = max(0.1, flow_total_gb / 1000.0)
+    ram_ratio = max(0.25, memory_mb / 1024.0)
+    disk_ratio = max(0.5, disk_gb / 10.0)
+    bw_ratio = max(0.5, bandwidth_mbps / 200.0)
+    phi_capacity = 8.0 * (0.50 * t_ratio + 0.25 * ram_ratio + 0.10 * disk_ratio + 0.15 * min(10.0, bw_ratio))
+
+    route_tier = str(route_info.get("tier") or "C")
+    tier_k_map = {"S": 3.0, "A": 2.3, "B": 1.6, "C": 1.0}
+    k_route = tier_k_map.get(route_tier, 1.0)
+
+    combined = f"{name} {node_name} {detail} {intro}".lower()
+    is_dual_isp = ("isp" in combined or "双isp" in combined) and bool(route_info.get("native_ip"))
+    k_ip = 1.25 if is_dual_isp else (1.10 if route_info.get("native_ip") else 1.0)
+    m_market = round(k_route * k_ip * phi_capacity, 1)
+
+    monthly_saving = max(0.0, m_market - monthly_renew)
+    annual_saving = round(12.0 * monthly_saving, 1)
+
     trade_strategy = match_user_trade_strategy(name, node_name, detail, intro, monthly_renew)
     fair_market_value_cny = 0.0
     valuation_rationale = ""
@@ -631,23 +649,9 @@ def evaluate_cost_effectiveness(
         else:
             valuation_rationale = f"山哥核心主力资产：买入成本¥{trade_strategy.get('cost_basis', 0):.0f}，心理出售底价¥{target_sell_price:.0f}，买入目标≤¥{target_buy_price:.0f}"
     else:
-        flow_multiplier = min(1.3, max(0.6, flow_total_gb / 1000.0))
-        p_route = route_info.get("primary_route", "")
-        is_native = bool(route_info.get("native_ip"))
-
         if monthly_renew <= 2.5:
-            if route_info.get("tier") == "S" or "双ISP" in p_route or "9929" in p_route or "GIA" in p_route:
-                base_v = 220.0 + (30.0 if is_native else 0.0)
-                fair_market_value_cny = round(base_v * flow_multiplier, 1)
-                valuation_rationale = f"顶级好线路传家宝 (市场等效月租¥25-30/月，年化公允身价¥{fair_market_value_cny}，约10倍年供)"
-            elif route_info.get("tier") == "A" or "软银" in p_route or "4837" in p_route or "CMI" in p_route:
-                base_v = 180.0 + (20.0 if is_native else 0.0)
-                fair_market_value_cny = round(base_v * flow_multiplier, 1)
-                valuation_rationale = f"优质好线路传家宝 (市场等效月租¥18-20/月，年化公允身价¥{fair_market_value_cny}，约10倍年供)"
-            else:
-                base_v = 80.0
-                fair_market_value_cny = round(base_v * flow_multiplier, 1)
-                valuation_rationale = f"普通/非优化线路传家宝 (市场等效月租¥8-10/月，年化公允身价¥{fair_market_value_cny}，约10倍年供)"
+            fair_market_value_cny = round(annual_saving, 1)
+            valuation_rationale = f"绝版传家宝 (市场等效月租¥{m_market}/月，年化公允身价¥{fair_market_value_cny}，约10倍年供)"
         elif is_high_spec_powerhouse and monthly_renew <= 15.0:
             fair_market_value_cny = 120.0
             valuation_rationale = "高配生产力优质机型 (2.5G口+2G内存，年化公允转让身价¥120)"
@@ -661,26 +665,32 @@ def evaluate_cost_effectiveness(
             fair_market_value_cny = 5.0
             valuation_rationale = "高月租失血机型 (无长期套利溢价，转让价值趋于0)"
 
-    # 5. 指数函数调整价格敏感度 (Exponential Price Sensitivity Model)
-    # 遵照山哥指导：
-    # "越便宜的时候，我们对价格敏感度更低了，1.9 元和一元基本都是同样的，感觉这就像指数函数一样，你也要通过指数函数的方式对价格敏感度进行调整"
-    # 在极低价区间(1~2元)，心理支付阻力几乎为零，1.11 与 1.90 感受一致，消除线性 1/P 的断崖畸变；
-    # 随着价格上升，支付阻力呈现平滑饱和上升；高价区(>25元)指数级加剧阻力。
+    # 1. 资产价值倍数 (Value-to-Price Multiplier / 投资杠杆倍数)
+    comp_price = monthly_renew if item_type == "server" else price_cny
+    value_ratio = round(fair_market_value_cny / max(1.0, comp_price), 2)
+
+    # 2. 月供产能杠杆倍数 (Monthly Leverage: 实际付的月租享受多少倍商业产出)
+    monthly_leverage = round(m_market / max(0.1, monthly_renew), 2)
+
+    # 5. 指数函数调整价格敏感度与真实每元产能得分 (Exponential Price Sensitivity Model)
+    # 遵照山哥指导：结合物理产能变量与线路乘数系数，重新定义真实每元产出
     def exp_perceived_cost(cost: float) -> float:
         c = max(0.1, float(cost))
         base = 2.0
         return base + c * (1.0 - math.exp(-c / 5.0)) + (max(0.0, c - 25.0) ** 1.3) / 8.0
 
-    eff_cost_ask = exp_perceived_cost(price_cny)
+    eff_cost_ask = exp_perceived_cost(comp_price)
     eff_cost_renew = exp_perceived_cost(monthly_renew)
 
-    # 1. 购买/入手性价比（基于指数感知成本）
-    points_per_yuan = round(final_score / eff_cost_ask, 2)
-    points_per_usd = round(points_per_yuan * USD_RATE, 2)
-    cost_per_point_cny = round(price_cny / max(1, final_score), 3)
+    # 结合【物理产能】与【套利健康度】
+    health_factor = min(1.0, max(0.05, monthly_saving / max(1.0, m_market * 0.4))) if monthly_renew > 2.5 else 1.0
+    eff_capability_points = round(m_market * 10 * health_factor, 1)
 
-    # 2. 长效月供性价比（基于指数感知成本）
-    monthly_points_per_yuan = round(final_score / eff_cost_renew, 2)
+    points_per_yuan = round(eff_capability_points / eff_cost_ask, 2)
+    points_per_usd = round(points_per_yuan * USD_RATE, 2)
+    cost_per_point_cny = round(comp_price / max(1, final_score), 3)
+
+    monthly_points_per_yuan = round(eff_capability_points / eff_cost_renew, 2)
     monthly_points_per_usd = round(monthly_points_per_yuan * USD_RATE, 2)
 
     if final_score >= 88:
@@ -719,6 +729,10 @@ def evaluate_cost_effectiveness(
         "target_buy_price": target_buy_price,
         "target_sell_price": target_sell_price,
         "trade_strategy": trade_strategy,
+        "value_ratio": value_ratio,
+        "monthly_leverage": monthly_leverage,
+        "m_market": m_market,
+        "annual_saving": annual_saving,
         "breakdown": {
             "network_score": max(0, int(network_score)),
             "ltv_score": int(ltv_score),

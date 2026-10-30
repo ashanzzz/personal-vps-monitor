@@ -500,6 +500,10 @@ export interface CostEffectiveness {
   monthly_points_per_usd?: number
   fair_market_value_cny?: number
   valuation_rationale?: string
+  value_ratio?: number
+  monthly_leverage?: number
+  m_market?: number
+  annual_saving?: number
   breakdown: {
     network_score: number
     ltv_score: number
@@ -531,6 +535,11 @@ export interface StorePackage {
   badge_color?: string
   points_per_yuan?: number
   points_per_usd?: number
+  fair_market_value_cny?: number
+  valuation_rationale?: string
+  value_ratio?: number
+  monthly_leverage?: number
+  m_market?: number
   reasons?: string[]
   raw?: Record<string, unknown>
 }
@@ -560,6 +569,11 @@ export interface SecondhandItem {
   badge_color?: string
   points_per_yuan?: number
   points_per_usd?: number
+  fair_market_value_cny?: number
+  valuation_rationale?: string
+  value_ratio?: number
+  monthly_leverage?: number
+  m_market?: number
   reasons?: string[]
   raw?: Record<string, unknown>
 }

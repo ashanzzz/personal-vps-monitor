@@ -172,6 +172,9 @@ export const UnifiedStorePage: React.FC = () => {
         const gradeLabel = r.grade_label || (score >= 88 ? '【神机/必抢】' : score >= 75 ? '【超值高性价】' : '【平价可选】')
         const color = r.badge_color || (score >= 88 ? 'purple' : score >= 75 ? 'green' : score >= 60 ? 'blue' : 'orange')
 
+        const ml = r.monthly_leverage ?? ce?.monthly_leverage
+        const mm = r.m_market ?? ce?.m_market
+
         return (
           <Tooltip
             title={
@@ -180,8 +183,13 @@ export const UnifiedStorePage: React.FC = () => {
                   综合评分: {score} 分 {gradeLabel}
                 </div>
                 <div style={{ color: '#fbbf24', marginBottom: 4, fontWeight: 600 }}>
-                  ⚡ 每元得分: {ppy} 分/元 (约 ${ppd} 分/USD)
+                  ⚡ 真实每元产出比: {ppy} 分/元 (约 ${ppd} 分/USD)
                 </div>
+                {ml ? (
+                  <div style={{ color: '#38bdf8', marginBottom: 4, fontWeight: 600 }}>
+                    • 月供产能杠杆: <b>{ml}x</b> (等效市场月租: ¥{mm}/月)
+                  </div>
+                ) : null}
                 {ce?.breakdown && (
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 8px', margin: '4px 0' }}>
                     <div>• 线路网络: <b>{ce.breakdown.network_score}/30</b></div>
@@ -207,6 +215,11 @@ export const UnifiedStorePage: React.FC = () => {
               </Tag>
               <div style={{ fontSize: 11, color: '#2563eb', fontWeight: 600, marginTop: 2 }}>
                 {ppy} 分/元 <span style={{ color: '#64748b', fontWeight: 400 }}>(${ppd}/$)</span>
+                {ml ? (
+                  <span style={{ marginLeft: 4, color: ml >= 10 ? '#16a34a' : ml >= 2 ? '#2563eb' : '#dc2626', fontWeight: 700 }}>
+                    [{ml}x]
+                  </span>
+                ) : null}
               </div>
             </div>
           </Tooltip>

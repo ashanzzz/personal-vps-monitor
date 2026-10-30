@@ -222,6 +222,10 @@ export const UnifiedSecondhandPage: React.FC = () => {
         const gradeLabel = r.grade_label ?? r.sniping?.verdict_text ?? (score >= 88 ? '【神机/必抢】' : score >= 75 ? '【超值高性价】' : '【平价可选】')
         const color = r.badge_color || (score >= 88 ? 'purple' : score >= 75 ? 'green' : score >= 60 ? 'blue' : 'error')
 
+        const vr = r.value_ratio ?? ce?.value_ratio
+        const ml = r.monthly_leverage ?? ce?.monthly_leverage
+        const mm = r.m_market ?? ce?.m_market
+
         return (
           <div>
             <Tooltip
@@ -231,10 +235,20 @@ export const UnifiedSecondhandPage: React.FC = () => {
                     综合品质评分: {score} 分 {gradeLabel}
                   </div>
                   <div style={{ color: '#fbbf24', marginBottom: 4, fontWeight: 600 }}>
-                    ⚡ 购买性价比: {ppy} 分/元 (约 ${ppd} 分/USD)
+                    ⚡ 真实每元产出比: {ppy} 分/元 (约 ${ppd} 分/USD)
                   </div>
-                  {ce?.monthly_points_per_yuan ? (
+                  {vr ? (
+                    <div style={{ color: vr >= 1.5 ? '#4ade80' : vr >= 1.0 ? '#38bdf8' : '#f87171', marginBottom: 4, fontWeight: 600 }}>
+                      📈 资产套利倍数: {vr}x ({vr >= 1.5 ? '超值套利捡漏' : vr >= 1.0 ? '公允价值成交' : '溢价割韭菜'})
+                    </div>
+                  ) : null}
+                  {ml ? (
                     <div style={{ color: '#38bdf8', marginBottom: 4 }}>
+                      • 月供产能杠杆: <b>{ml}x</b> (等效市场月租: ¥{mm}/月)
+                    </div>
+                  ) : null}
+                  {ce?.monthly_points_per_yuan ? (
+                    <div style={{ color: '#94a3b8', marginBottom: 4 }}>
                       • 长线月供比: {ce.monthly_points_per_yuan} 分/元·月 (${ce.monthly_points_per_usd}/$)
                     </div>
                   ) : null}
@@ -278,6 +292,11 @@ export const UnifiedSecondhandPage: React.FC = () => {
               </Tag>
               <div style={{ fontSize: 11, color: '#2563eb', fontWeight: 600, marginTop: 2 }}>
                 {ppy} 分/元 <span style={{ color: '#64748b', fontWeight: 400 }}>(${ppd}/$)</span>
+                {vr ? (
+                  <span style={{ marginLeft: 4, color: vr >= 1.5 ? '#16a34a' : vr >= 1.0 ? '#2563eb' : '#dc2626', fontWeight: 700 }}>
+                    [{vr}x]
+                  </span>
+                ) : null}
               </div>
             </Tooltip>
             {pr?.real_total_cost_cny && pr.real_total_cost_cny !== r.price_cny ? (
