@@ -401,8 +401,8 @@ def evaluate_cost_effectiveness(
     price_cny: float = 0.0,
     renew_price_cny: float = 0.0,
     cpu: int = 1,
-    memory_mb: int = 1024,
-    disk_gb: int = 10,
+    memory_mb: float = 1024.0,
+    disk_gb: float = 10.0,
     bandwidth_mbps: int = 100,
     flow_total_gb: float = 1000.0,
     flow_used_gb: float = 0.0,
@@ -420,6 +420,17 @@ def evaluate_cost_effectiveness(
     """
     route_info = analyze_route(name=name, node_name=node_name, detail=detail, intro=intro, area=area)
     traffic_info = analyze_traffic(flow_total_gb, flow_used_gb, reset_price_cny)
+
+    # Normalize hardware units safely (ACCK passes disk in MB, e.g. 5120MB -> 5GB)
+    disk_gb = float(disk_gb or 10.0)
+    if disk_gb >= 100.0:
+        disk_gb = round(disk_gb / 1024.0, 1)
+    disk_gb = max(1.0, disk_gb)
+
+    memory_mb = float(memory_mb or 1024.0)
+    if memory_mb < 64.0:
+        memory_mb = memory_mb * 1024.0
+    memory_mb = max(128.0, memory_mb)
 
     price_cny = max(0.1, float(price_cny or 0))
     renew_price_cny = max(0.0, float(renew_price_cny or 0))
