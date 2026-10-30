@@ -187,11 +187,26 @@ export const UnifiedDashboard: React.FC = () => {
     {
       title: '配置规格',
       key: 'specs',
-      width: 180,
+      width: 170,
       render: (_, r) => (
         <span className="mono-num" style={{ fontSize: 12, color: '#334155' }}>
           {r.cpu}C / {r.memory >= 1024 ? `${r.memory / 1024}G` : `${r.memory}M`} / {r.disk}G / {r.bandwidth}M
         </span>
+      ),
+    },
+    {
+      title: '续费价格 / 周期',
+      key: 'price',
+      width: 140,
+      render: (_, r) => (
+        <div className="mono-num" style={{ fontSize: 13 }}>
+          <span style={{ fontWeight: 700, color: '#0f172a' }}>
+            {r.price_cny > 0 ? `¥${r.price_cny.toFixed(2)}` : (r.price ? `¥${(r.price / 100).toFixed(2)}` : '—')}
+          </span>
+          <span style={{ fontSize: 11, color: '#64748b', marginLeft: 4 }}>
+            /{r.cycle_text || (r.cycle === 12 ? '年' : `${r.cycle || 1}月`)}
+          </span>
+        </div>
       ),
     },
     {

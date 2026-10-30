@@ -68,11 +68,15 @@ export const UnifiedBillingPage: React.FC = () => {
       dataIndex: 'order_price',
       key: 'order_price',
       width: 120,
-      render: (p: number) => (
-        <span className="mono-num" style={{ fontWeight: 700, color: '#0f172a', fontSize: 14 }}>
-          ¥{(p / 100).toFixed(2)}
-        </span>
-      ),
+      render: (p: any, r: any) => {
+        const val = p != null ? p : r.order_money
+        const num = typeof val === 'number' ? val : (parseFloat(val) || 0)
+        return (
+          <span className="mono-num" style={{ fontWeight: 700, color: '#0f172a', fontSize: 14 }}>
+            ¥{(num / 100).toFixed(2)}
+          </span>
+        )
+      },
     },
     {
       title: '状态',
@@ -139,11 +143,15 @@ export const UnifiedBillingPage: React.FC = () => {
       dataIndex: 'order_price',
       key: 'order_price',
       width: 120,
-      render: (p: number) => (
-        <span className="mono-num" style={{ fontWeight: 700, color: '#0f172a', fontSize: 14 }}>
-          ¥{(p / 100).toFixed(2)}
-        </span>
-      ),
+      render: (p: any, r: any) => {
+        const val = p != null ? p : r.order_money
+        const num = typeof val === 'number' ? val : (parseFloat(val) || 0)
+        return (
+          <span className="mono-num" style={{ fontWeight: 700, color: '#0f172a', fontSize: 14 }}>
+            ¥{(num / 100).toFixed(2)}
+          </span>
+        )
+      },
     },
     {
       title: '支付方式 / 状态',
@@ -214,11 +222,13 @@ export const UnifiedBillingPage: React.FC = () => {
       dataIndex: 'money',
       key: 'money',
       width: 140,
-      render: (m: number) => {
-        const isPositive = m >= 0
+      render: (m: any, r: any) => {
+        const val = m != null ? m : r.amount
+        const num = typeof val === 'number' ? val : (parseFloat(val) || 0)
+        const isPositive = num >= 0
         return (
           <span className="mono-num" style={{ fontWeight: 700, color: isPositive ? '#15803d' : '#b91c1c' }}>
-            {isPositive ? `+¥${(m / 100).toFixed(2)}` : `-¥${(Math.abs(m) / 100).toFixed(2)}`}
+            {isPositive ? `+¥${(num / 100).toFixed(2)}` : `-¥${(Math.abs(num) / 100).toFixed(2)}`}
           </span>
         )
       },

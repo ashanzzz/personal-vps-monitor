@@ -141,6 +141,13 @@ async def get_unified_servers(
             ak_list = await akile_client.get_my_servers(akile_tok)
             for s in ak_list:
                 sid = s.get("id")
+                try:
+                    price_cents = int(float(str(s.get("price", 0))))
+                except (ValueError, TypeError):
+                    price_cents = 0
+                cycle = int(s.get("cycle", 1))
+                cycle_text = "年付" if cycle == 12 else (f"{cycle}个月" if cycle > 1 else "月付")
+
                 servers.append({
                     "uid": f"akile:{sid}",
                     "platform": "akile",
@@ -159,8 +166,10 @@ async def get_unified_servers(
                     "used_flow": s.get("used_flow", 0),
                     "due_time": s.get("due_time", 0),
                     "auto_renew": bool(s.get("auto_renew")),
-                    "price": s.get("price", 0),
-                    "cycle": s.get("cycle", 1),
+                    "price_cents": price_cents,
+                    "price_cny": round(price_cents / 100, 2),
+                    "cycle": cycle,
+                    "cycle_text": cycle_text,
                     "status": s.get("status", 1),
                     "system_name": s.get("system_name", ""),
                     "raw": s,
@@ -175,6 +184,13 @@ async def get_unified_servers(
             ac_list = await acck_client.get_my_servers(acck_tok)
             for s in ac_list:
                 sid = s.get("id")
+                try:
+                    price_cents = int(float(str(s.get("price", 0))))
+                except (ValueError, TypeError):
+                    price_cents = 0
+                cycle = int(s.get("cycle", 1))
+                cycle_text = "年付" if cycle == 12 else (f"{cycle}个月" if cycle > 1 else "月付")
+
                 servers.append({
                     "uid": f"acck:{sid}",
                     "platform": "acck",
@@ -193,8 +209,10 @@ async def get_unified_servers(
                     "used_flow": 0,
                     "due_time": s.get("due_time", 0),
                     "auto_renew": bool(s.get("auto_renew")),
-                    "price": s.get("price", 0),
-                    "cycle": s.get("cycle", 1),
+                    "price_cents": price_cents,
+                    "price_cny": round(price_cents / 100, 2),
+                    "cycle": cycle,
+                    "cycle_text": cycle_text,
                     "status": s.get("status", 1),
                     "system_name": "",
                     "raw": s,
@@ -304,7 +322,23 @@ async def get_unified_billing(
             logger.warning("Akile orders fetch error: %s", e)
         try:
             money_res = await akile_client.get_money_logs(akile_tok, page, page_size)
-            ak_money_logs = money_res.get("list") or []
+            raw_money = money_res.get("list") or []
+            for m in raw_money:
+                amt = m.get("amount") if "amount" in m else m.get("money", 0)
+                try:
+                    amt_int = int(float(str(amt)))
+                except (ValueError, TypeError):
+                    amt_int = 0
+                ak_money_logs.append({
+                    "id": m.get("id"),
+                    "money": amt_int,
+                    "money_cny": round(abs(amt_int) / 100, 2),
+                    "is_positive": amt_int >= 0,
+                    "remark": m.get("reason") or m.get("remark") or m.get("name") or "余额变动",
+                    "order_no": m.get("order_no", ""),
+                    "created_at": m.get("created_at", ""),
+                    "raw": m,
+                })
         except Exception as e:
             logger.warning("Akile money log error: %s", e)
         try:
@@ -456,8 +490,16 @@ async def get_unified_secondhand(
             raw_list = ak_res.get("list") or []
             for item in raw_list:
                 iid = item.get("id")
-                # price in fen
-                price_cents = item.get("price", 0)
+                # price in fen (can be string or int)
+                try:
+                    price_cents = int(float(str(item.get("price", 0))))
+                except (ValueError, TypeError):
+                    price_cents = 0
+                try:
+                    renew_price_cents = int(float(str(item.get("server_price", 0))))
+                except (ValueError, TypeError):
+                    renew_price_cents = 0
+
                 items.append({
                     "uid": f"akile:{iid}",
                     "platform": "akile",
@@ -467,10 +509,12 @@ async def get_unified_secondhand(
                     "node": item.get("node_name", ""),
                     "price_cents": price_cents,
                     "price_cny": round(price_cents / 100, 2),
+                    "renew_price_cny": round(renew_price_cents / 100, 2) if renew_price_cents > 0 else 0,
                     "bandwidth": item.get("bandwidth", 0),
                     "flow": item.get("traffic") or item.get("flow", 0),
                     "due_time": item.get("due_time", 0),
                     "seller": item.get("username", "卖家"),
+                    "intro": item.get("detail", ""),
                     "raw": item,
                 })
         except Exception as e:
@@ -481,13 +525,24 @@ async def get_unified_secondhand(
         ac_list = await acck_client.get_exchange_listings(page=page, page_size=page_size)
         for item in ac_list:
             iid = item.get("id")
-            price_cents = item.get("ask_price_cents", 0)
+            try:
+                price_cents = int(float(str(item.get("ask_price_cents", 0))))
+            except (ValueError, TypeError):
+                price_cents = 0
+
             snapshot = {}
             if item.get("snapshot_json"):
                 try:
                     snapshot = json.loads(item["snapshot_json"])
                 except Exception:
                     pass
+
+            renew_cents = 0
+            if snapshot.get("renew_price_cents"):
+                try:
+                    renew_cents = int(float(str(snapshot["renew_price_cents"])))
+                except (ValueError, TypeError):
+                    renew_cents = 0
 
             items.append({
                 "uid": f"acck:{iid}",
@@ -498,6 +553,7 @@ async def get_unified_secondhand(
                 "node": snapshot.get("node_name", ""),
                 "price_cents": price_cents,
                 "price_cny": round(price_cents / 100, 2),
+                "renew_price_cny": round(renew_cents / 100, 2) if renew_cents > 0 else 0,
                 "bandwidth": snapshot.get("bandwidth_mbps", 0),
                 "flow": snapshot.get("flow_gb", 0),
                 "due_time": snapshot.get("due_time_unix", 0),
@@ -509,7 +565,7 @@ async def get_unified_secondhand(
         logger.warning("ACCK Exchange fetch error: %s", e)
 
     # Sort by price ascending
-    items.sort(key=lambda x: x["price_cents"])
+    items.sort(key=lambda x: int(x.get("price_cents", 0)))
 
     return {
         "total": len(items),
@@ -545,8 +601,7 @@ async def buy_secondhand_item(
     if req.platform == "akile":
         if not akile_tok:
             raise HTTPException(400, "Akile token not configured")
-        payload = {"product_id": req.listing_id, "captcha": req.captcha}
-        res = await akile_client.buy_secondhand(akile_tok, payload)
+        res = await akile_client.buy_secondhand(akile_tok, req.listing_id, auto_pay=True)
         return {"status": "success", "platform": "akile", "result": res}
     elif req.platform == "acck":
         if not acck_tok:

@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react'
 import {
   Card, Table, Button, Modal, Switch, Typography, Input,
-  App as AntApp, Tag, Tooltip
+  App as AntApp, Tag
 } from 'antd'
 import {
   SwapOutlined, SafetyCertificateOutlined, ReloadOutlined,
-  ThunderboltOutlined, InfoCircleOutlined
+  ThunderboltOutlined
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
@@ -92,30 +92,36 @@ export const UnifiedSecondhandPage: React.FC = () => {
       title: '挂售商品 / 套餐',
       dataIndex: 'title',
       key: 'title',
-      width: 250,
+      width: 260,
       render: (t: string, r) => (
         <div>
           <div style={{ fontWeight: 600, color: '#0f172a' }}>{t}</div>
-          <div style={{ fontSize: 11, color: '#64748b' }}>
-            {r.node ? `${r.node} · ` : ''}{r.area}
+          <div style={{ fontSize: 11, color: '#64748b', display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+            <span>{r.node ? `${r.node} · ` : ''}{r.area}</span>
             {r.intro ? (
-              <Tooltip title={r.intro}>
-                <InfoCircleOutlined style={{ marginLeft: 4, color: '#94a3b8' }} />
-              </Tooltip>
+              <span className="badge-warning" style={{ fontSize: 10, padding: '0 4px', borderRadius: 3 }}>
+                {r.intro}
+              </span>
             ) : null}
           </div>
         </div>
       ),
     },
     {
-      title: '转让售价',
-      dataIndex: 'price_cny',
-      key: 'price_cny',
-      width: 120,
-      render: (p: number) => (
-        <span className="mono-num" style={{ fontWeight: 700, color: '#0f172a', fontSize: 15 }}>
-          ¥{p.toFixed(2)}
-        </span>
+      title: '转让售价 / 续费成本',
+      key: 'price',
+      width: 150,
+      render: (_, r) => (
+        <div>
+          <span className="mono-num" style={{ fontWeight: 700, color: '#0f172a', fontSize: 14 }}>
+            ¥{typeof r.price_cny === 'number' ? r.price_cny.toFixed(2) : '0.00'}
+          </span>
+          {r.renew_price_cny ? (
+            <div style={{ fontSize: 11, color: '#64748b' }}>
+              续费: <span className="mono-num">¥{r.renew_price_cny.toFixed(2)}</span>
+            </div>
+          ) : null}
+        </div>
       ),
     },
     {

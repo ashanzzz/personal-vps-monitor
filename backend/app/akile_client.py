@@ -109,13 +109,40 @@ async def get_recycle_prices(token: str) -> list[dict]:
         return r.json().get("data") or []
 
 
-async def buy_secondhand(token: str, payload: dict) -> dict:
-    """POST /v1/pushshop/PushShopUserTx – place purchase order."""
+async def buy_secondhand(token: str, product_id: int | str, auto_pay: bool = True) -> dict:
+    """Purchase a secondhand product from PushShop via official order flow.
+
+    1. POST /v1/store/makeOrder with order_type="6" and productId
+    2. If auto_pay=True, POST /v1/pay to immediately settle with account balance
+    """
+    payload = {
+        "order_type": "6",
+        "order_data": [
+            {"key": "productId", "name": "productId", "value": str(product_id)},
+        ],
+    }
     async with httpx.AsyncClient(timeout=TIMEOUT) as c:
-        r = await c.post(f"{BASE}/v1/pushshop/PushShopUserTx",
-                         json=payload, headers=_headers(token))
+        r = await c.post(f"{BASE}/v1/store/makeOrder", json=payload, headers=_headers(token))
         r.raise_for_status()
-        return r.json()
+        res = r.json()
+
+    order_no = ""
+    if isinstance(res, dict):
+        order_no = res.get("order_no") or (res.get("data") or {}).get("order_no", "")
+
+    pay_res = None
+    if auto_pay and order_no:
+        try:
+            pay_res = await pay_order(token, order_no, pay_type="balance")
+        except Exception as e:
+            pay_res = {"error": f"Auto-pay failed: {e}"}
+
+    return {
+        "order_result": res,
+        "order_no": order_no,
+        "paid": pay_res is not None and "error" not in pay_res,
+        "pay_result": pay_res,
+    }
 
 
 async def get_user_info(token: str) -> dict:

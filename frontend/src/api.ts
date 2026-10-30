@@ -382,7 +382,7 @@ export const api = {
   getUnifiedSecondhand: (page = 1, page_size = 50) =>
     http.get<{ total: number; items: SecondhandItem[]; counts: Record<string, number> }>('/api/unified/secondhand', { params: { page, page_size } }).then(r => r.data),
 
-  buySecondhandItem: (platform: string, listing_id: number, price_cents = 0, safe_mode = true, captcha = '') =>
+  buySecondhandItem: (platform: string, listing_id: number | string, price_cents = 0, safe_mode = true, captcha = '') =>
     http.post('/api/unified/secondhand/buy', { platform, listing_id, price_cents, safe_mode, captcha }).then(r => r.data),
 }
 
@@ -416,8 +416,11 @@ export interface UnifiedServer {
   used_flow: number
   due_time: number
   auto_renew: boolean
-  price: number
+  price?: number
+  price_cents?: number
+  price_cny: number
   cycle: number
+  cycle_text?: string
   status: number
   system_name?: string
   raw?: Record<string, unknown>
@@ -438,12 +441,13 @@ export interface UnifiedBillingData {
 export interface SecondhandItem {
   uid: string
   platform: 'akile' | 'acck'
-  id: number
+  id: number | string
   title: string
   area: string
   node: string
   price_cents: number
   price_cny: number
+  renew_price_cny?: number
   bandwidth: number
   flow: number
   due_time: number
