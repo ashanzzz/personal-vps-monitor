@@ -9,6 +9,7 @@ Provides:
 """
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, Dict, List, Optional
 
@@ -432,9 +433,9 @@ def evaluate_cost_effectiveness(
 
     # 3. 硬件规格与长线持有月供 (0 - 20 分) —— 严格对齐山哥铁律基准
     # 铁律：<=2元超级超值；好线路<=10元才是真正超值；20元左右成交价一般；
-    # 特例：百元级以上若兼具大内存(>=4G)、大硬盘(>=30G)、多流量(>=1000G)，判定为优质高配生产力机型，性价比良好！
+    # 高配生产力：2000M(2.5G)超大口径、大内存(>=2G)、大硬盘(>=20G)、多流量(>=1000G)
     ram_gb = max(0.25, memory_mb / 1024)
-    is_high_spec_powerhouse = (ram_gb >= 3.5 and disk_gb >= 30 and flow_total_gb >= 1000.0)
+    is_high_spec_powerhouse = (ram_gb >= 2.0 and disk_gb >= 20 and flow_total_gb >= 1000.0 and bandwidth_mbps >= 1000)
 
     ltv_score = 10.0
     if monthly_renew <= 2.0:
@@ -443,13 +444,16 @@ def evaluate_cost_effectiveness(
     elif monthly_renew <= 10.0:
         ltv_score = 17.0
         reasons.append(f"月供¥{monthly_renew:.2f}/月 (好线路10元内，真正超值月供梯队 +17)")
+    elif is_high_spec_powerhouse and monthly_renew <= 20.0:
+        # 如日本 IIJ 这种高配机器（2G口径+2G内存+20G盘+1000G流量，月折合13.25元）
+        ltv_score = 18.0
+        reasons.append(f"大带宽({bandwidth_mbps}M)+大内存({int(ram_gb)}G)+大硬盘({disk_gb}G) (优质高配生产力机型，¥{monthly_renew:.2f}/月超高价值 +18)")
     elif monthly_renew <= 22.0:
         ltv_score = 12.0
         reasons.append(f"月供¥{monthly_renew:.2f}/月 (好线路20元档成交价一般/平价 +12)")
     elif is_high_spec_powerhouse:
-        # 如日本 IIJ 这种高配生产力机器（大内存+大硬盘+多流量）
-        ltv_score = 16.0
-        reasons.append(f"大内存({int(ram_gb)}G)+大硬盘({disk_gb}G)+多流量({int(flow_total_gb)}G) (优质高配生产力机型，性价比良好 +16)")
+        ltv_score = 15.0
+        reasons.append(f"高配生产力机型({int(ram_gb)}G内存/{disk_gb}G盘/{bandwidth_mbps}M口) (大容量多流量，月供良好 +15)")
     elif monthly_renew <= 45.0:
         ltv_score = 8.0
         reasons.append(f"月供¥{monthly_renew:.2f}/月偏贵 (-4)")
@@ -457,11 +461,16 @@ def evaluate_cost_effectiveness(
         ltv_score = 4.0
         reasons.append(f"月续费¥{monthly_renew:.2f}/月过高，缺乏长期持有性价比 (-6)")
 
-    # 针对山哥业务场景加分（FRP穿透/自动化/大带宽）
-    if bandwidth_mbps >= 500:
+    # 针对山哥业务场景专属硬件加分（FRP反代/大流量/超大口径）：
+    # 2000Mbps (2.5G口) 是市面稀缺硬实力！
+    if bandwidth_mbps >= 2000:
+        ltv_score = min(20.0, ltv_score + 3.0)
+        reasons.append(f"{bandwidth_mbps}Mbps超高速口径(极度契合FRP反代与多路中转并发 +3)")
+    elif bandwidth_mbps >= 1000:
         ltv_score = min(20.0, ltv_score + 2.0)
-        reasons.append(f"{bandwidth_mbps}Mbps大带宽(契合FRP反代与高速穿透 +2)")
-    elif cpu >= 2 or ram_gb >= 2.0:
+        reasons.append(f"{bandwidth_mbps}Mbps千兆口径(契合FRP反代 +2)")
+
+    if ram_gb >= 2.0:
         ltv_score = min(20.0, ltv_score + 1.0)
 
     # 4. 入手价格与续费价格双轮驱动 (0 - 15 分)
@@ -472,12 +481,15 @@ def evaluate_cost_effectiveness(
         if monthly_renew <= 10.0:
             price_score = 15.0
             reasons.append(f"一手真正超值月续费¥{monthly_renew:.2f}/月 (+15)")
+        elif is_high_spec_powerhouse and monthly_renew <= 20.0:
+            price_score = 14.0
+            reasons.append(f"一手高配生产力机型月续费¥{monthly_renew:.2f}/月极具性价比 (+14)")
         elif monthly_renew <= 22.0:
             price_score = 10.0
             reasons.append(f"一手月续费¥{monthly_renew:.2f}/月 (20元档一般价位 +10)")
         elif is_high_spec_powerhouse:
-            price_score = 13.0
-            reasons.append("优质高配生产力机型续费价值良好 (+13)")
+            price_score = 12.0
+            reasons.append("优质高配生产力机型续费价值良好 (+12)")
         elif monthly_renew <= 40.0:
             price_score = 7.0
         else:
@@ -506,6 +518,9 @@ def evaluate_cost_effectiveness(
         elif monthly_renew <= 10.0:
             price_score = min(15.0, ask_score)
             reasons.append(f"双优：入手¥{price_cny:.1f} + 真正超值月续费¥{monthly_renew:.1f} (+{int(price_score)})")
+        elif is_high_spec_powerhouse and monthly_renew <= 20.0:
+            price_score = min(14.0, ask_score + 2.0)
+            reasons.append(f"入手¥{price_cny:.1f}，高配生产力机型续费价值极高 (+{int(price_score)})")
         elif monthly_renew <= 22.0:
             price_score = min(11.0, ask_score)
             reasons.append(f"入手¥{price_cny:.1f}，月续费¥{monthly_renew:.1f} (好线路20元档成交价一般 +{int(price_score)})")
@@ -524,14 +539,26 @@ def evaluate_cost_effectiveness(
 
     USD_RATE = 7.25
 
-    # 性价比指数（每元评分 & 每美元评分: 单位资金所能购买到的综合品质分）
-    # 1. 购买/入手性价比
-    points_per_yuan = round(final_score / price_cny, 2)
+    # 5. 指数函数调整价格敏感度 (Exponential Price Sensitivity Model)
+    # 遵照山哥指导：
+    # "越便宜的时候，我们对价格敏感度更低了，1.9 元和一元基本都是同样的，感觉这就像指数函数一样，你也要通过指数函数的方式对价格敏感度进行调整"
+    # 在极低价区间(1~2元)，心理支付阻力几乎为零，1.11 与 1.90 感受一致，消除线性 1/P 的断崖畸变；
+    # 随着价格上升，支付阻力呈现平滑饱和上升；高价区(>25元)指数级加剧阻力。
+    def exp_perceived_cost(cost: float) -> float:
+        c = max(0.1, float(cost))
+        base = 2.0
+        return base + c * (1.0 - math.exp(-c / 5.0)) + (max(0.0, c - 25.0) ** 1.3) / 8.0
+
+    eff_cost_ask = exp_perceived_cost(price_cny)
+    eff_cost_renew = exp_perceived_cost(monthly_renew)
+
+    # 1. 购买/入手性价比（基于指数感知成本）
+    points_per_yuan = round(final_score / eff_cost_ask, 2)
     points_per_usd = round(points_per_yuan * USD_RATE, 2)
     cost_per_point_cny = round(price_cny / max(1, final_score), 3)
 
-    # 2. 长效月供性价比（每月每花 1 元所能享受的品质分）
-    monthly_points_per_yuan = round(final_score / monthly_renew, 2)
+    # 2. 长效月供性价比（基于指数感知成本）
+    monthly_points_per_yuan = round(final_score / eff_cost_renew, 2)
     monthly_points_per_usd = round(monthly_points_per_yuan * USD_RATE, 2)
 
     if final_score >= 88:
