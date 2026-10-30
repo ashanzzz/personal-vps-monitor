@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import httpx
 
-BASE = "https://api.akilecloud.com/api"
+BASE = "https://api.akile.ai/api"
 BASE_AI = "https://api.akile.ai/api"
 TIMEOUT = 15
 
@@ -133,17 +133,19 @@ async def get_user_info(token: str) -> dict:
 
 
 async def get_my_servers(token: str) -> list[dict]:
-    """POST /v1/server/GetServerV2List – the account's own instances.
-
-    Returns a list of server dicts. When the account has no instances the API
-    responds 200 with data.list = null, which we normalise to an empty list.
-    """
+    """POST /v1/server/GetServerV2List – the account's own instances."""
     async with httpx.AsyncClient(timeout=TIMEOUT) as c:
         r = await c.post(f"{BASE}/v1/server/GetServerV2List",
                          json={}, headers=_headers(token))
         r.raise_for_status()
-        data = r.json().get("data") or {}
-        return data.get("list") or []
+        res = r.json()
+        if isinstance(res, dict):
+            if "list" in res and isinstance(res["list"], list):
+                return res["list"]
+            data = res.get("data") or {}
+            if isinstance(data, dict):
+                return data.get("list") or []
+        return []
 
 
 async def checkin(token: str) -> dict:
@@ -167,3 +169,86 @@ async def get_ak_coin_info(token: str) -> dict:
         r = await c.get(f"{BASE_AI}/v1/user/index", headers=_ai_headers(token))
         r.raise_for_status()
         return r.json().get("data") or {}
+
+
+async def get_order_list(token: str, page: int = 1, page_size: int = 20) -> dict:
+    """POST /v1/order/GetOrderListByUserId – user's order history."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        r = await c.post(
+            f"{BASE}/v1/order/GetOrderListByUserId",
+            json={"page": page, "page_size": page_size},
+            headers=_headers(token),
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+async def get_money_logs(token: str, page: int = 1, page_size: int = 20) -> dict:
+    """POST /v1/user/GetMoneyLog – balance and transaction history."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        r = await c.post(
+            f"{BASE}/v1/user/GetMoneyLog",
+            json={"page": page, "page_size": page_size},
+            headers=_headers(token),
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+async def get_billing_services(token: str) -> dict:
+    """GET /v1/billing/service – active services and renewal billing."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        r = await c.get(f"{BASE}/v1/billing/service", headers=_headers(token))
+        r.raise_for_status()
+        return r.json()
+
+
+async def get_billing_orders(token: str) -> dict:
+    """GET /v1/billing/order – pending billing invoices."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        r = await c.get(f"{BASE}/v1/billing/order", headers=_headers(token))
+        r.raise_for_status()
+        return r.json()
+
+
+async def get_server_detail(token: str, server_id: int) -> dict:
+    """GET /v1/server/GetServerDetailV2?id=X – single server full specs."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        r = await c.get(f"{BASE}/v1/server/GetServerDetailV2", params={"id": server_id}, headers=_headers(token))
+        r.raise_for_status()
+        return r.json().get("data") or {}
+
+
+async def update_auto_renew(token: str, server_id: int, auto_renew: bool) -> dict:
+    """GET /v1/server/UpdateAutoRenew?id=X&auto_renew=true|false."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        r = await c.get(
+            f"{BASE}/v1/server/UpdateAutoRenew",
+            params={"id": server_id, "auto_renew": str(auto_renew).lower()},
+            headers=_headers(token),
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+async def make_order(token: str, order_data: list[dict], order_type: str = "1", plan_id: int = 0) -> dict:
+    """POST /v1/store/makeOrder – create a store purchase order."""
+    payload = {
+        "order_data": order_data,
+        "order_type": order_type,
+    }
+    if plan_id:
+        payload["order_plan_id"] = plan_id
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        r = await c.post(f"{BASE}/v1/store/makeOrder", json=payload, headers=_headers(token))
+        r.raise_for_status()
+        return r.json()
+
+
+async def pay_order(token: str, order_no: str, pay_type: str = "balance") -> dict:
+    """POST /v1/pay – pay an unpaid order with balance or other method."""
+    payload = {"order_no": order_no, "pay_type": pay_type}
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        r = await c.post(f"{BASE}/v1/pay", json=payload, headers=_headers(token))
+        r.raise_for_status()
+        return r.json()

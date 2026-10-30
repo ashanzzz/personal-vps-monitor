@@ -3,7 +3,7 @@ import { wsUrl } from './config'
 import { getToken } from './api'
 
 export type WsMessage = {
-  type: 'refresh' | 'events' | 'purchased'
+  type: 'refresh' | 'events' | 'purchased' | 'refresh_mode_change'
   category?: string
   data?: unknown
   plan_id?: string

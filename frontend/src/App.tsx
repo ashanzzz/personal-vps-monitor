@@ -1,43 +1,55 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   App as AntApp, Badge, Button, ConfigProvider, Layout, Menu, message as antMessage,
-  Spin, theme, Typography,
+  Spin, Typography, Tooltip
 } from 'antd'
 import {
-  DashboardOutlined, CloudServerOutlined, ThunderboltOutlined, ShoppingOutlined,
-  BellOutlined, SettingOutlined, LogoutOutlined, FileTextOutlined, WalletOutlined,
-  SafetyCertificateOutlined,
+  DashboardOutlined, SwapOutlined, ShoppingCartOutlined,
+  CreditCardOutlined, BellOutlined, SettingOutlined, LogoutOutlined,
+  FileTextOutlined, WalletOutlined, SafetyCertificateOutlined,
+  ReloadOutlined, ThunderboltOutlined, SyncOutlined
 } from '@ant-design/icons'
 
 import { api, clearToken, getToken, setUnauthorizedHandler } from './api'
-import type { AlertEvent, AppSettings, Machine, PageBuyConfig, ScoreRules, VersionInfo } from './api'
+import type { AlertEvent, AppSettings, VersionInfo, RefreshState } from './api'
 import { useWebSocket } from './useWebSocket'
-import { Overview }      from './pages/Overview'
-import { CategoryPage }  from './pages/CategoryPage'
-import { AlertHistory }  from './pages/AlertHistory'
-import { SettingsPage }  from './pages/SettingsPage'
-import { LoginPage }     from './pages/LoginPage'
-import { LogsPage }      from './pages/LogsPage'
-import { AccountPage }   from './pages/AccountPage'
+import { UnifiedDashboard } from './pages/UnifiedDashboard'
+import { UnifiedStorePage } from './pages/UnifiedStorePage'
+import { UnifiedSecondhandPage } from './pages/UnifiedSecondhandPage'
+import { UnifiedBillingPage } from './pages/UnifiedBillingPage'
+import { AccountPage } from './pages/AccountPage'
 import { AcckAccountPage } from './pages/AcckAccountPage'
+import { AlertHistory } from './pages/AlertHistory'
+import { SettingsPage } from './pages/SettingsPage'
+import { LoginPage } from './pages/LoginPage'
+import { LogsPage } from './pages/LogsPage'
 
 import './App.css'
 
 const { Header, Sider, Content } = Layout
-const { Title } = Typography
+const { Text } = Typography
 
-type PageKey = 'overview' | 'account' | 'acck' | 'cloud' | 'lightweight' | 'secondhand' | 'alerts' | 'logs' | 'settings'
+type PageKey =
+  | 'overview'
+  | 'store'
+  | 'secondhand'
+  | 'billing'
+  | 'account'
+  | 'acck'
+  | 'alerts'
+  | 'logs'
+  | 'settings'
 
 export default function App() {
-  const [authed, setAuthed]       = useState<boolean>(!!getToken())
-  const [page, setPage]           = useState<PageKey>('overview')
-  const [machines, setMachines]   = useState<Machine[]>([])
-  const [events, setEvents]       = useState<AlertEvent[]>([])
-  const [settings, setSettings]   = useState<AppSettings | null>(null)
-  const [loading, setLoading]     = useState(true)
+  const [authed, setAuthed] = useState<boolean>(!!getToken())
+  const [page, setPage] = useState<PageKey>('overview')
+  const [events, setEvents] = useState<AlertEvent[]>([])
+  const [settings, setSettings] = useState<AppSettings | null>(null)
+  const [loading, setLoading] = useState(true)
   const [newAlerts, setNewAlerts] = useState(0)
   const [collapsed, setCollapsed] = useState(false)
-  const [version, setVersion]     = useState<VersionInfo | null>(null)
+  const [version, setVersion] = useState<VersionInfo | null>(null)
+  const [refreshState, setRefreshState] = useState<RefreshState | null>(null)
 
   // Bounce back to login on any 401.
   useEffect(() => {
@@ -46,35 +58,49 @@ export default function App() {
 
   const loadAll = useCallback(async () => {
     try {
-      const [m, e, s] = await Promise.all([
-        api.getMachines(),
-        api.getEvents({ limit: 200 }),
-        api.getSettings(),
+      const [e, s, refState] = await Promise.all([
+        api.getEvents({ limit: 200 }).catch(() => []),
+        api.getSettings().catch(() => null),
+        api.getRefreshStatus().catch(() => null),
       ])
-      setMachines(m)
       setEvents(e)
       setSettings(s)
+      if (refState) setRefreshState(refState)
       api.getVersion().then(setVersion).catch(() => {})
     } catch {
-      antMessage.error('加载数据失败，请检查后端连接')
+      antMessage.error('加载系统数据失败')
     } finally {
       setLoading(false)
     }
   }, [])
 
-  useEffect(() => { if (authed) loadAll() }, [authed, loadAll])
+  useEffect(() => {
+    if (authed) loadAll()
+  }, [authed, loadAll])
+
+  // Dual-rate refresh polling countdown
+  useEffect(() => {
+    const timer = setInterval(() => {
+      api.getRefreshStatus().then(st => {
+        setRefreshState(st)
+      }).catch(() => {})
+    }, 2000)
+    return () => clearInterval(timer)
+  }, [])
 
   const handleLogout = useCallback(() => {
     clearToken()
     setAuthed(false)
-    antMessage.success('已退出登录')
+    antMessage.success('已安全退出')
   }, [])
 
-  // WebSocket real-time updates
+  // WebSocket real-time events
   useWebSocket(msg => {
     if (msg.type === 'refresh') {
       loadAll()
       setNewAlerts(n => n + 1)
+    } else if (msg.type === 'refresh_mode_change') {
+      api.getRefreshStatus().then(setRefreshState).catch(() => {})
     } else if (msg.type === 'events') {
       loadAll()
       setNewAlerts(n => n + 1)
@@ -84,61 +110,40 @@ export default function App() {
     }
   })
 
-  const handleBuy = useCallback(async (planId: string) => {
+  // Quick burst mode triggers
+  const handleStartBurst = async (durationSec: number) => {
     try {
-      const result = await api.buyMachine(planId)
-      if (result?.error) antMessage.error(result.error)
-      else antMessage.success('购买请求已提交')
+      const res = await api.startBurstRefresh(durationSec, 2)
+      setRefreshState(res)
+      antMessage.success(`已开启 ${durationSec / 60} 分钟高速刷新 (2s/次)`)
     } catch {
-      antMessage.error('购买失败')
+      antMessage.error('开启高速刷新失败')
     }
-  }, [])
+  }
 
-  // Save a single page's buy config (debounced-ish: immediate save on change).
-  const handleSaveBuyConfig = useCallback(async (buyKey: keyof AppSettings, cfg: PageBuyConfig) => {
-    // Optimistic local update so the editor feels responsive.
-    setSettings(prev => (prev ? { ...prev, [buyKey]: cfg } : prev))
+  const handleStopBurst = async () => {
     try {
-      const updated = await api.saveSettings({ [buyKey]: cfg } as Partial<AppSettings>)
-      setSettings(updated)
+      const res = await api.stopBurstRefresh()
+      setRefreshState(res)
+      antMessage.info('已恢复为平时慢刷新 (30s/次)')
     } catch {
-      antMessage.error('保存抢购设置失败')
+      antMessage.error('恢复慢刷新失败')
     }
-  }, [])
+  }
 
-  // Persist a page's column widths (key already debounced in CategoryPage).
-  const handleSaveColWidths = useCallback(async (
-    widthKey: 'col_widths_cloud' | 'col_widths_ls' | 'col_widths_secondhand',
-    widths: Record<string, number>,
-  ) => {
-    setSettings(prev => (prev ? { ...prev, [widthKey]: widths } : prev))
-    try {
-      await api.saveSettings({ [widthKey]: widths } as Partial<AppSettings>)
-    } catch {
-      antMessage.error('保存列宽失败')
-    }
-  }, [])
-
-  // Persist a page's hardware scoring rules (immediate save on change).
-  const handleSaveScoreRules = useCallback(async (
-    scoreKey: 'score_rules_cloud' | 'score_rules_ls' | 'score_rules_secondhand',
-    rules: ScoreRules,
-  ) => {
-    setSettings(prev => (prev ? { ...prev, [scoreKey]: rules } : prev))
-    try {
-      const updated = await api.saveSettings({ [scoreKey]: rules } as Partial<AppSettings>)
-      setSettings(updated)
-      // Re-pull machines so the 评分 column reflects the new weights.
-      api.getMachines().then(setMachines).catch(() => {})
-    } catch {
-      antMessage.error('保存评分规则失败')
-    }
-  }, [])
-
-  // Not logged in → show the gatekeeper (login or first-time setup).
+  // Not logged in → Login / Setup
   if (!authed) {
     return (
-      <ConfigProvider theme={{ algorithm: theme.darkAlgorithm, token: { colorPrimary: '#177ddc', borderRadius: 6 } }}>
+      <ConfigProvider
+        theme={{
+          token: {
+            colorPrimary: '#2563eb',
+            colorBgBase: '#ffffff',
+            colorBgLayout: '#f8fafc',
+            borderRadius: 6,
+          },
+        }}
+      >
         <AntApp>
           <LoginPage onAuthed={() => { setAuthed(true); setLoading(true) }} />
         </AntApp>
@@ -146,118 +151,155 @@ export default function App() {
     )
   }
 
+  const isBurst = refreshState?.mode === 'burst'
+  const burstRemaining = refreshState?.remaining_seconds ?? 0
+
   return (
     <ConfigProvider
       theme={{
-        algorithm: theme.darkAlgorithm,
         token: {
-          colorPrimary: '#177ddc',
+          colorPrimary: '#2563eb',
+          colorBgBase: '#ffffff',
+          colorBgLayout: '#f8fafc',
+          colorText: '#334155',
+          colorTextHeading: '#0f172a',
+          colorTextSecondary: '#64748b',
+          colorBorder: '#e2e8f0',
+          colorBorderSecondary: '#f1f5f9',
           borderRadius: 6,
+          fontSize: 13,
         },
       }}
     >
       <AntApp>
-        <Layout style={{ minHeight: '100vh' }}>
+        <Layout className="ashan-layout">
+          {/* Ashan Slate 220px Sider */}
           <Sider
             collapsible
             collapsed={collapsed}
             onCollapse={setCollapsed}
-            theme="dark"
-            width={200}
-            style={{ background: '#111' }}
+            width={220}
+            className="ashan-sider"
           >
-            <div style={{ padding: '16px 12px', borderBottom: '1px solid #1f1f1f' }}>
-              <Title level={5} style={{ color: '#e0e0e0', margin: 0, fontSize: collapsed ? 0 : 14 }}>
-                {!collapsed && '个人工具仓库'}
-              </Title>
+            <div className="ashan-logo">
+              <div className="ashan-logo-icon">A</div>
+              {!collapsed && <div className="ashan-logo-text">Ashan Server Hub</div>}
             </div>
             <Menu
-              theme="dark"
               mode="inline"
               selectedKeys={[page]}
               onClick={({ key }) => {
                 setPage(key as PageKey)
                 if (key === 'alerts') setNewAlerts(0)
               }}
-              style={{ background: '#111', borderRight: 0 }}
+              style={{ borderRight: 0, padding: '8px 0' }}
               items={[
-                { key: 'overview',    icon: <DashboardOutlined />,         label: '总览' },
-                { key: 'account',     icon: <WalletOutlined />,            label: 'Akile 平台' },
-                { key: 'acck',        icon: <SafetyCertificateOutlined />, label: 'ACCK 平台' },
-                { key: 'cloud',       icon: <CloudServerOutlined />,        label: '云服务器' },
-                { key: 'lightweight', icon: <ThunderboltOutlined />,        label: '轻量服务器' },
-                { key: 'secondhand',  icon: <ShoppingOutlined />,           label: '二手机' },
+                { key: 'overview', icon: <DashboardOutlined />, label: '系统大盘' },
+                { key: 'store', icon: <ShoppingCartOutlined />, label: '一手新购' },
+                { key: 'secondhand', icon: <SwapOutlined />, label: '二手集市' },
+                { key: 'billing', icon: <CreditCardOutlined />, label: '账单与支付' },
+                { type: 'divider' },
+                { key: 'account', icon: <WalletOutlined />, label: 'Akile 资产' },
+                { key: 'acck', icon: <SafetyCertificateOutlined />, label: 'ACCK 资产' },
                 {
                   key: 'alerts',
                   icon: <BellOutlined />,
                   label: (
                     <Badge count={newAlerts} size="small" offset={[8, 0]}>
-                      预警历史
+                      预警动态
                     </Badge>
                   ),
                 },
-                { key: 'logs',     icon: <FileTextOutlined />, label: '调试日志' },
-                { key: 'settings', icon: <SettingOutlined />, label: '设置' },
+                { key: 'logs', icon: <FileTextOutlined />, label: '运行日志' },
+                { key: 'settings', icon: <SettingOutlined />, label: '系统配置' },
               ]}
             />
           </Sider>
 
           <Layout>
-            <Header style={{
-              background: '#111',
-              padding: '0 20px',
-              borderBottom: '1px solid #1f1f1f',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}>
-              <Typography.Text style={{ color: '#ccc', margin: 0 }}>
-                {{ overview: '总览', account: 'Akile 平台', acck: 'ACCK 平台', cloud: '云服务器', lightweight: '轻量服务器', secondhand: '二手机', alerts: '预警历史', logs: '调试日志', settings: '系统设置' }[page]}
-              </Typography.Text>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <Typography.Text style={{ color: '#555', fontSize: 12 }}>
-                  {settings ? `刷新间隔 ${settings.refresh_interval}s` : ''}
-                </Typography.Text>
-                <Typography.Text style={{ color: '#555', fontSize: 12 }}>
+            {/* Ashan Slate Top Context Bar */}
+            <Header className="ashan-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <span style={{ fontSize: 16, fontWeight: 700, color: '#0f172a' }}>
+                  {{
+                    overview: '双平台核心大盘',
+                    store: '官方一手云服务器商城',
+                    secondhand: '二手交易与捡漏集市',
+                    billing: '统一订单与账单支付中心',
+                    account: 'Akile 平台资产',
+                    acck: 'ACCK 平台资产',
+                    alerts: '系统预警历史',
+                    logs: '服务运行日志',
+                    settings: '系统与刷新设置',
+                  }[page]}
+                </span>
+                <span className="badge-online">Akile 永续保活</span>
+                <span className="badge-proxy">ACCK 7天 Token 复用</span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                {/* Dual-rate refresh control pill */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className={isBurst ? 'refresh-pill refresh-pill-burst' : 'refresh-pill refresh-pill-slow'}>
+                    {isBurst ? (
+                      <>
+                        <ThunderboltOutlined style={{ color: '#2563eb' }} />
+                        高速刷新中 (2s/次) · 剩 {Math.floor(burstRemaining / 60)}m{burstRemaining % 60}s
+                      </>
+                    ) : (
+                      <>
+                        <SyncOutlined spin style={{ color: '#059669', fontSize: 11 }} />
+                        平时慢刷新 (30s/次)
+                      </>
+                    )}
+                  </span>
+                  {isBurst ? (
+                    <Button size="small" danger onClick={handleStopBurst}>切回慢刷</Button>
+                  ) : (
+                    <Button size="small" type="primary" ghost onClick={() => handleStartBurst(300)}>5分高速</Button>
+                  )}
+                </div>
+
+                <Tooltip title="一键全量刷新">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<ReloadOutlined spin={loading} />}
+                    onClick={loadAll}
+                    style={{ color: '#64748b' }}
+                  />
+                </Tooltip>
+
+                <Text style={{ color: '#94a3b8', fontSize: 12 }}>
                   {version ? `v${version.version}` : ''}
-                </Typography.Text>
+                </Text>
+
                 <Button
                   type="text"
                   size="small"
                   icon={<LogoutOutlined />}
                   onClick={handleLogout}
-                  style={{ color: '#888' }}
+                  style={{ color: '#64748b' }}
                 >
                   退出
                 </Button>
-              </span>
+              </div>
             </Header>
 
-            <Content style={{ padding: 20, background: '#0d0d0d', minHeight: 0 }}>
-              {loading ? (
-                <Spin size="large" style={{ display: 'block', margin: '120px auto' }} />
+            {/* Ashan Slate Main Content */}
+            <Content className="ashan-content">
+              {loading && !refreshState ? (
+                <Spin size="large" style={{ display: 'block', margin: '140px auto' }} />
               ) : (
                 <>
-                  {page === 'overview'  && <Overview machines={machines} events={events} />}
-                  {page === 'account'  && <AccountPage />}
-                  {page === 'acck'     && <AcckAccountPage />}
-                  {page === 'cloud'  && (
-                    <CategoryPage pageKey="cloud" machines={machines} settings={settings}
-                      onBuy={handleBuy} onSaveBuyConfig={handleSaveBuyConfig}
-                      onSaveColWidths={handleSaveColWidths} onSaveScoreRules={handleSaveScoreRules} />
-                  )}
-                  {page === 'lightweight'  && (
-                    <CategoryPage pageKey="lightweight" machines={machines} settings={settings}
-                      onBuy={handleBuy} onSaveBuyConfig={handleSaveBuyConfig}
-                      onSaveColWidths={handleSaveColWidths} onSaveScoreRules={handleSaveScoreRules} />
-                  )}
-                  {page === 'secondhand'  && (
-                    <CategoryPage pageKey="secondhand" machines={machines} settings={settings}
-                      onBuy={handleBuy} onSaveBuyConfig={handleSaveBuyConfig}
-                      onSaveColWidths={handleSaveColWidths} onSaveScoreRules={handleSaveScoreRules} />
-                  )}
-                  {page === 'alerts'   && <AlertHistory events={events} />}
-                  {page === 'logs'     && <LogsPage />}
+                  {page === 'overview' && <UnifiedDashboard />}
+                  {page === 'store' && <UnifiedStorePage />}
+                  {page === 'secondhand' && <UnifiedSecondhandPage />}
+                  {page === 'billing' && <UnifiedBillingPage />}
+                  {page === 'account' && <AccountPage />}
+                  {page === 'acck' && <AcckAccountPage />}
+                  {page === 'alerts' && <AlertHistory events={events} />}
+                  {page === 'logs' && <LogsPage />}
                   {page === 'settings' && <SettingsPage settings={settings} onSaved={setSettings} />}
                 </>
               )}

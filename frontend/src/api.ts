@@ -337,6 +337,119 @@ export const api = {
 
   acckBuyPreview: (payload: Record<string, unknown>) =>
     http.post<Record<string, unknown>>('/api/acck/buy-preview', payload).then(r => r.data),
+
+  // --- Dual-Rate Refresh Control ---
+  getRefreshStatus: () =>
+    http.get<RefreshState>('/api/unified/refresh/status').then(r => r.data),
+
+  startBurstRefresh: (duration = 300, interval = 2) =>
+    http.post<RefreshState>('/api/unified/refresh/burst', { duration, interval }).then(r => r.data),
+
+  stopBurstRefresh: () =>
+    http.post<RefreshState>('/api/unified/refresh/slow').then(r => r.data),
+
+  // --- Unified Dual-Platform Management ---
+  getUnifiedServers: () =>
+    http.get<{ total: number; servers: UnifiedServer[]; counts: Record<string, number> }>('/api/unified/servers').then(r => r.data),
+
+  updateServerAutoRenew: (platform: string, server_id: number, auto_renew: boolean) =>
+    http.post<{ platform: string; server_id: number; auto_renew: boolean; result: any }>('/api/unified/servers/auto-renew', {
+      platform,
+      server_id,
+      auto_renew,
+    }).then(r => r.data),
+
+  renewServer: (platform: string, server_id: number, cycle = 1, auto_pay = false) =>
+    http.post<{ platform: string; server_id: number; order?: any; paid?: boolean; pay_result?: any }>('/api/unified/servers/renew', {
+      platform,
+      server_id,
+      cycle,
+      auto_pay,
+    }).then(r => r.data),
+
+  getUnifiedBilling: (page = 1, page_size = 20) =>
+    http.get<UnifiedBillingData>('/api/unified/billing', { params: { page, page_size } }).then(r => r.data),
+
+  payUnifiedOrder: (platform: string, order_id?: any, order_no?: string, method = 'balance') =>
+    http.post('/api/unified/billing/pay', { platform, order_id, order_no, method }).then(r => r.data),
+
+  getUnifiedStore: () =>
+    http.get<{ akile_store: any; acck_store: any }>('/api/unified/store').then(r => r.data),
+
+  buyStorePackage: (platform: string, plan_id: any, order_data: any[] = [], safe_mode = true) =>
+    http.post('/api/unified/store/buy', { platform, plan_id, order_data, safe_mode }).then(r => r.data),
+
+  getUnifiedSecondhand: (page = 1, page_size = 50) =>
+    http.get<{ total: number; items: SecondhandItem[]; counts: Record<string, number> }>('/api/unified/secondhand', { params: { page, page_size } }).then(r => r.data),
+
+  buySecondhandItem: (platform: string, listing_id: number, price_cents = 0, safe_mode = true, captcha = '') =>
+    http.post('/api/unified/secondhand/buy', { platform, listing_id, price_cents, safe_mode, captcha }).then(r => r.data),
+}
+
+export interface RefreshState {
+  mode: 'slow' | 'burst'
+  current_interval: number
+  slow_interval: number
+  burst_interval: number
+  burst_duration: number
+  remaining_seconds: number
+  expires_at: number | null
+  last_poll_at: number | null
+  total_bursts: number
+}
+
+export interface UnifiedServer {
+  uid: string
+  platform: 'akile' | 'acck'
+  id: number
+  server_id: string
+  name: string
+  node_name: string
+  area_name: string
+  ipv4: string
+  ipv6: string
+  cpu: number
+  memory: number
+  disk: number
+  bandwidth: number
+  flow: number
+  used_flow: number
+  due_time: number
+  auto_renew: boolean
+  price: number
+  cycle: number
+  status: number
+  system_name?: string
+  raw?: Record<string, unknown>
+}
+
+export interface UnifiedBillingData {
+  akile: {
+    orders: any[]
+    money_logs: any[]
+    pending_invoices: any[]
+  }
+  acck: {
+    orders: any[]
+    shop_logs: any[]
+  }
+}
+
+export interface SecondhandItem {
+  uid: string
+  platform: 'akile' | 'acck'
+  id: number
+  title: string
+  area: string
+  node: string
+  price_cents: number
+  price_cny: number
+  bandwidth: number
+  flow: number
+  due_time: number
+  seller: string
+  intro?: string
+  raw?: Record<string, unknown>
 }
 
 export interface AcckProfile {

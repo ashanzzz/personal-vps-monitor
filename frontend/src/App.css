@@ -1,1 +1,110 @@
-.read-the-docs { display: none; }
+/* Ashan Slate Layout Styles */
+.ashan-layout {
+  min-height: 100vh;
+  background-color: var(--ashan-slate-50);
+}
+
+.ashan-sider {
+  background: #ffffff !important;
+  border-right: 1px solid var(--ashan-slate-200);
+  box-shadow: none !important;
+}
+
+.ashan-logo {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--ashan-slate-200);
+  background: #ffffff;
+}
+
+.ashan-logo-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: #2563eb;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.ashan-logo-text {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ashan-slate-900);
+  letter-spacing: -0.01em;
+}
+
+.ashan-header {
+  background: #ffffff !important;
+  border-bottom: 1px solid var(--ashan-slate-200);
+  padding: 0 24px !important;
+  height: 56px !important;
+  line-height: 56px !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ashan-content {
+  padding: 20px 24px;
+  background-color: var(--ashan-slate-50);
+  min-height: calc(100vh - 56px);
+}
+
+/* Card Styling: Pure white, clean border, no heavy shadow */
+.ashan-card {
+  background: #ffffff !important;
+  border: 1px solid var(--ashan-slate-200) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 1px 2px 0 rgba(15, 23, 42, 0.03) !important;
+}
+
+.ashan-card .ant-card-head {
+  border-bottom: 1px solid var(--ashan-slate-200) !important;
+  padding: 0 16px !important;
+  min-height: 44px !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: var(--ashan-slate-900) !important;
+}
+
+.ashan-card .ant-card-body {
+  padding: 16px !important;
+}
+
+/* Refresh Mode Pill */
+.refresh-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.refresh-pill-slow {
+  background: #f1f5f9;
+  border: 1px solid var(--ashan-slate-200);
+  color: var(--ashan-slate-700);
+}
+
+.refresh-pill-burst {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+  animation: pulse-border 1.5s infinite;
+}
+
+@keyframes pulse-border {
+  0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.4); }
+  70% { box-shadow: 0 0 0 6px rgba(37, 99, 235, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+}

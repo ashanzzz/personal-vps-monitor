@@ -2,14 +2,125 @@
   box-sizing: border-box;
 }
 
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #0d0d0d;
-  color: #e0e0e0;
+:root {
+  --ashan-slate-50: #f8fafc;
+  --ashan-slate-100: #f1f5f9;
+  --ashan-slate-200: #e2e8f0;
+  --ashan-slate-300: #cbd5e1;
+  --ashan-slate-400: #94a3b8;
+  --ashan-slate-500: #64748b;
+  --ashan-slate-600: #475569;
+  --ashan-slate-700: #334155;
+  --ashan-slate-800: #1e293b;
+  --ashan-slate-900: #0f172a;
+  --ashan-blue-600: #2563eb;
+  --ashan-blue-700: #1d4ed8;
 }
 
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #111; }
-::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #555; }
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: var(--ashan-slate-50);
+  color: var(--ashan-slate-700);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular numbers for IP, MAC, Ports, Currency, Latency */
+.tabular-nums, .mono-num {
+  font-family: 'SF Mono', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* Custom minimal scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: var(--ashan-slate-100);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--ashan-slate-300);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ashan-slate-400);
+}
+
+/* Status Badges */
+.badge-online {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge-warning {
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge-offline {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge-proxy {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Table Ergonomics: 38px row height, 13px text */
+.ant-table-wrapper .ant-table-thead > tr > th {
+  padding: 8px 12px !important;
+  height: 40px !important;
+  background: #f8fafc !important;
+  color: #475569 !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+.ant-table-wrapper .ant-table-tbody > tr > td {
+  padding: 6px 12px !important;
+  height: 38px !important;
+  font-size: 13px !important;
+  color: #334155 !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+}
+
+.ant-table-wrapper .ant-table-tbody > tr:hover > td {
+  background: #f8fafc !important;
+}

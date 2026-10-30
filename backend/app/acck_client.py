@@ -84,10 +84,15 @@ async def get_my_servers(token: str) -> list[dict[str, Any]]:
         r = await c.get(f"{BASE}/auth/user/server/list", headers=_headers(token))
         r.raise_for_status()
         res = r.json()
-        data = res.get("data") or []
-        if isinstance(data, dict):
-            return data.get("list") or []
-        return data if isinstance(data, list) else []
+        if isinstance(res, dict):
+            if "servers" in res and isinstance(res["servers"], list):
+                return res["servers"]
+            data = res.get("data") or []
+            if isinstance(data, dict):
+                return data.get("list") or data.get("servers") or []
+            if isinstance(data, list):
+                return data
+        return []
 
 
 async def get_exchange_listings(page: int = 1, page_size: int = 50) -> list[dict[str, Any]]:
@@ -100,10 +105,15 @@ async def get_exchange_listings(page: int = 1, page_size: int = 50) -> list[dict
         )
         r.raise_for_status()
         res = r.json()
-        data = res.get("data") or []
-        if isinstance(data, dict):
-            return data.get("list") or []
-        return data if isinstance(data, list) else []
+        if isinstance(res, dict):
+            if "listings" in res:
+                return res.get("listings") or []
+            data = res.get("data")
+            if isinstance(data, dict):
+                return data.get("list") or []
+            if isinstance(data, list):
+                return data
+        return res if isinstance(res, list) else []
 
 
 async def buy_preview(token: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -118,3 +128,75 @@ async def buy_preview(token: str, payload: dict[str, Any]) -> dict[str, Any]:
         "msg": "【防误购保护锁已生效】模拟购买试算成功，未发起真实支付扣费。",
         "payload": payload,
     }
+
+
+async def get_order_list(token: str, page: int = 1, page_size: int = 20) -> dict[str, Any]:
+    """GET /api/auth/user/order/list – user orders and payment history."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        r = await c.get(
+            f"{BASE}/auth/user/order/list",
+            params={"page": page, "page_size": page_size},
+            headers=_headers(token),
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+async def create_renew_order(token: str, server_id: int, cycle: int = 1) -> dict[str, Any]:
+    """POST /api/auth/user/server/renew/create – create renewal order."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        r = await c.post(
+            f"{BASE}/auth/user/server/renew/create",
+            json={"server_id": server_id, "cycle": cycle},
+            headers=_headers(token),
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+async def update_auto_renew(token: str, server_id: int, auto_renew: bool) -> dict[str, Any]:
+    """POST /api/auth/user/server/{id}/auto-renew."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        r = await c.post(
+            f"{BASE}/auth/user/server/{server_id}/auto-renew",
+            json={"auto_renew": 1 if auto_renew else 0},
+            headers=_headers(token),
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+async def pay_order(token: str, order_id: int | str, payment_method: str = "balance") -> dict[str, Any]:
+    """POST /api/auth/user/order/pay – pay an order via balance or alipay."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        r = await c.post(
+            f"{BASE}/auth/user/order/pay",
+            json={"order_id": order_id, "payment_method": payment_method},
+            headers=_headers(token),
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+async def create_order(token: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """POST /api/auth/user/order/create – create new server/service order."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        r = await c.post(
+            f"{BASE}/auth/user/order/create",
+            json=payload,
+            headers=_headers(token),
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+async def buy_exchange_listing(token: str, listing_id: int) -> dict[str, Any]:
+    """POST /api/auth/user/exchange/listing/{id}/buy – purchase secondhand listing."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        r = await c.post(
+            f"{BASE}/auth/user/exchange/listing/{listing_id}/buy",
+            json={},
+            headers=_headers(token),
+        )
+        r.raise_for_status()
+        return r.json()
