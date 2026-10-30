@@ -516,10 +516,10 @@ def evaluate_cost_effectiveness(
             price_score = 15.0
             reasons.append(f"双优：入手¥{price_cny:.1f} + 超级超值传家宝月供¥{monthly_renew:.1f} (+15)")
         elif monthly_renew <= 10.0:
-            price_score = min(15.0, ask_score)
+            price_score = min(15.0, max(12.0, ask_score))
             reasons.append(f"双优：入手¥{price_cny:.1f} + 真正超值月续费¥{monthly_renew:.1f} (+{int(price_score)})")
         elif is_high_spec_powerhouse and monthly_renew <= 20.0:
-            price_score = min(14.0, ask_score + 2.0)
+            price_score = 14.0
             reasons.append(f"入手¥{price_cny:.1f}，高配生产力机型续费价值极高 (+{int(price_score)})")
         elif monthly_renew <= 22.0:
             price_score = min(11.0, ask_score)
