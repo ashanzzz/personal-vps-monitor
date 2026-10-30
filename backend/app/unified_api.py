@@ -21,6 +21,7 @@ from .config import get_all_settings
 from .database import get_db
 from . import akile_client, acck_client
 from .refresh_manager import refresh_mgr
+from .route_analyzer import analyze_route, analyze_traffic, evaluate_secondhand_listing
 from .ws import broadcast
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,7 @@ class SecondhandBuyRequest(BaseModel):
     price_cents: int = Field(default=0)
     captcha: str = Field(default="")
     safe_mode: bool = Field(default=True, description="When true, simulate only without payment")
+    force_buy_depleted: bool = Field(default=False, description="Explicitly bypass traffic depletion guard")
 
 
 # ---------------------------------------------------------------------------
@@ -531,21 +533,51 @@ async def get_unified_secondhand(
                 except (ValueError, TypeError):
                     renew_price_cents = 0
 
+                title = item.get("name") or item.get("product_name") or f"PushShop-{iid}"
+                area = item.get("area_name", "")
+                node = item.get("node_name", "")
+                detail = item.get("detail", "")
+                price_cny = round(price_cents / 100, 2)
+                renew_cny = round(renew_price_cents / 100, 2) if renew_price_cents > 0 else 0
+
+                # Traffic normalization
+                flow_total = float(item.get("flow", 0) or 0)
+                flow_used_raw = float(item.get("flow_used", 0) or 0)
+                flow_used = round(flow_used_raw / (1024 ** 3), 1) if flow_used_raw > 1000000 else flow_used_raw
+                reset_price_cny = round(float(item.get("reset_price", 0) or 0) / 100, 2)
+
+                eval_res = evaluate_secondhand_listing(
+                    price_cny=price_cny,
+                    renew_price_cny=renew_cny,
+                    flow_total_gb=flow_total,
+                    flow_used_gb=flow_used,
+                    reset_price_cny=reset_price_cny,
+                    name=title,
+                    node_name=node,
+                    detail=detail,
+                    intro=detail,
+                    area=area,
+                )
+
                 items.append({
                     "uid": f"akile:{iid}",
                     "platform": "akile",
                     "id": iid,
-                    "title": item.get("name") or item.get("product_name") or f"PushShop-{iid}",
-                    "area": item.get("area_name", ""),
-                    "node": item.get("node_name", ""),
+                    "title": title,
+                    "area": area,
+                    "node": node,
                     "price_cents": price_cents,
-                    "price_cny": round(price_cents / 100, 2),
-                    "renew_price_cny": round(renew_price_cents / 100, 2) if renew_price_cents > 0 else 0,
+                    "price_cny": price_cny,
+                    "renew_price_cny": renew_cny,
                     "bandwidth": item.get("bandwidth", 0),
-                    "flow": item.get("traffic") or item.get("flow", 0),
+                    "flow": flow_total,
                     "due_time": item.get("due_time", 0),
                     "seller": item.get("username", "卖家"),
-                    "intro": item.get("detail", ""),
+                    "intro": detail,
+                    "route": eval_res["route"],
+                    "traffic": eval_res["traffic"],
+                    "pricing_analysis": eval_res["pricing"],
+                    "sniping": eval_res["sniping_verdict"],
                     "raw": item,
                 })
         except Exception as e:
@@ -575,21 +607,50 @@ async def get_unified_secondhand(
                 except (ValueError, TypeError):
                     renew_cents = 0
 
+            title = snapshot.get("plan_name") or item.get("intro_text") or f"Exchange-{iid}"
+            area = snapshot.get("area_name", "美国")
+            node = snapshot.get("node_name", "")
+            node_comment = snapshot.get("node_comment", "")
+            intro = item.get("intro_text", "")
+            price_cny = round(price_cents / 100, 2)
+            renew_cny = round(renew_cents / 100, 2) if renew_cents > 0 else 0
+
+            flow_total = float(snapshot.get("flow_gb", 0) or 0)
+            flow_used = float(snapshot.get("flow_used_gb", 0) or 0)
+            reset_price_cny = round(float(snapshot.get("reset_flow_price_cents", 0) or 0) / 100, 2)
+
+            eval_res = evaluate_secondhand_listing(
+                price_cny=price_cny,
+                renew_price_cny=renew_cny,
+                flow_total_gb=flow_total,
+                flow_used_gb=flow_used,
+                reset_price_cny=reset_price_cny,
+                name=title,
+                node_name=node,
+                detail=node_comment,
+                intro=intro,
+                area=area,
+            )
+
             items.append({
                 "uid": f"acck:{iid}",
                 "platform": "acck",
                 "id": iid,
-                "title": snapshot.get("plan_name") or item.get("intro_text") or f"Exchange-{iid}",
-                "area": snapshot.get("area_name", "美国"),
-                "node": snapshot.get("node_name", ""),
+                "title": title,
+                "area": area,
+                "node": node,
                 "price_cents": price_cents,
-                "price_cny": round(price_cents / 100, 2),
-                "renew_price_cny": round(renew_cents / 100, 2) if renew_cents > 0 else 0,
+                "price_cny": price_cny,
+                "renew_price_cny": renew_cny,
                 "bandwidth": snapshot.get("bandwidth_mbps", 0),
-                "flow": snapshot.get("flow_gb", 0),
+                "flow": flow_total,
                 "due_time": snapshot.get("due_time_unix", 0),
                 "seller": f"User#{item.get('seller_user_id', '')}",
-                "intro": item.get("intro_text", ""),
+                "intro": intro,
+                "route": eval_res["route"],
+                "traffic": eval_res["traffic"],
+                "pricing_analysis": eval_res["pricing"],
+                "sniping": eval_res["sniping_verdict"],
                 "raw": item,
             })
     except Exception as e:
@@ -614,7 +675,7 @@ async def buy_secondhand_item(
     _: str = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Snipe / buy a secondhand server (supports safe dry-run mode)."""
+    """Snipe / buy a secondhand server (supports safe dry-run mode and traffic depletion guard)."""
     settings = await get_all_settings(db)
     is_safe = req.safe_mode or settings.get("safe_buy_mode", True)
 
@@ -637,6 +698,28 @@ async def buy_secondhand_item(
     elif req.platform == "acck":
         if not acck_tok:
             raise HTTPException(400, "ACCK token not configured")
+
+        # Sniping Safety Guard: Inspect listing traffic and IP status before direct purchase
+        if not req.force_buy_depleted:
+            try:
+                listings = await acck_client.get_exchange_listings(1, 100)
+                matched = next((l for l in listings if l.get("id") == req.listing_id), None)
+                if matched and matched.get("snapshot_json"):
+                    sn = json.loads(matched["snapshot_json"])
+                    f_total = float(sn.get("flow_gb", 0) or 0)
+                    f_used = float(sn.get("flow_used_gb", 0) or 0)
+                    reset_p = float(sn.get("reset_flow_price_cents", 0) or 0) / 100
+                    if f_total > 0 and (f_total - f_used) <= 5.0:
+                        raise HTTPException(
+                            400,
+                            f"【捡漏风控拦截】该主机可用流量已全部耗尽（{f_used}/{f_total}GB已光，充值重置需额外付¥{reset_p:.2f}）！"
+                            f"加上流量重置费后失去套利价值。若明确知晓并仍需购买，请勾选【确认强制买入耗尽流量主机】。"
+                        )
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.warning("Failed pre-buy safety check: %s", e)
+
         res = await acck_client.buy_exchange_listing(acck_tok, req.listing_id)
         return {"status": "success", "platform": "acck", "result": res}
     raise HTTPException(400, f"Unsupported platform: {req.platform}")

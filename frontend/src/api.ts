@@ -382,8 +382,8 @@ export const api = {
   getUnifiedSecondhand: (page = 1, page_size = 50) =>
     http.get<{ total: number; items: SecondhandItem[]; counts: Record<string, number> }>('/api/unified/secondhand', { params: { page, page_size } }).then(r => r.data),
 
-  buySecondhandItem: (platform: string, listing_id: number | string, price_cents = 0, safe_mode = true, captcha = '') =>
-    http.post('/api/unified/secondhand/buy', { platform, listing_id, price_cents, safe_mode, captcha }).then(r => r.data),
+  buySecondhandItem: (platform: string, listing_id: number | string, price_cents = 0, safe_mode = true, captcha = '', force_buy_depleted = false) =>
+    http.post('/api/unified/secondhand/buy', { platform, listing_id, price_cents, safe_mode, captcha, force_buy_depleted }).then(r => r.data),
 }
 
 export interface RefreshState {
@@ -438,6 +438,46 @@ export interface UnifiedBillingData {
   }
 }
 
+export interface RouteAnalysis {
+  tier: 'S' | 'A' | 'B' | 'C'
+  tier_label: string
+  is_optimized: boolean
+  routes: string[]
+  primary_route: string
+  native_ip: boolean
+  ip_clean: boolean
+  ip_status: string
+  ip_status_text: string
+}
+
+export interface TrafficAnalysis {
+  total_gb: number
+  used_gb: number
+  remaining_gb: number
+  remaining_ratio_percent: number
+  is_depleted: boolean
+  is_low: boolean
+  status: string
+  status_text: string
+  badge_tone: string
+  reset_price_cny: number
+}
+
+export interface PricingAnalysis {
+  ask_price_cny: number
+  renew_price_cny: number
+  reset_traffic_fee_cny: number
+  real_total_cost_cny: number
+  intrinsic_value_cny: number
+}
+
+export interface SnipingVerdict {
+  is_snipable: boolean
+  score: number
+  reasons: string[]
+  verdict_text: string
+}
+
 export interface SecondhandItem {
   uid: string
   platform: 'akile' | 'acck'
@@ -453,6 +493,10 @@ export interface SecondhandItem {
   due_time: number
   seller: string
   intro?: string
+  route?: RouteAnalysis
+  traffic?: TrafficAnalysis
+  pricing_analysis?: PricingAnalysis
+  sniping?: SnipingVerdict
   raw?: Record<string, unknown>
 }
 
