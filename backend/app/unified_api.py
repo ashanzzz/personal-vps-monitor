@@ -148,6 +148,20 @@ async def get_unified_servers(
                 cycle = int(s.get("cycle", 1))
                 cycle_text = "年付" if cycle == 12 else (f"{cycle}个月" if cycle > 1 else "月付")
 
+                # If ipv4 is empty, query network ip address
+                ipv4 = s.get("ipAddress") or s.get("ipv4") or ""
+                ipv6 = s.get("ipv6") or ""
+                if not ipv4 and sid:
+                    try:
+                        addrs = await akile_client.get_server_ip_address(akile_tok, sid)
+                        for a in addrs:
+                            if a.get("type") == "ipv4" and not ipv4:
+                                ipv4 = a.get("address", "")
+                            elif a.get("type") == "ipv6" and not ipv6:
+                                ipv6 = a.get("address", "")
+                    except Exception:
+                        pass
+
                 servers.append({
                     "uid": f"akile:{sid}",
                     "platform": "akile",
@@ -156,8 +170,11 @@ async def get_unified_servers(
                     "name": s.get("server_re_name") or s.get("server_name") or f"Akile-{sid}",
                     "node_name": s.get("node_name", ""),
                     "area_name": s.get("area_name", ""),
-                    "ipv4": s.get("ipAddress") or s.get("ipv4") or "",
-                    "ipv6": s.get("ipv6", ""),
+                    "ipv4": ipv4,
+                    "ipv6": ipv6,
+                    "ssh_user": s.get("init_username") or "root",
+                    "ssh_password": s.get("init_password") or "",
+                    "ssh_port": 22,
                     "cpu": s.get("cpu", 1),
                     "memory": s.get("memory", 1024),
                     "disk": s.get("disk", 10),
@@ -201,6 +218,9 @@ async def get_unified_servers(
                     "area_name": s.get("area_name", ""),
                     "ipv4": s.get("ipv4", ""),
                     "ipv6": s.get("ipv6", ""),
+                    "ssh_user": s.get("init_username") or "root",
+                    "ssh_password": s.get("init_password") or "",
+                    "ssh_port": 22,
                     "cpu": s.get("cpu", 1),
                     "memory": s.get("memory", 1024),
                     "disk": s.get("disk", 10),

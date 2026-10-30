@@ -246,6 +246,20 @@ async def get_server_detail(token: str, server_id: int) -> dict:
         return r.json().get("data") or {}
 
 
+async def get_server_ip_address(token: str, server_id: int) -> list[dict]:
+    """GET /v1/server/GetIpAddress?id=X – fetch IPv4 and IPv6 network assignments."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        r = await c.get(f"{BASE}/v1/server/GetIpAddress", params={"id": server_id}, headers=_headers(token))
+        r.raise_for_status()
+        res = r.json()
+        raw_list = res.get("list") or (res.get("data") or {}).get("list") or []
+        addrs = []
+        for item in raw_list:
+            for addr in item.get("address", []):
+                addrs.append(addr)
+        return addrs
+
+
 async def update_auto_renew(token: str, server_id: int, auto_renew: bool) -> dict:
     """GET /v1/server/UpdateAutoRenew?id=X&auto_renew=true|false."""
     async with httpx.AsyncClient(timeout=TIMEOUT) as c:
