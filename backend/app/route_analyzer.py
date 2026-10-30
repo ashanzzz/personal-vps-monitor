@@ -345,6 +345,57 @@ def evaluate_secondhand_listing(
 # General Cost-Effectiveness Evaluation Engine (一手与二手通用性价比算法)
 # ---------------------------------------------------------------------------
 
+def match_user_trade_strategy(
+    name: str = "",
+    node_name: str = "",
+    detail: str = "",
+    intro: str = "",
+    monthly_renew: float = 0.0,
+) -> Optional[Dict[str, Any]]:
+    """
+    山哥专属主力核心机型做市报价与心理底牌字典：
+    1. IIJ (Akile JP IIJ 旗舰大口径高配生产力): 买入成本 ¥350，出售底价 ¥500，买入目标 <= ¥200
+    2. ISP (ACCK LAX4837-ISP 绝版双ISP传家宝): 目标售价 ¥400，买入目标 ¥200 - ¥250
+    3. SB (ACCK JPSB 绝版软银 1.11元传家宝): 目标售价 ¥250 - ¥300，买入目标 ¥100 - ¥170
+    """
+    combined = f"{name} {node_name} {detail} {intro}".lower()
+
+    # 1. IIJ 旗舰机型
+    if "iij" in combined:
+        return {
+            "model_code": "IIJ",
+            "model_name": "Akile JP IIJ 旗舰生产力",
+            "buy_target_max": 200.0,
+            "sell_target_min": 500.0,
+            "cost_basis": 350.0,
+            "desc": "性能极强生产力底座(2.5G口+2G内存+20G盘)，成本¥350，非¥500不卖，¥200内闭眼入",
+        }
+
+    # 2. ISP 绝版双ISP传家宝 (月付1.90元)
+    if ("isp" in combined or "双isp" in combined) and monthly_renew <= 2.5:
+        return {
+            "model_code": "ISP",
+            "model_name": "ACCK LAX4837-ISP 绝版双ISP传家宝",
+            "buy_target_max": 250.0,
+            "sell_target_min": 400.0,
+            "cost_basis": 1.90,
+            "desc": "美西双ISP绝版传家宝(1000M口+1200G)，买入目标¥200-250，目标售价¥400",
+        }
+
+    # 3. SB 绝版软银传家宝 (月付1.11元)
+    if ("sb" in combined or "softbank" in combined or "软银" in combined) and monthly_renew <= 2.5:
+        return {
+            "model_code": "SB",
+            "model_name": "ACCK JPSB 绝版软银传家宝",
+            "buy_target_max": 170.0,
+            "sell_target_min": 250.0,
+            "cost_basis": 1.11,
+            "desc": "日本软银绝版传家宝(1000M口+1000G)，买入目标¥100-170，目标售价¥250-300",
+        }
+
+    return None
+
+
 def evaluate_cost_effectiveness(
     item_type: str = "store",  # "store" (一手) | "secondhand" (二手) | "server" (已有名下主机)
     price_cny: float = 0.0,
@@ -551,45 +602,64 @@ def evaluate_cost_effectiveness(
 
     USD_RATE = 7.25
 
-    # 6. 山哥传家宝资产化估值模型 (Annualized Arbitrage Fair Valuation)
-    # 以市场等效 1000G 月租作为机会成本锚点：
-    # 1. 传家宝 (月供 <= 2元):
-    #    - 普通烂网: 市场月租 8~10元/月 -> 年化公允转让身价: ¥80 左右
-    #    - 优化好网(A级/软银/4837/CMI): 市场月租 18~22元/月 -> 年化公允转让身价: ¥180~¥200 左右
-    #    - 顶级好网(S级/9929/GIA/双ISP): 市场月租 25~30元/月 -> 年化公允转让身价: ¥220~¥250 左右 (相当于10倍年供)
-    # 2. 高配生产力优良机型: 年化公允身价约 ¥120
-    # 3. 普通/高月租机型: 缺乏长期套利溢价，转让价值趋于零
+    # 6. 山哥传家宝资产化估值模型与做市商策略 (Annualized Arbitrage Fair Valuation & Market-Making)
+    # 严格遵照山哥三款核心主力做市买卖底牌：
+    # IIJ: 成本¥350，出售底价¥500，买入目标≤¥200
+    # ISP: 目标售价¥400，买入目标¥200-250
+    # SB:  目标售价¥250-300，买入目标¥100-170
+    trade_strategy = match_user_trade_strategy(name, node_name, detail, intro, monthly_renew)
     fair_market_value_cny = 0.0
     valuation_rationale = ""
-    flow_multiplier = min(1.3, max(0.6, flow_total_gb / 1000.0))
-    p_route = route_info.get("primary_route", "")
-    is_native = bool(route_info.get("native_ip"))
+    target_buy_price = None
+    target_sell_price = None
 
-    if monthly_renew <= 2.5:
-        if route_info.get("tier") == "S" or "双ISP" in p_route or "9929" in p_route or "GIA" in p_route:
-            base_v = 220.0 + (30.0 if is_native else 0.0)
-            fair_market_value_cny = round(base_v * flow_multiplier, 1)
-            valuation_rationale = f"顶级好线路传家宝 (市场等效月租¥25-30/月，年化公允身价¥{fair_market_value_cny}，约10倍年供)"
-        elif route_info.get("tier") == "A" or "软银" in p_route or "4837" in p_route or "CMI" in p_route:
-            base_v = 180.0 + (20.0 if is_native else 0.0)
-            fair_market_value_cny = round(base_v * flow_multiplier, 1)
-            valuation_rationale = f"优质好线路传家宝 (市场等效月租¥18-20/月，年化公允身价¥{fair_market_value_cny}，约10倍年供)"
+    if trade_strategy:
+        target_buy_price = trade_strategy["buy_target_max"]
+        target_sell_price = trade_strategy["sell_target_min"]
+        fair_market_value_cny = trade_strategy["sell_target_min"]
+
+        if item_type == "secondhand":
+            if price_cny <= target_buy_price:
+                # 命中山哥扫货抄底买入区间！
+                reasons.append(f"🚨 命中山哥扫货捡漏区间(标价¥{price_cny:.1f} ≤ 买入上限¥{target_buy_price:.0f})，极高优先级抄底！")
+                final_score = max(final_score, 92)  # 提振至神机必抢！
+                valuation_rationale = f"【极度超值扫货】当前标价¥{price_cny:.1f}落入山哥买入心仪价(≤¥{target_buy_price:.0f})，持有出售底价¥{target_sell_price:.0f}"
+            else:
+                valuation_rationale = f"【山哥关注型号】买入目标¥{target_buy_price:.0f}以内，心理出售底价¥{target_sell_price:.0f} (当前标价¥{price_cny:.1f})"
+                if price_cny > target_sell_price:
+                    reasons.append(f"标价¥{price_cny:.1f}高于山哥心仪卖出价(¥{target_sell_price:.0f})，溢价过高")
         else:
-            base_v = 80.0
-            fair_market_value_cny = round(base_v * flow_multiplier, 1)
-            valuation_rationale = f"普通/非优化线路传家宝 (市场等效月租¥8-10/月，年化公允身价¥{fair_market_value_cny}，约10倍年供)"
-    elif is_high_spec_powerhouse and monthly_renew <= 15.0:
-        fair_market_value_cny = 120.0
-        valuation_rationale = "高配生产力优质机型 (2.5G口+2G内存，年化公允转让身价¥120)"
-    elif monthly_renew <= 10.0:
-        fair_market_value_cny = 25.0
-        valuation_rationale = "轻量超值月租机 (公允二手转让身价¥20-30)"
-    elif monthly_renew <= 20.0:
-        fair_market_value_cny = 10.0
-        valuation_rationale = "平价月租机 (建议折价转让，公允身价约¥10)"
+            valuation_rationale = f"山哥核心主力资产：买入成本¥{trade_strategy.get('cost_basis', 0):.0f}，心理出售底价¥{target_sell_price:.0f}，买入目标≤¥{target_buy_price:.0f}"
     else:
-        fair_market_value_cny = 5.0
-        valuation_rationale = "高月租失血机型 (无长期套利溢价，转让价值趋于0)"
+        flow_multiplier = min(1.3, max(0.6, flow_total_gb / 1000.0))
+        p_route = route_info.get("primary_route", "")
+        is_native = bool(route_info.get("native_ip"))
+
+        if monthly_renew <= 2.5:
+            if route_info.get("tier") == "S" or "双ISP" in p_route or "9929" in p_route or "GIA" in p_route:
+                base_v = 220.0 + (30.0 if is_native else 0.0)
+                fair_market_value_cny = round(base_v * flow_multiplier, 1)
+                valuation_rationale = f"顶级好线路传家宝 (市场等效月租¥25-30/月，年化公允身价¥{fair_market_value_cny}，约10倍年供)"
+            elif route_info.get("tier") == "A" or "软银" in p_route or "4837" in p_route or "CMI" in p_route:
+                base_v = 180.0 + (20.0 if is_native else 0.0)
+                fair_market_value_cny = round(base_v * flow_multiplier, 1)
+                valuation_rationale = f"优质好线路传家宝 (市场等效月租¥18-20/月，年化公允身价¥{fair_market_value_cny}，约10倍年供)"
+            else:
+                base_v = 80.0
+                fair_market_value_cny = round(base_v * flow_multiplier, 1)
+                valuation_rationale = f"普通/非优化线路传家宝 (市场等效月租¥8-10/月，年化公允身价¥{fair_market_value_cny}，约10倍年供)"
+        elif is_high_spec_powerhouse and monthly_renew <= 15.0:
+            fair_market_value_cny = 120.0
+            valuation_rationale = "高配生产力优质机型 (2.5G口+2G内存，年化公允转让身价¥120)"
+        elif monthly_renew <= 10.0:
+            fair_market_value_cny = 25.0
+            valuation_rationale = "轻量超值月租机 (公允二手转让身价¥20-30)"
+        elif monthly_renew <= 20.0:
+            fair_market_value_cny = 10.0
+            valuation_rationale = "平价月租机 (建议折价转让，公允身价约¥10)"
+        else:
+            fair_market_value_cny = 5.0
+            valuation_rationale = "高月租失血机型 (无长期套利溢价，转让价值趋于0)"
 
     # 5. 指数函数调整价格敏感度 (Exponential Price Sensitivity Model)
     # 遵照山哥指导：
@@ -646,6 +716,9 @@ def evaluate_cost_effectiveness(
         "monthly_points_per_usd": monthly_points_per_usd,
         "fair_market_value_cny": fair_market_value_cny,
         "valuation_rationale": valuation_rationale,
+        "target_buy_price": target_buy_price,
+        "target_sell_price": target_sell_price,
+        "trade_strategy": trade_strategy,
         "breakdown": {
             "network_score": max(0, int(network_score)),
             "ltv_score": int(ltv_score),
