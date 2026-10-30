@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, Float
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -135,6 +135,30 @@ class CheckinLog(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False, default="")
     details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON blob
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class MarketTrade(Base):
+    """Dual-platform secondhand market trade transactions & arbitrage tracker."""
+    __tablename__ = "market_trades"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)  # "akile" | "acck"
+    server_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    server_name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    plan_name: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    node_name: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    listing_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    buy_order_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    buy_price_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ask_price_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    fee_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.10)
+    fee_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    seller_net_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    profit_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="on_sale")  # "on_sale", "sold", "cancelled"
+    remark: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    sold_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 async def init_db():
