@@ -261,11 +261,12 @@ async def get_server_ip_address(token: str, server_id: int) -> list[dict]:
 
 
 async def update_auto_renew(token: str, server_id: int, auto_renew: bool) -> dict:
-    """GET /v1/server/UpdateAutoRenew?id=X&auto_renew=true|false."""
+    """GET /v1/server/UpdateAutoRenew?serverId=X&renewStatus=1|0."""
+    status_str = "1" if auto_renew else "0"
     async with httpx.AsyncClient(timeout=TIMEOUT) as c:
         r = await c.get(
             f"{BASE}/v1/server/UpdateAutoRenew",
-            params={"id": server_id, "auto_renew": str(auto_renew).lower()},
+            params={"serverId": server_id, "renewStatus": status_str},
             headers=_headers(token),
         )
         r.raise_for_status()

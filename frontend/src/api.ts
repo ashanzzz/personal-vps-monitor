@@ -353,11 +353,20 @@ export const api = {
     http.get<{ total: number; servers: UnifiedServer[]; counts: Record<string, number> }>('/api/unified/servers').then(r => r.data),
 
   updateServerAutoRenew: (platform: string, server_id: number, auto_renew: boolean) =>
-    http.post<{ platform: string; server_id: number; auto_renew: boolean; result: any }>('/api/unified/servers/auto-renew', {
+    http.post<{ platform: string; server_id: number; auto_renew: boolean; status_text?: string; result: any }>('/api/unified/servers/auto-renew', {
       platform,
       server_id,
       auto_renew,
     }).then(r => r.data),
+
+  getServersAutoRenewStatus: () =>
+    http.get<{
+      total: number
+      enabled_count: number
+      disabled_count: number
+      servers: any[]
+      mechanism_docs: any
+    }>('/api/unified/servers/auto-renew-status').then(r => r.data),
 
   renewServer: (platform: string, server_id: number, cycle = 1, auto_pay = false) =>
     http.post<{ platform: string; server_id: number; order?: any; paid?: boolean; pay_result?: any }>('/api/unified/servers/renew', {

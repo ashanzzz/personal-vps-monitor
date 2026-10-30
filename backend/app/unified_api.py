@@ -254,6 +254,90 @@ async def get_unified_servers(
     }
 
 
+@router.get("/servers/auto-renew-status")
+async def get_all_servers_auto_renew_status(
+    _: str = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Inspect and report real-time auto-renew status across all Akile and ACCK servers."""
+    akile_tok, acck_tok = await _get_tokens(db)
+    servers_status: list[dict[str, Any]] = []
+
+    # 1. Akile
+    if akile_tok:
+        try:
+            ak_servers = await akile_client.get_my_servers(akile_tok)
+            for s in ak_servers:
+                sid = s.get("id")
+                price_cents = int(float(str(s.get("price", 0))))
+                cycle = int(s.get("cycle", 1))
+                due_ts = int(s.get("due_time", 0))
+                auto_renew = bool(s.get("auto_renew"))
+
+                servers_status.append({
+                    "platform": "akile",
+                    "server_id": sid,
+                    "name": s.get("server_re_name") or s.get("server_name") or f"Akile-{sid}",
+                    "ipv4": s.get("ipAddress") or s.get("ipv4") or "",
+                    "price_cny": round(price_cents / 100, 2),
+                    "cycle_text": "年付" if cycle == 12 else (f"{cycle}个月" if cycle > 1 else "月付"),
+                    "due_time": due_ts,
+                    "auto_renew": auto_renew,
+                    "auto_renew_text": "已开启自动续费 ✅" if auto_renew else "已关闭自动续费 ⚠️",
+                    "platform_policy": "Akile官方规则：到期前3天自动从账户可用余额划扣原价续费",
+                })
+        except Exception as e:
+            logger.warning("Failed to fetch Akile auto-renew: %s", e)
+
+    # 2. ACCK
+    if acck_tok:
+        try:
+            ac_servers = await acck_client.get_my_servers(acck_tok)
+            for s in ac_servers:
+                sid = s.get("id")
+                price_cents = int(float(str(s.get("price", 0))))
+                cycle = int(s.get("cycle", 1))
+                due_ts = int(s.get("due_time", 0))
+                auto_renew = bool(s.get("auto_renew"))
+
+                servers_status.append({
+                    "platform": "acck",
+                    "server_id": sid,
+                    "name": s.get("server_re_name") or s.get("server_name") or f"ACCK-{sid}",
+                    "ipv4": s.get("ipv4", ""),
+                    "price_cny": round(price_cents / 100, 2),
+                    "cycle_text": "年付" if cycle == 12 else (f"{cycle}个月" if cycle > 1 else "月付"),
+                    "due_time": due_ts,
+                    "auto_renew": auto_renew,
+                    "auto_renew_text": "已开启自动续费 ✅" if auto_renew else "已关闭自动续费 ⚠️",
+                    "platform_policy": "ACCK官方规则：到期日前使用账户余额自动生成续费单并划扣",
+                })
+        except Exception as e:
+            logger.warning("Failed to fetch ACCK auto-renew: %s", e)
+
+    enabled = [s for s in servers_status if s["auto_renew"]]
+    disabled = [s for s in servers_status if not s["auto_renew"]]
+
+    return {
+        "total": len(servers_status),
+        "enabled_count": len(enabled),
+        "disabled_count": len(disabled),
+        "servers": servers_status,
+        "mechanism_docs": {
+            "akile": {
+                "read_method": "GET /v1/server/GetServerV2List 或 GetServerDetailV2 (返回 auto_renew: bool)",
+                "update_method": "GET /v1/server/UpdateAutoRenew?serverId={id}&renewStatus={1|0}",
+                "trigger_timing": "到期前 3 天",
+            },
+            "acck": {
+                "read_method": "GET /api/auth/user/server/list (返回 auto_renew: 0|1)",
+                "update_method": "POST /api/auth/user/server/{id}/auto-renew (body: {\"auto_renew\": 1|0})",
+                "trigger_timing": "到期临期前自动发起余额结清",
+            }
+        }
+    }
+
+
 @router.post("/servers/auto-renew")
 async def update_server_auto_renew(
     req: UpdateAutoRenewRequest,
@@ -266,12 +350,24 @@ async def update_server_auto_renew(
         if not akile_tok:
             raise HTTPException(400, "Akile token not configured")
         res = await akile_client.update_auto_renew(akile_tok, req.server_id, req.auto_renew)
-        return {"platform": "akile", "server_id": req.server_id, "auto_renew": req.auto_renew, "result": res}
+        return {
+            "platform": "akile",
+            "server_id": req.server_id,
+            "auto_renew": req.auto_renew,
+            "status_text": "已开启自动续费" if req.auto_renew else "已关闭自动续费",
+            "result": res
+        }
     elif req.platform == "acck":
         if not acck_tok:
             raise HTTPException(400, "ACCK token not configured")
         res = await acck_client.update_auto_renew(acck_tok, req.server_id, req.auto_renew)
-        return {"platform": "acck", "server_id": req.server_id, "auto_renew": req.auto_renew, "result": res}
+        return {
+            "platform": "acck",
+            "server_id": req.server_id,
+            "auto_renew": req.auto_renew,
+            "status_text": "已开启自动续费" if req.auto_renew else "已关闭自动续费",
+            "result": res
+        }
     raise HTTPException(400, f"Unsupported platform: {req.platform}")
 
 
