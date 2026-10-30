@@ -383,7 +383,7 @@ export const api = {
     http.post('/api/unified/billing/pay', { platform, order_id, order_no, method }).then(r => r.data),
 
   getUnifiedStore: () =>
-    http.get<{ akile_store: any; acck_store: any }>('/api/unified/store').then(r => r.data),
+    http.get<{ total: number; packages: StorePackage[]; akile_store: any; acck_store: any }>('/api/unified/store').then(r => r.data),
 
   buyStorePackage: (platform: string, plan_id: any, order_data: any[] = [], safe_mode = true) =>
     http.post('/api/unified/store/buy', { platform, plan_id, order_data, safe_mode }).then(r => r.data),
@@ -487,6 +487,44 @@ export interface SnipingVerdict {
   verdict_text: string
 }
 
+export interface CostEffectiveness {
+  score: number
+  grade: string
+  grade_label: string
+  badge_color: string
+  breakdown: {
+    network_score: number
+    hardware_score: number
+    traffic_score: number
+    price_score: number
+  }
+  reasons: string[]
+}
+
+export interface StorePackage {
+  uid: string
+  platform: 'akile' | 'acck'
+  id: number | string
+  name: string
+  area: string
+  node: string
+  cpu: number
+  memory: number
+  disk: number
+  bandwidth: number
+  flow: number
+  price_cny: number
+  cycle: number
+  monthly_cny: number
+  stock: number
+  cost_effectiveness?: CostEffectiveness
+  score?: number
+  grade_label?: string
+  badge_color?: string
+  reasons?: string[]
+  raw?: Record<string, unknown>
+}
+
 export interface SecondhandItem {
   uid: string
   platform: 'akile' | 'acck'
@@ -505,7 +543,12 @@ export interface SecondhandItem {
   route?: RouteAnalysis
   traffic?: TrafficAnalysis
   pricing_analysis?: PricingAnalysis
+  cost_effectiveness?: CostEffectiveness
   sniping?: SnipingVerdict
+  score?: number
+  grade_label?: string
+  badge_color?: string
+  reasons?: string[]
   raw?: Record<string, unknown>
 }
 

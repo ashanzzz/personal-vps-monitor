@@ -21,7 +21,12 @@ from .config import get_all_settings
 from .database import get_db
 from . import akile_client, acck_client
 from .refresh_manager import refresh_mgr
-from .route_analyzer import analyze_route, analyze_traffic, evaluate_secondhand_listing
+from .route_analyzer import (
+    analyze_route,
+    analyze_traffic,
+    evaluate_secondhand_listing,
+    evaluate_cost_effectiveness,
+)
 from .ws import broadcast
 
 logger = logging.getLogger(__name__)
@@ -534,14 +539,81 @@ async def get_unified_store(
     _: str = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Get official store offerings from both Akile and ACCK."""
+    """Get official store offerings with automated cost-effectiveness evaluation."""
     akile_tok, acck_tok = await _get_tokens(db)
     ak_vps: dict = {}
     ac_shop: dict = {}
+    packages: list[dict[str, Any]] = []
 
     if akile_tok:
         try:
             ak_vps = await akile_client.get_vps_store(akile_tok)
+            areas = (ak_vps.get("data") or {}).get("areas") or []
+            for area in areas:
+                area_name = area.get("area_name", "")
+                for node in (area.get("nodes") or []):
+                    group_name = node.get("group_name", "")
+                    for plan in (node.get("plans") or []):
+                        pid = plan.get("id")
+                        pname = plan.get("plan_name", "")
+                        cpu = int(plan.get("cpu", 1))
+                        mem = int(plan.get("memory", 1024))
+                        disk = int(plan.get("disk", 10))
+                        bw = int(plan.get("bandwidth", 100))
+                        flow = float(plan.get("flow", 1000))
+                        stock = int(plan.get("stock", 0))
+
+                        price_cents = 0
+                        cycle = 1
+                        if plan.get("price_datas"):
+                            price_cents = plan["price_datas"][0].get("price", 0)
+                            cycle = plan["price_datas"][0].get("cycle", 1)
+                        elif plan.get("price"):
+                            price_cents = plan.get("price", 0)
+                            cycle = plan.get("cycle", 1)
+                        price_cny = round(price_cents / 100, 2)
+
+                        # Compute monthly normalized price
+                        monthly_cny = round(price_cny / cycle, 2) if cycle > 1 else price_cny
+
+                        cost_eff = evaluate_cost_effectiveness(
+                            item_type="store",
+                            price_cny=monthly_cny,
+                            renew_price_cny=monthly_cny,
+                            cpu=cpu,
+                            memory_mb=mem,
+                            disk_gb=disk,
+                            bandwidth_mbps=bw,
+                            flow_total_gb=flow,
+                            name=pname,
+                            node_name=group_name,
+                            detail=group_name,
+                            area=area_name,
+                        )
+
+                        packages.append({
+                            "uid": f"akile:{pid}",
+                            "platform": "akile",
+                            "id": pid,
+                            "name": pname,
+                            "area": area_name,
+                            "node": group_name,
+                            "cpu": cpu,
+                            "memory": mem,
+                            "disk": disk,
+                            "bandwidth": bw,
+                            "flow": flow,
+                            "price_cny": price_cny,
+                            "cycle": cycle,
+                            "monthly_cny": monthly_cny,
+                            "stock": stock,
+                            "cost_effectiveness": cost_eff,
+                            "score": cost_eff["score"],
+                            "grade_label": cost_eff["grade_label"],
+                            "badge_color": cost_eff["badge_color"],
+                            "reasons": cost_eff["reasons"],
+                            "raw": plan,
+                        })
         except Exception as e:
             logger.warning("Akile VPS store fetch error: %s", e)
 
@@ -551,7 +623,12 @@ async def get_unified_store(
         except Exception as e:
             logger.warning("ACCK shop fetch error: %s", e)
 
+    # Sort packages by cost-effectiveness score descending
+    packages.sort(key=lambda x: -x.get("score", 0))
+
     return {
+        "total": len(packages),
+        "packages": packages,
         "akile_store": ak_vps.get("data") or ak_vps,
         "acck_store": ac_shop,
     }
@@ -673,7 +750,12 @@ async def get_unified_secondhand(
                     "route": eval_res["route"],
                     "traffic": eval_res["traffic"],
                     "pricing_analysis": eval_res["pricing"],
+                    "cost_effectiveness": eval_res["cost_effectiveness"],
                     "sniping": eval_res["sniping_verdict"],
+                    "score": eval_res["cost_effectiveness"]["score"],
+                    "grade_label": eval_res["cost_effectiveness"]["grade_label"],
+                    "badge_color": eval_res["cost_effectiveness"]["badge_color"],
+                    "reasons": eval_res["cost_effectiveness"]["reasons"],
                     "raw": item,
                 })
         except Exception as e:
@@ -746,7 +828,12 @@ async def get_unified_secondhand(
                 "route": eval_res["route"],
                 "traffic": eval_res["traffic"],
                 "pricing_analysis": eval_res["pricing"],
+                "cost_effectiveness": eval_res["cost_effectiveness"],
                 "sniping": eval_res["sniping_verdict"],
+                "score": eval_res["cost_effectiveness"]["score"],
+                "grade_label": eval_res["cost_effectiveness"]["grade_label"],
+                "badge_color": eval_res["cost_effectiveness"]["badge_color"],
+                "reasons": eval_res["cost_effectiveness"]["reasons"],
                 "raw": item,
             })
     except Exception as e:

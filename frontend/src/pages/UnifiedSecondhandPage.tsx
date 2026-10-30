@@ -209,28 +209,50 @@ export const UnifiedSecondhandPage: React.FC = () => {
       ),
     },
     {
-      title: '综合捡漏评估',
+      title: '性价比 / 捡漏评分',
       key: 'sniping',
-      width: 150,
+      width: 175,
+      sorter: (a, b) => (a.score || 0) - (b.score || 0),
       render: (_, r) => {
-        const sn = r.sniping
+        const ce = r.cost_effectiveness
         const pr = r.pricing_analysis
-        if (!sn) return '—'
-
-        let tagColor = 'default'
-        if (sn.verdict_text === '【优质捡漏】') tagColor = 'green'
-        else if (sn.verdict_text === '【可入手】') tagColor = 'blue'
-        else tagColor = 'error'
+        const score = r.score ?? r.sniping?.score ?? 50
+        const gradeLabel = r.grade_label ?? r.sniping?.verdict_text ?? (score >= 88 ? '【神机/必抢】' : score >= 75 ? '【超值高性价】' : '【平价可选】')
+        const color = r.badge_color || (score >= 88 ? 'purple' : score >= 75 ? 'green' : score >= 60 ? 'blue' : 'error')
 
         return (
           <div>
-            <Tooltip title={sn.reasons.length > 0 ? sn.reasons.join('；') : `内在评估价值: ¥${pr?.intrinsic_value_cny || 0}`}>
-              <Tag color={tagColor} style={{ fontWeight: 600, fontSize: 11, cursor: 'help' }}>
-                {sn.verdict_text} ({sn.score}分)
+            <Tooltip
+              title={
+                <div style={{ fontSize: 12 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                    综合性价比: {score} 分 {gradeLabel}
+                  </div>
+                  {ce?.breakdown && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 8px', margin: '4px 0' }}>
+                      <div>• 线路网络: <b>{ce.breakdown.network_score}/35</b></div>
+                      <div>• 硬件产出: <b>{ce.breakdown.hardware_score}/25</b></div>
+                      <div>• 流量资产: <b>{ce.breakdown.traffic_score}/20</b></div>
+                      <div>• 价格与折扣: <b>{ce.breakdown.price_score}/20</b></div>
+                    </div>
+                  )}
+                  {pr?.intrinsic_value_cny ? (
+                    <div style={{ marginTop: 2 }}>内在评估基准价值: <b>¥{pr.intrinsic_value_cny}</b></div>
+                  ) : null}
+                  {r.reasons && r.reasons.length > 0 && (
+                    <div style={{ marginTop: 4, borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: 4, color: '#e2e8f0' }}>
+                      {r.reasons.join('；')}
+                    </div>
+                  )}
+                </div>
+              }
+            >
+              <Tag color={color} style={{ fontWeight: 700, fontSize: 11, cursor: 'help', padding: '1px 8px', margin: 0, borderRadius: 4 }}>
+                {score}分 {gradeLabel}
               </Tag>
             </Tooltip>
             {pr?.real_total_cost_cny && pr.real_total_cost_cny !== r.price_cny ? (
-              <div style={{ fontSize: 10, color: '#dc2626', marginTop: 2 }}>
+              <div style={{ fontSize: 10, color: '#dc2626', marginTop: 2, fontWeight: 500 }}>
                 含重置总成本: ¥{pr.real_total_cost_cny}
               </div>
             ) : null}
