@@ -159,14 +159,16 @@ export const UnifiedStorePage: React.FC = () => {
       ),
     },
     {
-      title: '性价比评分 (0-100)',
+      title: '综合评分 / 性价比比率',
       key: 'score',
-      width: 175,
-      sorter: (a, b) => (a.score || 0) - (b.score || 0),
+      width: 195,
+      sorter: (a, b) => (a.points_per_yuan || 0) - (b.points_per_yuan || 0),
       defaultSortOrder: 'descend',
       render: (_, r) => {
         const ce = r.cost_effectiveness
         const score = r.score ?? 50
+        const ppy = r.points_per_yuan ?? ce?.points_per_yuan ?? Number((score / Math.max(0.1, r.price_cny)).toFixed(2))
+        const ppd = r.points_per_usd ?? ce?.points_per_usd ?? Number((ppy * 7.25).toFixed(2))
         const gradeLabel = r.grade_label || (score >= 88 ? '【神机/必抢】' : score >= 75 ? '【超值高性价】' : '【平价可选】')
         const color = r.badge_color || (score >= 88 ? 'purple' : score >= 75 ? 'green' : score >= 60 ? 'blue' : 'orange')
 
@@ -175,7 +177,10 @@ export const UnifiedStorePage: React.FC = () => {
             title={
               <div style={{ fontSize: 12 }}>
                 <div style={{ fontWeight: 700, marginBottom: 4 }}>
-                  综合性价比: {score} 分 {gradeLabel}
+                  综合评分: {score} 分 {gradeLabel}
+                </div>
+                <div style={{ color: '#fbbf24', marginBottom: 4, fontWeight: 600 }}>
+                  ⚡ 每元得分: {ppy} 分/元 (约 ${ppd} 分/USD)
                 </div>
                 {ce?.breakdown && (
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 8px', margin: '4px 0' }}>
@@ -200,6 +205,9 @@ export const UnifiedStorePage: React.FC = () => {
               >
                 {score}分 {gradeLabel}
               </Tag>
+              <div style={{ fontSize: 11, color: '#2563eb', fontWeight: 600, marginTop: 2 }}>
+                {ppy} 分/元 <span style={{ color: '#64748b', fontWeight: 400 }}>(${ppd}/$)</span>
+              </div>
             </div>
           </Tooltip>
         )

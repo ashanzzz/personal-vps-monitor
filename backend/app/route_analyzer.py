@@ -488,6 +488,18 @@ def evaluate_cost_effectiveness(
     raw_total = network_score + ltv_score + traffic_score + price_score
     final_score = max(0, min(100, int(round(raw_total))))
 
+    USD_RATE = 7.25
+
+    # 性价比指数（每元评分 & 每美元评分: 单位资金所能购买到的综合品质分）
+    # 1. 购买/入手性价比
+    points_per_yuan = round(final_score / price_cny, 2)
+    points_per_usd = round(points_per_yuan * USD_RATE, 2)
+    cost_per_point_cny = round(price_cny / max(1, final_score), 3)
+
+    # 2. 长效月供性价比（每月每花 1 元所能享受的品质分）
+    monthly_points_per_yuan = round(final_score / monthly_renew, 2)
+    monthly_points_per_usd = round(monthly_points_per_yuan * USD_RATE, 2)
+
     if not route_info["ip_clean"]:
         grade = "D"
         grade_label = "【拦截避坑】"
@@ -514,6 +526,11 @@ def evaluate_cost_effectiveness(
         "grade": grade,
         "grade_label": grade_label,
         "badge_color": badge_color,
+        "points_per_yuan": points_per_yuan,
+        "points_per_usd": points_per_usd,
+        "cost_per_point_cny": cost_per_point_cny,
+        "monthly_points_per_yuan": monthly_points_per_yuan,
+        "monthly_points_per_usd": monthly_points_per_usd,
         "breakdown": {
             "network_score": max(0, int(network_score)),
             "ltv_score": int(ltv_score),

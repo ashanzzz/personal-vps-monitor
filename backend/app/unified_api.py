@@ -611,6 +611,8 @@ async def get_unified_store(
                             "score": cost_eff["score"],
                             "grade_label": cost_eff["grade_label"],
                             "badge_color": cost_eff["badge_color"],
+                            "points_per_yuan": cost_eff["points_per_yuan"],
+                            "points_per_usd": cost_eff["points_per_usd"],
                             "reasons": cost_eff["reasons"],
                             "raw": plan,
                         })
@@ -755,6 +757,8 @@ async def get_unified_secondhand(
                     "score": eval_res["cost_effectiveness"]["score"],
                     "grade_label": eval_res["cost_effectiveness"]["grade_label"],
                     "badge_color": eval_res["cost_effectiveness"]["badge_color"],
+                    "points_per_yuan": eval_res["cost_effectiveness"]["points_per_yuan"],
+                    "points_per_usd": eval_res["cost_effectiveness"]["points_per_usd"],
                     "reasons": eval_res["cost_effectiveness"]["reasons"],
                     "raw": item,
                 })
@@ -833,6 +837,8 @@ async def get_unified_secondhand(
                 "score": eval_res["cost_effectiveness"]["score"],
                 "grade_label": eval_res["cost_effectiveness"]["grade_label"],
                 "badge_color": eval_res["cost_effectiveness"]["badge_color"],
+                "points_per_yuan": eval_res["cost_effectiveness"]["points_per_yuan"],
+                "points_per_usd": eval_res["cost_effectiveness"]["points_per_usd"],
                 "reasons": eval_res["cost_effectiveness"]["reasons"],
                 "raw": item,
             })

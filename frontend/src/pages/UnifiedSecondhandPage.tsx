@@ -209,14 +209,16 @@ export const UnifiedSecondhandPage: React.FC = () => {
       ),
     },
     {
-      title: '性价比 / 捡漏评分',
+      title: '综合评分 / 性价比比率',
       key: 'sniping',
-      width: 175,
-      sorter: (a, b) => (a.score || 0) - (b.score || 0),
+      width: 195,
+      sorter: (a, b) => (a.points_per_yuan || 0) - (b.points_per_yuan || 0),
       render: (_, r) => {
         const ce = r.cost_effectiveness
         const pr = r.pricing_analysis
         const score = r.score ?? r.sniping?.score ?? 50
+        const ppy = r.points_per_yuan ?? ce?.points_per_yuan ?? Number((score / Math.max(0.1, r.price_cny)).toFixed(2))
+        const ppd = r.points_per_usd ?? ce?.points_per_usd ?? Number((ppy * 7.25).toFixed(2))
         const gradeLabel = r.grade_label ?? r.sniping?.verdict_text ?? (score >= 88 ? '【神机/必抢】' : score >= 75 ? '【超值高性价】' : '【平价可选】')
         const color = r.badge_color || (score >= 88 ? 'purple' : score >= 75 ? 'green' : score >= 60 ? 'blue' : 'error')
 
@@ -226,8 +228,21 @@ export const UnifiedSecondhandPage: React.FC = () => {
               title={
                 <div style={{ fontSize: 12 }}>
                   <div style={{ fontWeight: 700, marginBottom: 4 }}>
-                    综合性价比: {score} 分 {gradeLabel}
+                    综合品质评分: {score} 分 {gradeLabel}
                   </div>
+                  <div style={{ color: '#fbbf24', marginBottom: 4, fontWeight: 600 }}>
+                    ⚡ 购买性价比: {ppy} 分/元 (约 ${ppd} 分/USD)
+                  </div>
+                  {ce?.monthly_points_per_yuan ? (
+                    <div style={{ color: '#38bdf8', marginBottom: 4 }}>
+                      • 长线月供比: {ce.monthly_points_per_yuan} 分/元·月 (${ce.monthly_points_per_usd}/$)
+                    </div>
+                  ) : null}
+                  {ce?.cost_per_point_cny ? (
+                    <div style={{ color: '#94a3b8', marginBottom: 4 }}>
+                      • 单位品质成本: ¥{ce.cost_per_point_cny} / 分
+                    </div>
+                  ) : null}
                   {ce?.breakdown && (
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 8px', margin: '4px 0' }}>
                       <div>• 线路网络: <b>{ce.breakdown.network_score}/30</b></div>
@@ -250,6 +265,9 @@ export const UnifiedSecondhandPage: React.FC = () => {
               <Tag color={color} style={{ fontWeight: 700, fontSize: 11, cursor: 'help', padding: '1px 8px', margin: 0, borderRadius: 4 }}>
                 {score}分 {gradeLabel}
               </Tag>
+              <div style={{ fontSize: 11, color: '#2563eb', fontWeight: 600, marginTop: 2 }}>
+                {ppy} 分/元 <span style={{ color: '#64748b', fontWeight: 400 }}>(${ppd}/$)</span>
+              </div>
             </Tooltip>
             {pr?.real_total_cost_cny && pr.real_total_cost_cny !== r.price_cny ? (
               <div style={{ fontSize: 10, color: '#dc2626', marginTop: 2, fontWeight: 500 }}>

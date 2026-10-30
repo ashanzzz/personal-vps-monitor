@@ -492,6 +492,11 @@ export interface CostEffectiveness {
   grade: string
   grade_label: string
   badge_color: string
+  points_per_yuan?: number
+  points_per_usd?: number
+  cost_per_point_cny?: number
+  monthly_points_per_yuan?: number
+  monthly_points_per_usd?: number
   breakdown: {
     network_score: number
     ltv_score: number
@@ -521,6 +526,8 @@ export interface StorePackage {
   score?: number
   grade_label?: string
   badge_color?: string
+  points_per_yuan?: number
+  points_per_usd?: number
   reasons?: string[]
   raw?: Record<string, unknown>
 }
@@ -548,6 +555,8 @@ export interface SecondhandItem {
   score?: number
   grade_label?: string
   badge_color?: string
+  points_per_yuan?: number
+  points_per_usd?: number
   reasons?: string[]
   raw?: Record<string, unknown>
 }
