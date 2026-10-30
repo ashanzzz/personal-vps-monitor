@@ -169,12 +169,29 @@ async def get_unified_servers(
                     except Exception:
                         pass
 
+                price_cny = round(price_cents / 100, 2)
+                monthly_price = round(price_cny / cycle, 2) if cycle > 0 else price_cny
+                server_name = s.get("server_re_name") or s.get("server_name") or f"Akile-{sid}"
+                cost_eff = evaluate_cost_effectiveness(
+                    item_type="server",
+                    price_cny=monthly_price,
+                    renew_price_cny=monthly_price,
+                    cpu=s.get("cpu", 1),
+                    memory_mb=s.get("memory", 1024),
+                    disk_gb=s.get("disk", 10),
+                    bandwidth_mbps=s.get("bandwidth", 1000),
+                    flow_total_gb=s.get("flow", 1000),
+                    name=server_name,
+                    node_name=s.get("node_name", ""),
+                    area=s.get("area_name", ""),
+                )
+
                 servers.append({
                     "uid": f"akile:{sid}",
                     "platform": "akile",
                     "id": sid,
                     "server_id": s.get("server_id", ""),
-                    "name": s.get("server_re_name") or s.get("server_name") or f"Akile-{sid}",
+                    "name": server_name,
                     "node_name": s.get("node_name", ""),
                     "area_name": s.get("area_name", ""),
                     "ipv4": ipv4,
@@ -191,7 +208,11 @@ async def get_unified_servers(
                     "due_time": s.get("due_time", 0),
                     "auto_renew": bool(s.get("auto_renew")),
                     "price_cents": price_cents,
-                    "price_cny": round(price_cents / 100, 2),
+                    "price_cny": price_cny,
+                    "price_monthly": monthly_price,
+                    "cost_effectiveness": cost_eff,
+                    "fair_market_value_cny": cost_eff.get("fair_market_value_cny"),
+                    "valuation_rationale": cost_eff.get("valuation_rationale"),
                     "cycle": cycle,
                     "cycle_text": cycle_text,
                     "status": s.get("status", 1),
@@ -215,12 +236,29 @@ async def get_unified_servers(
                 cycle = int(s.get("cycle", 1))
                 cycle_text = "年付" if cycle == 12 else (f"{cycle}个月" if cycle > 1 else "月付")
 
+                price_cny = round(price_cents / 100, 2)
+                monthly_price = round(price_cny / cycle, 2) if cycle > 0 else price_cny
+                server_name = s.get("server_re_name") or s.get("server_name") or f"ACCK-{sid}"
+                cost_eff = evaluate_cost_effectiveness(
+                    item_type="server",
+                    price_cny=monthly_price,
+                    renew_price_cny=monthly_price,
+                    cpu=s.get("cpu", 1),
+                    memory_mb=s.get("memory", 1024),
+                    disk_gb=s.get("disk", 10),
+                    bandwidth_mbps=s.get("bandwidth", 1000),
+                    flow_total_gb=s.get("flow", 1000),
+                    name=server_name,
+                    node_name=s.get("node_name", ""),
+                    area=s.get("area_name", ""),
+                )
+
                 servers.append({
                     "uid": f"acck:{sid}",
                     "platform": "acck",
                     "id": sid,
                     "server_id": s.get("server_id", ""),
-                    "name": s.get("server_re_name") or s.get("server_name") or f"ACCK-{sid}",
+                    "name": server_name,
                     "node_name": s.get("node_name", ""),
                     "area_name": s.get("area_name", ""),
                     "ipv4": s.get("ipv4", ""),
@@ -237,7 +275,11 @@ async def get_unified_servers(
                     "due_time": s.get("due_time", 0),
                     "auto_renew": bool(s.get("auto_renew")),
                     "price_cents": price_cents,
-                    "price_cny": round(price_cents / 100, 2),
+                    "price_cny": price_cny,
+                    "price_monthly": monthly_price,
+                    "cost_effectiveness": cost_eff,
+                    "fair_market_value_cny": cost_eff.get("fair_market_value_cny"),
+                    "valuation_rationale": cost_eff.get("valuation_rationale"),
                     "cycle": cycle,
                     "cycle_text": cycle_text,
                     "status": s.get("status", 1),
