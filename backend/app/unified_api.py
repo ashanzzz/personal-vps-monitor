@@ -933,13 +933,13 @@ async def get_unified_secondhand(
         logger.warning("ACCK Exchange fetch error: %s", e)
 
     # Filter by subscription renew price range if requested
-    if min_renew is not None:
+    if min_renew is not None and isinstance(min_renew, (int, float)):
         items = [i for i in items if i.get("renew_price_cny", 0) >= min_renew]
-    if max_renew is not None:
+    if max_renew is not None and isinstance(max_renew, (int, float)):
         items = [i for i in items if i.get("renew_price_cny", 0) <= max_renew]
-    if min_score is not None:
+    if min_score is not None and isinstance(min_score, (int, float)):
         items = [i for i in items if i.get("score", 0) >= min_score]
-    if max_payback is not None:
+    if max_payback is not None and isinstance(max_payback, (int, float)):
         items = [i for i in items if i.get("payback_months", 999.0) <= max_payback]
 
     # Sort items based on requested criteria
