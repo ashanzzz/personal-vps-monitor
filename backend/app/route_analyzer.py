@@ -360,8 +360,8 @@ def match_user_trade_strategy(
     """
     combined = f"{name} {node_name} {detail} {intro}".lower()
 
-    # 1. IIJ 旗舰机型
-    if "iij" in combined:
+    # 1. IIJ 旗舰机型 (必须是旗舰高配或特配，绝非普通JPIIJ-Lite等常规路人款)
+    if "iij" in combined and ("pro" in combined or "2000" in combined or "bgp" in combined or "旗舰" in combined or ("lite" not in combined and monthly_renew <= 15.0)):
         return {
             "model_code": "IIJ",
             "model_name": "Akile JP IIJ 旗舰生产力",
@@ -438,178 +438,122 @@ def evaluate_cost_effectiveness(
     monthly_renew = max(0.1, monthly_renew)
     reasons: List[str] = []
 
-    # 1. 核心第一权重：线路与网络品质 (0 - 35 分) —— 用户最核心看重
-    network_score = 8.0
-    tier = route_info["tier"]
-    if tier == "S":
-        network_score = 35.0
-        reasons.append(f"{route_info['primary_route']} (S级顶级精品网 +35)")
-    elif tier == "A":
-        network_score = 26.0
-        reasons.append(f"{route_info['primary_route']} (A级优化直连 +26)")
-    elif tier == "B":
-        network_score = 16.0
-        reasons.append("亚太直连BGP (+16)")
-    else:
-        network_score = 8.0
-        reasons.append("普通国际BGP (+8)")
+    # -------------------------------------------------------------
+    # 山哥逆向推理锚点法则 (Reverse-Inference Calibration Architecture)
+    # 锚点 1: 垃圾 = 0 分 (Junk / 致命避坑 / IP阻断且高续费 / 无法使用)
+    # 锚点 2: 路人 = 50 分 (Passerby / 无明显折扣的日常在售套餐或公允二手，48~55分中位数)
+    # 锚点 3: 我的 IIJ = 80 分 (Flagship / 2.5G大口径+2G大内存+20G盘+直连优化主力生产力底座)
+    # 锚点 4: 我的传家宝 = 100 分 (Absolute Heirloom / 月供<=2元零持有成本+好线路/原生双ISP)
+    # -------------------------------------------------------------
+    ram_gb = max(0.25, memory_mb / 1024.0)
+    is_high_spec_powerhouse = (ram_gb >= 2.0 and disk_gb >= 20.0 and bandwidth_mbps >= 1000 and flow_total_gb >= 1000)
 
-    if route_info["native_ip"]:
-        network_score = min(35.0, network_score + 4.0)
-        reasons.append("原生IP认证 (+4)")
+    tier = str(route_info.get("tier") or "C")
+    combined = f"{name} {node_name} {detail} {intro}".lower()
+    is_dual_isp = ("isp" in combined or "双isp" in combined) and bool(route_info.get("native_ip"))
+    is_native = bool(route_info.get("native_ip"))
+    ip_clean = bool(route_info.get("ip_clean"))
 
-    # 官方更换IP机制：被墙不再一票否决，扣除适度修复摩擦成本(-10分)
-    if not route_info["ip_clean"]:
-        network_score = max(5.0, network_score - 10.0)
-        reasons.append("当前IP阻断(官方支持换新IP，成本约¥15~¥35/或1500AK币 -10)")
+    is_junk_trap = False
+    final_score = 50
 
-    # 2. 核心第二权重：周期流量配额与带宽资产 (0 - 30 分) —— 用户最核心看重
-    traffic_score = 10.0
-    remaining_gb = max(0.0, flow_total_gb - flow_used_gb)
-    is_depleted = (flow_total_gb > 0 and remaining_gb <= 1.0)
-    quota_efficiency = flow_total_gb / monthly_renew if monthly_renew > 0 else 50.0
-    is_budget_asset = (monthly_renew <= 10.0) or (price_cny <= 10.0)
+    # 1. 垃圾判定 (Junk Trap -> 0分)
+    if not ip_clean:
+        if monthly_renew >= 20.0 or tier == "C":
+            is_junk_trap = True
+            final_score = 0
+            reasons.append("【垃圾避坑】IP阻断且高续费/劣质线路，换IP成本倒挂且无使用价值 (0分)")
+    if monthly_renew > 60.0 and tier in ("B", "C") and not is_high_spec_powerhouse:
+        is_junk_trap = True
+        final_score = 0
+        reasons.append(f"【垃圾避坑】劣质线路天价月租¥{monthly_renew:.2f}/月严重失血 (0分)")
 
-    if flow_total_gb <= 0:
-        traffic_score = 30.0
-        reasons.append("不限流量无限带宽 (+30)")
-    elif flow_total_gb >= 2000.0:
-        traffic_score = 28.0
-        reasons.append(f"超大流量配额({int(flow_total_gb)}G/月 +28)")
-    elif flow_total_gb >= 1000.0:
-        traffic_score = 25.0
-        reasons.append(f"充沛流量配额({int(flow_total_gb)}G/月 +25)")
-    elif is_budget_asset:
-        if quota_efficiency >= 100:
-            traffic_score = 24.0
-            reasons.append(f"高能效配额({int(quota_efficiency)}G/元·月，每月自动满血重置 +24)")
+    # 2. 传家宝判定 (Heirloom -> 100分)
+    if not is_junk_trap and monthly_renew <= 2.0 and ip_clean:
+        if tier in ("S", "A") or is_dual_isp:
+            final_score = 100
+            reasons.append(f"【顶级绝版传家宝】月供仅¥{monthly_renew:.2f}/月 + 稀缺优质属性，无脑顶格公认神机 (100分)")
         else:
-            traffic_score = 20.0
-            reasons.append(f"周期配额{int(flow_total_gb)}G按月自动刷新 (+20)")
-    else:
-        traffic_score = 16.0
-        reasons.append(f"月配额{int(flow_total_gb)}G (+16)")
+            final_score = 90
+            reasons.append(f"【绝版传家宝】月供仅¥{monthly_renew:.2f}/月近乎零持有成本 (90分)")
 
-    if is_depleted:
-        reasons.append("提示：当期流量已用尽，静待月度重置自动满血")
+    # 3. 我的 IIJ 旗舰生产力判定 (Flagship Productivity -> 80分)
+    elif not is_junk_trap and is_high_spec_powerhouse and tier in ("S", "A") and monthly_renew <= 25.0 and ip_clean:
+        final_score = 80
+        reasons.append(f"【生产力旗舰底座】大带宽({bandwidth_mbps}M)+大内存({int(ram_gb)}G)+大硬盘({int(disk_gb)}G)+优质直连，主力生产力 (80分)")
 
-    # 3. 硬件规格与长线持有月供 (0 - 20 分) —— 严格对齐山哥铁律基准
-    # 铁律：<=2元超级超值；好线路<=10元才是真正超值；20元左右成交价一般；
-    # 高配生产力：2000M(2.5G)超大口径、大内存(>=2G)、大硬盘(>=20G)、多流量(>=1000G)
-    ram_gb = max(0.25, memory_mb / 1024)
-    is_high_spec_powerhouse = (ram_gb >= 2.0 and disk_gb >= 20 and flow_total_gb >= 1000.0 and bandwidth_mbps >= 1000)
+    # 4. 常规路人模型 (Passerby Baseline -> 围绕 50 分基准展开)
+    elif not is_junk_trap:
+        score = 50.0
 
-    ltv_score = 10.0
-    if monthly_renew <= 2.0:
-        ltv_score = 20.0
-        reasons.append(f"月供仅¥{monthly_renew:.2f}/月 (超级超值/绝版传家宝，长期持有近乎零成本 +20)")
-    elif monthly_renew <= 10.0:
-        ltv_score = 17.0
-        reasons.append(f"月供¥{monthly_renew:.2f}/月 (好线路10元内，真正超值月供梯队 +17)")
-    elif is_high_spec_powerhouse and monthly_renew <= 20.0:
-        # 如日本 IIJ 这种高配机器（2G口径+2G内存+20G盘+1000G流量，月折合13.25元）
-        ltv_score = 18.0
-        reasons.append(f"大带宽({bandwidth_mbps}M)+大内存({int(ram_gb)}G)+大硬盘({disk_gb}G) (优质高配生产力机型，¥{monthly_renew:.2f}/月超高价值 +18)")
-    elif monthly_renew <= 20.0:
-        ltv_score = 12.0
-        reasons.append(f"月供¥{monthly_renew:.2f}/月 (好线路20元档成交价一般/平价 +12)")
-    elif monthly_renew <= 22.0:
-        ltv_score = 7.0
-        reasons.append(f"月供¥{monthly_renew:.2f}/月略微超出平价线 (+7)")
-    elif monthly_renew <= 25.0:
-        ltv_score = 2.0
-        reasons.append(f"月供¥{monthly_renew:.2f}/月已偏高，长期养机持续失血负担大 (+2)")
-    elif is_high_spec_powerhouse:
-        ltv_score = 10.0
-        reasons.append(f"高配生产力机型({int(ram_gb)}G内存/{disk_gb}G盘/{bandwidth_mbps}M口) (大容量多流量，月供尚可 +10)")
-    else:
-        ltv_score = 0.0
-        reasons.append(f"月续费¥{monthly_renew:.2f}/月过高，缺乏长期持有性价比 (0)")
+        # 线路溢折价
+        tier_deltas = {"S": 10.0, "A": 4.0, "B": -1.0, "C": -6.0}
+        delta_t = tier_deltas.get(tier, 0.0)
+        score += delta_t
+        if delta_t != 0:
+            reasons.append(f"线路等级: {tier}级 ({delta_t:+0.0f}分)")
 
-    # 针对山哥业务场景专属硬件加分（FRP反代/大流量/超大口径）：
-    # 2000Mbps (2.5G口) 是市面稀缺硬实力！
-    if bandwidth_mbps >= 2000:
-        ltv_score = min(20.0, ltv_score + 3.0)
-        reasons.append(f"{bandwidth_mbps}Mbps超高速口径(极度契合FRP反代与多路中转并发 +3)")
-    elif bandwidth_mbps >= 1000:
-        ltv_score = min(20.0, ltv_score + 2.0)
-        reasons.append(f"{bandwidth_mbps}Mbps千兆口径(契合FRP反代 +2)")
+        # IP 稀缺性
+        if is_dual_isp:
+            score += 6.0
+            reasons.append("原生双ISP住宅属性 (+6分)")
+        elif is_native:
+            score += 2.0
+            reasons.append("原生单IP (+2分)")
 
-    if ram_gb >= 2.0:
-        ltv_score = min(20.0, ltv_score + 1.0)
-
-    # 4. 入手价格与续费价格双轮驱动 (0 - 15 分)
-    # 核心：全新机只看月续费；二手挂单必须同时看销售价格与续费价格！
-    price_score = 8.0
-    if item_type == "store":
-        # 全新商品：买入即按续费价，严格按山哥价格标准
-        if monthly_renew <= 10.0:
-            price_score = 15.0
-            reasons.append(f"一手真正超值月续费¥{monthly_renew:.2f}/月 (+15)")
-        elif is_high_spec_powerhouse and monthly_renew <= 20.0:
-            price_score = 14.0
-            reasons.append(f"一手高配生产力机型月续费¥{monthly_renew:.2f}/月极具性价比 (+14)")
+        # 月供经济性 (以 15~20 元常规路人平价为 0 基准)
+        if monthly_renew <= 5.0:
+            score += 15.0
+            reasons.append(f"超低月供¥{monthly_renew:.2f}/月 (+15分)")
+        elif monthly_renew <= 10.0:
+            score += 6.0
+            reasons.append(f"超值月供¥{monthly_renew:.2f}/月 (+6分)")
         elif monthly_renew <= 20.0:
-            price_score = 10.0
-            reasons.append(f"一手月续费¥{monthly_renew:.2f}/月 (20元档一般价位 +10)")
+            score += 0.0
+            reasons.append(f"平价月供¥{monthly_renew:.2f}/月 (常规路人价位 +0分)")
         elif monthly_renew <= 25.0:
-            price_score = 4.0
-            reasons.append(f"一手月续费¥{monthly_renew:.2f}/月偏贵 (-4)")
-        elif is_high_spec_powerhouse:
-            price_score = 10.0
-            reasons.append("优质高配生产力机型续费价值良好 (+10)")
+            score -= 3.0
+            reasons.append(f"月供¥{monthly_renew:.2f}/月略偏高 (-3分)")
+        elif monthly_renew <= 35.0:
+            score -= 12.0
+            reasons.append(f"月供¥{monthly_renew:.2f}/月偏贵 (-12分)")
+        elif monthly_renew <= 50.0:
+            score -= 22.0
+            reasons.append(f"月供¥{monthly_renew:.2f}/月较高持续失血 (-22分)")
         else:
-            price_score = 2.0
-            reasons.append(f"一手月续费¥{monthly_renew:.2f}/月过高 (-6)")
-    else:
-        # 二手商品：双轮驱动（销售价看折价捡漏，续费价看养机压力）
-        ask_score = 8.0
-        if is_budget_asset and price_cny <= 10.0:
-            ask_score = 15.0
-        elif renew_price_cny > 0:
+            score -= 35.0
+            reasons.append(f"月供¥{monthly_renew:.2f}/月天价严重失血 (-35分)")
+
+        # 二手折价/捡漏调节
+        if item_type == "secondhand" and renew_price_cny > 0:
             discount = price_cny / renew_price_cny
             if discount <= 0.3:
-                ask_score = 15.0
+                score += 12.0
+                reasons.append(f"二手大幅折价捡漏 (售价¥{price_cny:.1f}/月租¥{renew_price_cny:.1f} +12分)")
             elif discount <= 0.6:
-                ask_score = 12.0
-            elif discount > 1.3:
-                ask_score = 4.0
-            else:
-                ask_score = 8.0
+                score += 6.0
+                reasons.append(f"二手适度折价 (售价¥{price_cny:.1f}/月租¥{renew_price_cny:.1f} +6分)")
+            elif discount > 1.2:
+                score -= 8.0
+                reasons.append(f"二手溢价倒卖 (售价¥{price_cny:.1f}/月租¥{renew_price_cny:.1f} -8分)")
 
-        # 续费价对二手价格分的调节权重
-        if monthly_renew <= 2.0:
-            price_score = 15.0
-            reasons.append(f"双优：入手¥{price_cny:.1f} + 超级超值传家宝月供¥{monthly_renew:.1f} (+15)")
-        elif monthly_renew <= 10.0:
-            price_score = min(15.0, max(12.0, ask_score))
-            reasons.append(f"双优：入手¥{price_cny:.1f} + 真正超值月续费¥{monthly_renew:.1f} (+{int(price_score)})")
-        elif is_high_spec_powerhouse and monthly_renew <= 20.0:
-            price_score = 14.0
-            reasons.append(f"入手¥{price_cny:.1f}，高配生产力机型续费价值极高 (+{int(price_score)})")
-        elif monthly_renew <= 20.0:
-            price_score = min(11.0, ask_score)
-            reasons.append(f"入手¥{price_cny:.1f}，月续费¥{monthly_renew:.1f} (好线路20元档成交价一般 +{int(price_score)})")
-        elif monthly_renew <= 25.0:
-            price_score = min(3.0, ask_score)
-            reasons.append(f"入手¥{price_cny:.1f}，但月续费¥{monthly_renew:.1f}偏贵压低价格分 (+{int(price_score)})")
-        elif is_high_spec_powerhouse:
-            price_score = min(10.0, ask_score)
-            reasons.append(f"入手¥{price_cny:.1f}，高配生产力机型长线价值良好 (+{int(price_score)})")
-        else:
-            price_score = 1.0
-            reasons.append(f"注意：月续费¥{monthly_renew:.1f}过高，缺乏二手长期持有性价比 (+1)")
+        # IP 阻断但属于超低月供可抢救机型
+        if not ip_clean:
+            score -= 25.0
+            reasons.append("IP被阻断 (官方换IP需¥15~¥35成本 -25分)")
 
-    # 5. 续费致命失血惩罚 (Renewal Drain Penalty)
-    # 严格遵照山哥铁律：优化比较好、续费 25、流量 1000 的，只能打三四十分！
-    # 超过 20 元平价线的机器，每多 1 元月供产生强烈失血惩罚
-    renew_drain_penalty = 0.0
-    if not is_high_spec_powerhouse and monthly_renew > 20.0:
-        renew_drain_penalty = (monthly_renew - 20.0) * 4.2
-        reasons.append(f"高月租失血惩罚：月供¥{monthly_renew:.1f}/月严重透支性价比 (-{int(renew_drain_penalty)})")
+        # 硬件加分
+        if bandwidth_mbps >= 2000:
+            score += 4.0
+            reasons.append(f"{bandwidth_mbps}Mbps超大口径并发 (+4分)")
+        elif bandwidth_mbps >= 1000:
+            score += 2.0
+            reasons.append(f"{bandwidth_mbps}Mbps千兆口径 (+2分)")
+        if ram_gb >= 2.0:
+            score += 3.0
+            reasons.append(f"{int(ram_gb)}G大内存 (+3分)")
 
-    raw_total = network_score + traffic_score + ltv_score + price_score - renew_drain_penalty
-    final_score = max(5, min(100, int(round(raw_total))))
+        final_score = int(round(max(0, min(100, score))))
 
     USD_RATE = 7.25
 
@@ -663,10 +607,14 @@ def evaluate_cost_effectiveness(
 
         if item_type == "secondhand":
             if price_cny <= target_buy_price:
-                # 命中山哥扫货抄底买入区间！
-                reasons.append(f"🚨 命中山哥扫货捡漏区间(标价¥{price_cny:.1f} ≤ 买入上限¥{target_buy_price:.0f})，极高优先级抄底！")
-                final_score = max(final_score, 92)  # 提振至神机必抢！
-                valuation_rationale = f"【极度超值扫货】当前标价¥{price_cny:.1f}落入山哥买入心仪价(≤¥{target_buy_price:.0f})，持有出售底价¥{target_sell_price:.0f}"
+                if trade_strategy.get("model_code") in ("ISP", "SB"):
+                    reasons.append(f"🚨 命中山哥绝版传家宝扫货区间(标价¥{price_cny:.1f} ≤ 买入上限¥{target_buy_price:.0f})，极高优先级抄底！")
+                    final_score = max(final_score, 100)
+                    valuation_rationale = f"【绝版传家宝扫货】当前标价¥{price_cny:.1f}落入山哥买入心仪价(≤¥{target_buy_price:.0f})，持有出售底价¥{target_sell_price:.0f}"
+                else:
+                    reasons.append(f"🚨 命中山哥旗舰生产力扫货区间(标价¥{price_cny:.1f} ≤ 买入上限¥{target_buy_price:.0f})！")
+                    final_score = max(final_score, 80)
+                    valuation_rationale = f"【旗舰生产力扫货】当前标价¥{price_cny:.1f}落入山哥IIJ买入心仪价(≤¥{target_buy_price:.0f})，持有出售底价¥{target_sell_price:.0f}"
             else:
                 valuation_rationale = f"【山哥关注型号】买入目标¥{target_buy_price:.0f}以内，心理出售底价¥{target_sell_price:.0f} (当前标价¥{price_cny:.1f})"
                 if price_cny > target_sell_price:
@@ -718,37 +666,37 @@ def evaluate_cost_effectiveness(
     health_factor = min(1.0, max(0.05, monthly_saving / max(1.0, m_market * 0.4))) if monthly_renew > 2.5 else 1.0
     eff_capability_points = round(m_market * 10 * health_factor, 1)
 
-    # 铁律守卫：若综合品质评分低于 40 分（属于高月供失血或拦截避坑机型），性价比分/元强行锁死在 0.5 以下，杜绝虚高倒挂！
+    # 铁律守卫：若综合品质评分低于 40 分（属于高月供失血或拦截避坑机型），性价比分/元强行锁死为 0.0，杜绝虚高倒挂！
     if final_score < 40:
-        points_per_yuan = round(min(0.3, (final_score / 100.0) * (eff_capability_points / eff_cost_ask)), 2)
+        points_per_yuan = 0.0
     else:
         points_per_yuan = round(eff_capability_points / eff_cost_ask, 2)
 
     points_per_usd = round(points_per_yuan * USD_RATE, 2)
-    cost_per_point_cny = round(comp_price / max(1, final_score), 3)
+    cost_per_point_cny = round(comp_price / max(1, final_score), 3) if final_score > 0 else 999.0
 
-    monthly_points_per_yuan = round(eff_capability_points / eff_cost_renew, 2)
+    monthly_points_per_yuan = round(eff_capability_points / eff_cost_renew, 2) if final_score >= 40 else 0.0
     monthly_points_per_usd = round(monthly_points_per_yuan * USD_RATE, 2)
 
     if final_score >= 88:
         grade = "SSS"
-        grade_label = "【神机/必抢】"
+        grade_label = "【绝版传家宝】"
         badge_color = "purple"
     elif final_score >= 75:
         grade = "A"
-        grade_label = "【超值高性价】"
+        grade_label = "【旗舰生产力】"
         badge_color = "green"
-    elif final_score >= 60:
+    elif final_score >= 48:
         grade = "B"
-        grade_label = "【平价可选】"
+        grade_label = "【普通路人款】"
         badge_color = "blue"
-    elif final_score >= 45:
+    elif final_score >= 25:
         grade = "C"
-        grade_label = "【性价比偏低】"
+        grade_label = "【轻度失血/偏贵】"
         badge_color = "orange"
     else:
         grade = "D"
-        grade_label = "【拦截避坑】"
+        grade_label = "【垃圾/拦截避坑】"
         badge_color = "red"
 
     return {
@@ -771,10 +719,9 @@ def evaluate_cost_effectiveness(
         "m_market": m_market,
         "annual_saving": annual_saving,
         "breakdown": {
-            "network_score": max(0, int(network_score)),
-            "ltv_score": int(ltv_score),
-            "traffic_score": int(traffic_score),
-            "price_score": int(price_score),
+            "score": final_score,
+            "tier": tier,
+            "monthly_renew": monthly_renew,
         },
         "reasons": reasons,
     }
