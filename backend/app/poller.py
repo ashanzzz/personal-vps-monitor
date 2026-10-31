@@ -706,6 +706,7 @@ async def poll_acck_account(token: str, settings: dict) -> None:
             "username": info.get("username") or info.get("name") or "",
             "email": info.get("email", ""),
             "role": info.get("role", "user"),
+            "money": info.get("money", 0),  # ACCK cash balance in cents (分)
             "points": info.get("points") or info.get("balance") or 0,
             "telegram_id": info.get("telegram_id") or info.get("tg_id"),
             "created_at": info.get("created_at") or info.get("register_time"),
@@ -719,6 +720,9 @@ async def poll_acck_account(token: str, settings: dict) -> None:
         shop = await acck_client.get_ac_shop(token)
         shop_info = shop
         if profile is not None and isinstance(shop, dict):
+            # ACCK ac-shop balance is AC币 (coins)
+            if "balance" in shop:
+                profile["coins"] = shop["balance"]
             if "points" in shop:
                 profile["points"] = shop["points"]
             if "coins" in shop:

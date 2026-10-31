@@ -52,7 +52,9 @@ export const UnifiedDashboard: React.FC = () => {
         setAkCoin(akAcc.profile.ak_coin ?? null)
       }
       if (acAcc?.profile) {
-        setAcckBalance(acAcc.profile.points != null ? acAcc.profile.points / 100 : null)
+        // ACCK money is in cents (分), coins is AC币
+        const acckMoney = acAcc.profile.money != null ? acAcc.profile.money / 100 : (acAcc.profile.points != null ? acAcc.profile.points / 100 : null)
+        setAcckBalance(acckMoney)
         setAcCoin(acAcc.profile.coins ?? null)
       }
     } catch (e) {

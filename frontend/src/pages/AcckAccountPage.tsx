@@ -174,18 +174,19 @@ export function AcckAccountPage() {
         <Col xs={24} sm={8}>
           <Card size="small">
             <Statistic
-              title={<Space><WalletOutlined />AC 积分 / 余额</Space>}
-              value={profile?.points != null ? profile.points : '—'}
-              suffix="积分"
-              valueStyle={{ color: '#52c41a' }}
+              title={<Space><WalletOutlined />ACCK 现金余额</Space>}
+              value={profile?.money != null ? (profile.money / 100).toFixed(2) : (profile?.points != null ? (profile.points / 100).toFixed(2) : '0.00')}
+              prefix="¥ "
+              valueStyle={{ color: '#0284c7' }}
             />
           </Card>
         </Col>
         <Col xs={24} sm={8}>
           <Card size="small">
             <Statistic
-              title={<Space><GoldOutlined />金币/权益</Space>}
-              value={profile?.coins != null ? profile.coins : '0'}
+              title={<Space><GoldOutlined />AC 币 / 签到积分</Space>}
+              value={profile?.coins != null ? profile.coins : (profile?.points != null ? profile.points : '0')}
+              suffix="AC币"
               valueStyle={{ color: '#faad14' }}
             />
           </Card>

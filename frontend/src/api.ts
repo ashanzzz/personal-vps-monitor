@@ -388,8 +388,8 @@ export const api = {
   buyStorePackage: (platform: string, plan_id: any, order_data: any[] = [], safe_mode = true) =>
     http.post('/api/unified/store/buy', { platform, plan_id, order_data, safe_mode }).then(r => r.data),
 
-  getUnifiedSecondhand: (page = 1, page_size = 50) =>
-    http.get<{ total: number; items: SecondhandItem[]; counts: Record<string, number> }>('/api/unified/secondhand', { params: { page, page_size } }).then(r => r.data),
+  getUnifiedSecondhand: (params?: { page?: number; page_size?: number; min_renew?: number; max_renew?: number; min_score?: number; sort_by?: string; sort_order?: string }) =>
+    http.get<{ total: number; items: SecondhandItem[]; counts: Record<string, number> }>('/api/unified/secondhand', { params }).then(r => r.data),
 
   buySecondhandItem: (platform: string, listing_id: number | string, price_cents = 0, safe_mode = true, captcha = '', force_buy_depleted = false) =>
     http.post('/api/unified/secondhand/buy', { platform, listing_id, price_cents, safe_mode, captcha, force_buy_depleted }).then(r => r.data),
@@ -582,6 +582,7 @@ export interface AcckProfile {
   username: string
   email: string
   role: string
+  money?: number | null
   points: number | null
   coins?: number | null
   telegram_id?: string | number | null

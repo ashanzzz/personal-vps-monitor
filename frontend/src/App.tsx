@@ -183,7 +183,7 @@ export default function App() {
           >
             <div className="ashan-logo">
               <div className="ashan-logo-icon">A</div>
-              {!collapsed && <div className="ashan-logo-text">Ashan Server Hub</div>}
+              {!collapsed && <div className="ashan-logo-text">Ashan VPS Server Hub</div>}
             </div>
             <Menu
               mode="inline"

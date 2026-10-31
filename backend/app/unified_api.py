@@ -732,10 +732,15 @@ async def buy_store_package(
 async def get_unified_secondhand(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
+    min_renew: float | None = Query(None, description="最低月续费 (元)"),
+    max_renew: float | None = Query(None, description="最高月续费 (元)"),
+    min_score: float | None = Query(None, description="最低评分 (0-100)"),
+    sort_by: str = Query("price", description="排序字段: price, renew, score, ppy"),
+    sort_order: str = Query("asc", description="排序方向: asc, desc"),
     _: str = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Aggregate secondhand / marketplace listings from Akile PushShop and ACCK Exchange."""
+    """Aggregate secondhand / marketplace listings from Akile PushShop and ACCK Exchange with subscription range & score filtering."""
     akile_tok, acck_tok = await _get_tokens(db)
     items: list[dict[str, Any]] = []
 
@@ -905,8 +910,25 @@ async def get_unified_secondhand(
     except Exception as e:
         logger.warning("ACCK Exchange fetch error: %s", e)
 
-    # Sort by price ascending
-    items.sort(key=lambda x: int(x.get("price_cents", 0)))
+    # Filter by subscription renew price range if requested
+    if min_renew is not None:
+        items = [i for i in items if i.get("renew_price_cny", 0) >= min_renew]
+    if max_renew is not None:
+        items = [i for i in items if i.get("renew_price_cny", 0) <= max_renew]
+    if min_score is not None:
+        items = [i for i in items if i.get("score", 0) >= min_score]
+
+    # Sort items based on requested criteria
+    reverse_sort = (sort_order.lower() == "desc")
+    if sort_by == "renew":
+        items.sort(key=lambda x: float(x.get("renew_price_cny", 0)), reverse=reverse_sort)
+    elif sort_by == "score":
+        items.sort(key=lambda x: float(x.get("score", 0)), reverse=reverse_sort)
+    elif sort_by == "ppy":
+        items.sort(key=lambda x: float(x.get("points_per_yuan", 0)), reverse=reverse_sort)
+    else:
+        # Default price sort
+        items.sort(key=lambda x: int(x.get("price_cents", 0)), reverse=reverse_sort)
 
     return {
         "total": len(items),

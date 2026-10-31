@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react'
 import {
   Card, Table, Button, Modal, Switch, Typography, Input,
-  App as AntApp, Tag, Tooltip, Checkbox, Alert
+  App as AntApp, Tag, Tooltip, Checkbox, Alert, Space, Radio, InputNumber, Select
 } from 'antd'
 import {
   SwapOutlined, SafetyCertificateOutlined, ReloadOutlined,
-  ThunderboltOutlined, WarningOutlined
+  ThunderboltOutlined, WarningOutlined, DollarOutlined
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
@@ -27,10 +27,43 @@ export const UnifiedSecondhandPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false)
   const [buyResult, setBuyResult] = useState<any>(null)
 
+  // 专属续费价格区间与评分/性价比筛选状态
+  const [renewRange, setRenewRange] = useState<string>('all') // 'heirloom_2' (<=2元), 'budget_10' (<=10元), 'fair_20' (<=20元), 'custom', 'all'
+  const [minRenew, setMinRenew] = useState<number | undefined>(undefined)
+  const [maxRenew, setMaxRenew] = useState<number | undefined>(undefined)
+  const [minScore, setMinScore] = useState<number | undefined>(undefined)
+  const [sortBy, setSortBy] = useState<string>('price') // 'price', 'renew', 'score', 'ppy'
+  const [sortOrder, setSortOrder] = useState<string>('asc')
+
+  const handleRangePreset = (preset: string) => {
+    setRenewRange(preset)
+    if (preset === 'heirloom_2') {
+      setMinRenew(0)
+      setMaxRenew(2.0)
+    } else if (preset === 'budget_10') {
+      setMinRenew(0)
+      setMaxRenew(10.0)
+    } else if (preset === 'fair_20') {
+      setMinRenew(0)
+      setMaxRenew(20.0)
+    } else if (preset === 'all') {
+      setMinRenew(undefined)
+      setMaxRenew(undefined)
+    }
+  }
+
   const loadData = async () => {
     setLoading(true)
     try {
-      const res = await api.getUnifiedSecondhand(1, 50)
+      const res = await api.getUnifiedSecondhand({
+        page: 1,
+        page_size: 100,
+        min_renew: minRenew,
+        max_renew: maxRenew,
+        min_score: minScore,
+        sort_by: sortBy,
+        sort_order: sortOrder,
+      })
       setItems(res.items || [])
       setCounts(res.counts || { akile: 0, acck: 0 })
     } catch (err: any) {
@@ -42,7 +75,7 @@ export const UnifiedSecondhandPage: React.FC = () => {
 
   useEffect(() => {
     loadData()
-  }, [])
+  }, [minRenew, maxRenew, minScore, sortBy, sortOrder])
 
   const openBuyModal = (item: SecondhandItem) => {
     setSelectedItem(item)
@@ -368,6 +401,101 @@ export const UnifiedSecondhandPage: React.FC = () => {
           </div>
         }
       >
+        {/* 山哥专属：续费价格区间、评分与性价比联合筛选条 */}
+        <div style={{
+          background: '#f8fafc',
+          border: '1px solid #e2e8f0',
+          borderRadius: 8,
+          padding: '10px 14px',
+          marginBottom: 16,
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12
+        }}>
+          <Space wrap size={12} align="center">
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#334155', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <DollarOutlined style={{ color: '#059669' }} /> 续费区间:
+            </span>
+            <Radio.Group
+              value={renewRange}
+              onChange={e => handleRangePreset(e.target.value)}
+              buttonStyle="solid"
+              size="small"
+            >
+              <Radio.Button value="heirloom_2">传家宝 (≤ ¥2/月)</Radio.Button>
+              <Radio.Button value="budget_10">超值车 (≤ ¥10/月)</Radio.Button>
+              <Radio.Button value="fair_20">平价车 (≤ ¥20/月)</Radio.Button>
+              <Radio.Button value="all">不限</Radio.Button>
+            </Radio.Group>
+
+            <span style={{ color: '#94a3b8', fontSize: 12 }}>自定义区间:</span>
+            <InputNumber
+              size="small"
+              placeholder="最低月供"
+              prefix="¥"
+              min={0}
+              step={1}
+              style={{ width: 100 }}
+              value={minRenew}
+              onChange={v => { setMinRenew(v ?? undefined); setRenewRange('custom') }}
+            />
+            <span style={{ color: '#94a3b8' }}>~</span>
+            <InputNumber
+              size="small"
+              placeholder="最高月供"
+              prefix="¥"
+              min={0}
+              step={1}
+              style={{ width: 100 }}
+              value={maxRenew}
+              onChange={v => { setMaxRenew(v ?? undefined); setRenewRange('custom') }}
+            />
+
+            <span style={{ marginLeft: 6, fontSize: 13, fontWeight: 600, color: '#334155' }}>最低评分:</span>
+            <Select
+              size="small"
+              value={minScore ?? 0}
+              style={{ width: 110 }}
+              onChange={v => setMinScore(v === 0 ? undefined : v)}
+              options={[
+                { value: 0, label: '全部评分' },
+                { value: 60, label: '≥ 60 分 (及格)' },
+                { value: 75, label: '≥ 75 分 (良好)' },
+                { value: 85, label: '≥ 85 分 (极佳)' },
+                { value: 90, label: '≥ 90 分 (神机)' },
+              ]}
+            />
+          </Space>
+
+          <Space size={10} align="center">
+            <span style={{ fontSize: 12, color: '#64748b' }}>排序维度:</span>
+            <Select
+              size="small"
+              value={sortBy}
+              style={{ width: 120 }}
+              onChange={v => setSortBy(v)}
+              options={[
+                { value: 'price', label: '挂售价格' },
+                { value: 'renew', label: '月续费金额' },
+                { value: 'ppy', label: '每元性价比' },
+                { value: 'score', label: '综合质量分' },
+              ]}
+            />
+            <Select
+              size="small"
+              value={sortOrder}
+              style={{ width: 80 }}
+              onChange={v => setSortOrder(v)}
+              options={[
+                { value: 'asc', label: '升序' },
+                { value: 'desc', label: '降序' },
+              ]}
+            />
+          </Space>
+        </div>
+
         <Table
           columns={columns}
           dataSource={items}
