@@ -577,16 +577,22 @@ def evaluate_cost_effectiveness(
     disk_ratio = max(0.5, min(4.0, disk_gb / 10.0))
     bw_ratio = max(0.5, min(10.0, bandwidth_mbps / 200.0))
 
-    # 物理产能归一化系数 (以 1000G/1C1G/10G/1000M 标准物理机型为 1.0 基准)
-    phi_norm = 0.35 * t_effective + 0.25 * ram_ratio + 0.15 * disk_ratio + 0.25 * (bw_ratio / 5.0)
+    # 物理配置动态综合加权 (以 1000G / 1C1G / 10G / 500M~1000M 标准物理机型为 1.0 基准)
+    # 严格对齐山哥市场动态：硬件、流量多少直接决定公允产出比，绝不能机械一刀切！
+    flow_ratio = (flow_total_gb / 1000.0) if route_tier != "C" else t_effective
+    phi_norm = 0.40 * flow_ratio + 0.20 * ram_ratio + 0.15 * disk_ratio + 0.25 * min(2.0, bandwidth_mbps / 500.0)
 
-    # 线路市场公允基准月租 (严格对齐山哥真实定义：4837/优化款公开市场月租约为 ¥25.0/月)
-    tier_market_base = {"S": 45.0, "A": 25.0, "B": 16.0, "C": 9.9}
-    base_market = tier_market_base.get(route_tier, 9.9)
+    # 线路市场公允基准月租 (动态对齐 NodeSeek 最新市场实价：参考 vps.taxi 5美元 1T 9929/GIA/CMIN2，10元日本软银):
+    # S 级顶级 (9929 / CN2 GIA / CMIN2): 1T基准锚定 $5.00/月 ≈ ¥36.0/月 (500G规格约 ¥24/月，1T约 ¥36/月)
+    # A 级优化 (软银 / 4837 / CMI / IIJ): 1T基准锚定市场流通价 ¥16.0 ~ ¥22.0/月 (500G轻量款仅需 ¥10~¥12/月)
+    # B 级亚太 (亚太直连 BGP): 基准 ¥11.0/月
+    # C 级普通国际 (无优化): 基准 ¥7.0/月
+    tier_market_base = {"S": 36.0, "A": 16.5, "B": 11.0, "C": 7.0}
+    base_market = tier_market_base.get(route_tier, 7.0)
 
     combined = f"{name} {node_name} {detail} {intro}".lower()
     is_dual_isp = ("isp" in combined or "双isp" in combined) and bool(route_info.get("native_ip"))
-    k_ip = 1.25 if is_dual_isp else (1.10 if route_info.get("native_ip") else 1.0)
+    k_ip = 1.30 if is_dual_isp else (1.10 if route_info.get("native_ip") else 1.0)
 
     # 若IP被阻断，可用商业价值直接断崖
     if not route_info["ip_clean"]:
