@@ -388,7 +388,7 @@ export const api = {
   buyStorePackage: (platform: string, plan_id: any, order_data: any[] = [], safe_mode = true) =>
     http.post('/api/unified/store/buy', { platform, plan_id, order_data, safe_mode }).then(r => r.data),
 
-  getUnifiedSecondhand: (params?: { page?: number; page_size?: number; min_renew?: number; max_renew?: number; min_score?: number; sort_by?: string; sort_order?: string }) =>
+  getUnifiedSecondhand: (params?: { page?: number; page_size?: number; min_renew?: number; max_renew?: number; min_score?: number; max_payback?: number; sort_by?: string; sort_order?: string }) =>
     http.get<{ total: number; items: SecondhandItem[]; counts: Record<string, number> }>('/api/unified/secondhand', { params }).then(r => r.data),
 
   buySecondhandItem: (platform: string, listing_id: number | string, price_cents = 0, safe_mode = true, captcha = '', force_buy_depleted = false) =>
@@ -574,6 +574,11 @@ export interface SecondhandItem {
   value_ratio?: number
   monthly_leverage?: number
   m_market?: number
+  monthly_cash_savings?: number
+  payback_months?: number
+  annual_roi_percent?: number
+  payback_tier?: string
+  payback_badge_color?: string
   reasons?: string[]
   raw?: Record<string, unknown>
 }

@@ -735,7 +735,8 @@ async def get_unified_secondhand(
     min_renew: float | None = Query(None, description="最低月续费 (元)"),
     max_renew: float | None = Query(None, description="最高月续费 (元)"),
     min_score: float | None = Query(None, description="最低评分 (0-100)"),
-    sort_by: str = Query("price", description="排序字段: price, renew, score, ppy"),
+    max_payback: float | None = Query(None, description="最高回本周期 (月, 如12代表一年内回本)"),
+    sort_by: str = Query("price", description="排序字段: price, renew, score, ppy, payback, roi"),
     sort_order: str = Query("asc", description="排序方向: asc, desc"),
     _: str = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
@@ -785,6 +786,7 @@ async def get_unified_secondhand(
                     detail=detail,
                     intro=detail,
                     area=area,
+                    bandwidth_mbps=int(item.get("bandwidth") or 1000),
                 )
 
                 items.append({
@@ -818,6 +820,11 @@ async def get_unified_secondhand(
                     "monthly_leverage": eval_res["cost_effectiveness"].get("monthly_leverage", 1.0),
                     "m_market": eval_res["cost_effectiveness"].get("m_market", 0.0),
                     "annual_saving": eval_res["cost_effectiveness"].get("annual_saving", 0.0),
+                    "monthly_cash_savings": eval_res["cost_effectiveness"].get("monthly_cash_savings", 0.0),
+                    "payback_months": eval_res["cost_effectiveness"].get("payback_months", 999.0),
+                    "annual_roi_percent": eval_res["cost_effectiveness"].get("annual_roi_percent", 0.0),
+                    "payback_tier": eval_res["cost_effectiveness"].get("payback_tier", ""),
+                    "payback_badge_color": eval_res["cost_effectiveness"].get("payback_badge_color", "default"),
                     "reasons": eval_res["cost_effectiveness"]["reasons"],
                     "raw": item,
                 })
@@ -871,6 +878,7 @@ async def get_unified_secondhand(
                 detail=node_comment,
                 intro=intro,
                 area=area,
+                bandwidth_mbps=int(snapshot.get("bandwidth_mbps") or 1000),
             )
 
             items.append({
@@ -904,6 +912,11 @@ async def get_unified_secondhand(
                 "monthly_leverage": eval_res["cost_effectiveness"].get("monthly_leverage", 1.0),
                 "m_market": eval_res["cost_effectiveness"].get("m_market", 0.0),
                 "annual_saving": eval_res["cost_effectiveness"].get("annual_saving", 0.0),
+                "monthly_cash_savings": eval_res["cost_effectiveness"].get("monthly_cash_savings", 0.0),
+                "payback_months": eval_res["cost_effectiveness"].get("payback_months", 999.0),
+                "annual_roi_percent": eval_res["cost_effectiveness"].get("annual_roi_percent", 0.0),
+                "payback_tier": eval_res["cost_effectiveness"].get("payback_tier", ""),
+                "payback_badge_color": eval_res["cost_effectiveness"].get("payback_badge_color", "default"),
                 "reasons": eval_res["cost_effectiveness"]["reasons"],
                 "raw": item,
             })
@@ -917,6 +930,8 @@ async def get_unified_secondhand(
         items = [i for i in items if i.get("renew_price_cny", 0) <= max_renew]
     if min_score is not None:
         items = [i for i in items if i.get("score", 0) >= min_score]
+    if max_payback is not None:
+        items = [i for i in items if i.get("payback_months", 999.0) <= max_payback]
 
     # Sort items based on requested criteria
     reverse_sort = (sort_order.lower() == "desc")
@@ -926,6 +941,10 @@ async def get_unified_secondhand(
         items.sort(key=lambda x: float(x.get("score", 0)), reverse=reverse_sort)
     elif sort_by == "ppy":
         items.sort(key=lambda x: float(x.get("points_per_yuan", 0)), reverse=reverse_sort)
+    elif sort_by == "payback":
+        items.sort(key=lambda x: float(x.get("payback_months", 999.0)), reverse=reverse_sort)
+    elif sort_by == "roi":
+        items.sort(key=lambda x: float(x.get("annual_roi_percent", 0.0)), reverse=reverse_sort)
     else:
         # Default price sort
         items.sort(key=lambda x: int(x.get("price_cents", 0)), reverse=reverse_sort)

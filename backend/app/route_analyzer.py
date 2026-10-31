@@ -242,6 +242,7 @@ def evaluate_secondhand_listing(
     intro: str = "",
     area: str = "",
     days_left: int = 30,
+    bandwidth_mbps: int = 1000,
 ) -> Dict[str, Any]:
     """
     Full multidimensional evaluation for secondhand arbitrage, long-term asset value, and sniping safety.
@@ -305,7 +306,7 @@ def evaluate_secondhand_listing(
         cpu=1,
         memory_mb=1024,
         disk_gb=10,
-        bandwidth_mbps=200,
+        bandwidth_mbps=bandwidth_mbps,
         flow_total_gb=flow_total_gb,
         flow_used_gb=flow_used_gb,
         reset_price_cny=reset_price_cny,
@@ -564,8 +565,6 @@ def evaluate_cost_effectiveness(
     # 3) 5分【拦截避坑】的失血机，其性价比分/元绝不能高达几十，必须与总评级严格对齐！
     
     route_tier = str(route_info.get("tier") or "C")
-    tier_k_map = {"S": 3.0, "A": 2.2, "B": 1.4, "C": 0.5}
-    k_route = tier_k_map.get(route_tier, 0.5)
 
     # 对流量做线路加权：C级普通国际流量按对数折算，只有S/A级优质优化流量才具备高商业价值
     if route_tier == "C":
@@ -577,19 +576,23 @@ def evaluate_cost_effectiveness(
     ram_ratio = max(0.25, min(4.0, memory_mb / 1024.0))
     disk_ratio = max(0.5, min(4.0, disk_gb / 10.0))
     bw_ratio = max(0.5, min(10.0, bandwidth_mbps / 200.0))
-    
-    # 基础物理产能
-    phi_capacity = 6.0 * (0.35 * t_effective + 0.25 * ram_ratio + 0.15 * disk_ratio + 0.25 * bw_ratio)
+
+    # 物理产能归一化系数 (以 1000G/1C1G/10G/1000M 标准物理机型为 1.0 基准)
+    phi_norm = 0.35 * t_effective + 0.25 * ram_ratio + 0.15 * disk_ratio + 0.25 * (bw_ratio / 5.0)
+
+    # 线路市场公允基准月租 (严格对齐山哥真实定义：4837/优化款公开市场月租约为 ¥25.0/月)
+    tier_market_base = {"S": 45.0, "A": 25.0, "B": 16.0, "C": 9.9}
+    base_market = tier_market_base.get(route_tier, 9.9)
 
     combined = f"{name} {node_name} {detail} {intro}".lower()
     is_dual_isp = ("isp" in combined or "双isp" in combined) and bool(route_info.get("native_ip"))
     k_ip = 1.25 if is_dual_isp else (1.10 if route_info.get("native_ip") else 1.0)
-    
-    # 若IP被阻断，可用产能直接减半
-    if not route_info["ip_clean"]:
-        k_ip *= 0.5
 
-    m_market = round(k_route * k_ip * phi_capacity, 1)
+    # 若IP被阻断，可用商业价值直接断崖
+    if not route_info["ip_clean"]:
+        k_ip *= 0.15
+
+    m_market = round(base_market * k_ip * phi_norm, 1)
 
     monthly_saving = max(0.0, m_market - monthly_renew)
     annual_saving = round(12.0 * monthly_saving, 1)
@@ -692,6 +695,50 @@ def evaluate_cost_effectiveness(
     monthly_points_per_yuan = round(eff_capability_points / eff_cost_renew, 2) if final_score >= 40 else 0.0
     monthly_points_per_usd = round(monthly_points_per_yuan * USD_RATE, 2)
 
+    # 7. 山哥现金流资产套利与回本周期模型 (Payback Period & Arbitrage Cash Flow Engine)
+    # 核心理论：一年内回本(T_payback <= 12个月)是顶级暴利，年化套利ROI超100%
+    monthly_cash_savings = round(max(0.0, m_market - monthly_renew), 2)
+    if monthly_cash_savings > 0 and price_cny > 0:
+        payback_months = round(price_cny / monthly_cash_savings, 1)
+        annual_roi_percent = round((monthly_cash_savings * 12.0 / max(1.0, price_cny)) * 100.0, 1)
+    elif price_cny <= 0:
+        payback_months = 0.0
+        annual_roi_percent = 9999.0
+    else:
+        payback_months = 999.0
+        annual_roi_percent = 0.0
+
+    if item_type == "secondhand":
+        if price_cny <= 0.01:
+            payback_tier = "即时回本 (纯白送)"
+            payback_badge_color = "purple"
+            reasons.append("🎁 0元纯白送接盘，即时全额回本，终身白嫖！")
+        elif payback_months <= 6.0:
+            payback_tier = f"半年内回本 ({payback_months:.1f}月·极速暴利)"
+            payback_badge_color = "purple"
+            reasons.append(f"⚡ 半年内闪电回本({payback_months:.1f}个月·首年年化ROI {annual_roi_percent:.1f}%)，宇宙级暴利捡漏！")
+            if final_score >= 40:
+                final_score = max(final_score, 88)  # 提振至神机必抢
+        elif payback_months <= 12.0:
+            payback_tier = f"一年内回本 ({payback_months:.1f}月·超值爆棚)"
+            payback_badge_color = "green"
+            reasons.append(f"🔥 一年内超速回本({payback_months:.1f}个月·首年年化ROI {annual_roi_percent:.1f}%)，顶级套利爆棚！")
+            if final_score >= 40:
+                final_score = max(final_score, 75)  # 提振至超值高性价
+        elif payback_months <= 24.0:
+            payback_tier = f"1~2年回本 ({payback_months:.1f}月·公允)"
+            payback_badge_color = "blue"
+            reasons.append(f"📈 1~2年内可回本({payback_months:.1f}个月·年化ROI {annual_roi_percent:.1f}%)，公允稳健")
+        elif monthly_cash_savings > 0:
+            payback_tier = f"回本漫长 ({payback_months:.1f}月)"
+            payback_badge_color = "orange"
+        else:
+            payback_tier = "持续失血 (无法回本)"
+            payback_badge_color = "red"
+    else:
+        payback_tier = f"一手在售 (等效月租¥{m_market}/月)"
+        payback_badge_color = "default"
+
     if final_score >= 88:
         grade = "SSS"
         grade_label = "【绝版传家宝】"
@@ -732,6 +779,11 @@ def evaluate_cost_effectiveness(
         "monthly_leverage": monthly_leverage,
         "m_market": m_market,
         "annual_saving": annual_saving,
+        "monthly_cash_savings": monthly_cash_savings,
+        "payback_months": payback_months,
+        "annual_roi_percent": annual_roi_percent,
+        "payback_tier": payback_tier,
+        "payback_badge_color": payback_badge_color,
         "breakdown": {
             "score": final_score,
             "tier": tier,

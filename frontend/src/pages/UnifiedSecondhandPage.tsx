@@ -5,7 +5,8 @@ import {
 } from 'antd'
 import {
   SwapOutlined, SafetyCertificateOutlined, ReloadOutlined,
-  ThunderboltOutlined, WarningOutlined, DollarOutlined
+  ThunderboltOutlined, WarningOutlined, DollarOutlined,
+  FieldTimeOutlined, RiseOutlined
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
@@ -32,7 +33,9 @@ export const UnifiedSecondhandPage: React.FC = () => {
   const [minRenew, setMinRenew] = useState<number | undefined>(undefined)
   const [maxRenew, setMaxRenew] = useState<number | undefined>(undefined)
   const [minScore, setMinScore] = useState<number | undefined>(undefined)
-  const [sortBy, setSortBy] = useState<string>('price') // 'price', 'renew', 'score', 'ppy'
+  const [paybackPreset, setPaybackPreset] = useState<string>('all') // 'fast_6' (<=6月), 'year_12' (<=12月), 'mid_24' (<=24月), 'all'
+  const [maxPayback, setMaxPayback] = useState<number | undefined>(undefined)
+  const [sortBy, setSortBy] = useState<string>('price') // 'price', 'renew', 'score', 'ppy', 'payback', 'roi'
   const [sortOrder, setSortOrder] = useState<string>('asc')
 
   const handleRangePreset = (preset: string) => {
@@ -52,6 +55,19 @@ export const UnifiedSecondhandPage: React.FC = () => {
     }
   }
 
+  const handlePaybackPreset = (preset: string) => {
+    setPaybackPreset(preset)
+    if (preset === 'fast_6') {
+      setMaxPayback(6.0)
+    } else if (preset === 'year_12') {
+      setMaxPayback(12.0)
+    } else if (preset === 'mid_24') {
+      setMaxPayback(24.0)
+    } else {
+      setMaxPayback(undefined)
+    }
+  }
+
   const loadData = async () => {
     setLoading(true)
     try {
@@ -61,6 +77,7 @@ export const UnifiedSecondhandPage: React.FC = () => {
         min_renew: minRenew,
         max_renew: maxRenew,
         min_score: minScore,
+        max_payback: maxPayback,
         sort_by: sortBy,
         sort_order: sortOrder,
       })
@@ -75,7 +92,7 @@ export const UnifiedSecondhandPage: React.FC = () => {
 
   useEffect(() => {
     loadData()
-  }, [minRenew, maxRenew, minScore, sortBy, sortOrder])
+  }, [minRenew, maxRenew, minScore, maxPayback, sortBy, sortOrder])
 
   const openBuyModal = (item: SecondhandItem) => {
     setSelectedItem(item)
@@ -184,7 +201,7 @@ export const UnifiedSecondhandPage: React.FC = () => {
     {
       title: '转让售价 / 续费成本',
       key: 'price',
-      width: 140,
+      width: 155,
       sorter: (a, b) => (a.price_cny || 0) - (b.price_cny || 0),
       render: (_, r) => (
         <div>
@@ -194,6 +211,13 @@ export const UnifiedSecondhandPage: React.FC = () => {
           {r.renew_price_cny ? (
             <div style={{ fontSize: 11, color: '#64748b' }}>
               续费: <span className="mono-num">¥{r.renew_price_cny.toFixed(2)}</span>
+            </div>
+          ) : null}
+          {r.payback_tier ? (
+            <div style={{ marginTop: 2 }}>
+              <Tag color={r.payback_badge_color || 'green'} style={{ fontSize: 10, padding: '0 4px', margin: 0 }}>
+                {r.payback_tier}
+              </Tag>
             </div>
           ) : null}
         </div>
@@ -271,6 +295,20 @@ export const UnifiedSecondhandPage: React.FC = () => {
                   <div style={{ color: '#fbbf24', marginBottom: 4, fontWeight: 600 }}>
                     ⚡ 真实每元产出比: {ppy} 分/元 (约 ${ppd} 分/USD)
                   </div>
+                  {r.payback_months != null && r.payback_months < 990 ? (
+                    <div style={{ color: r.payback_months <= 12 ? '#4ade80' : '#38bdf8', marginBottom: 4, fontWeight: 700 }}>
+                      ⏳ 现金流投资回本期: {r.payback_months <= 0.01 ? '即时全额回本 (纯白送)' : `${r.payback_months} 个月`} (首年年化ROI: {r.annual_roi_percent || 0}%)
+                    </div>
+                  ) : r.payback_tier ? (
+                    <div style={{ color: '#f87171', marginBottom: 4, fontWeight: 600 }}>
+                      ⏳ 回本状态: {r.payback_tier}
+                    </div>
+                  ) : null}
+                  {r.monthly_cash_savings ? (
+                    <div style={{ color: '#38bdf8', marginBottom: 4 }}>
+                      • 相比公开市场月租(¥{mm}/月) 净省: <b>¥{r.monthly_cash_savings}/月</b>
+                    </div>
+                  ) : null}
                   {vr ? (
                     <div style={{ color: vr >= 1.5 ? '#4ade80' : vr >= 1.0 ? '#38bdf8' : '#f87171', marginBottom: 4, fontWeight: 600 }}>
                       📈 资产套利倍数: {vr}x ({vr >= 1.5 ? '超值套利捡漏' : vr >= 1.0 ? '公允价值成交' : '溢价割韭菜'})
@@ -475,13 +513,15 @@ export const UnifiedSecondhandPage: React.FC = () => {
             <Select
               size="small"
               value={sortBy}
-              style={{ width: 120 }}
+              style={{ width: 140 }}
               onChange={v => setSortBy(v)}
               options={[
                 { value: 'price', label: '挂售价格' },
                 { value: 'renew', label: '月续费金额' },
                 { value: 'ppy', label: '每元性价比' },
                 { value: 'score', label: '综合质量分' },
+                { value: 'payback', label: '回本周期最快' },
+                { value: 'roi', label: '年化套利ROI最高' },
               ]}
             />
             <Select
@@ -495,6 +535,39 @@ export const UnifiedSecondhandPage: React.FC = () => {
               ]}
             />
           </Space>
+
+          {/* 回本周期套利筛选行 */}
+          <div style={{
+            width: '100%',
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            paddingTop: 8,
+            borderTop: '1px dashed #e2e8f0',
+          }}>
+            <Space wrap size={12} align="center">
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#334155', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <FieldTimeOutlined style={{ color: '#2563eb' }} /> 资产套利回本:
+              </span>
+              <Radio.Group
+                value={paybackPreset}
+                onChange={e => handlePaybackPreset(e.target.value)}
+                buttonStyle="solid"
+                size="small"
+              >
+                <Radio.Button value="year_12">⚡ 一年内回本 (超值爆棚)</Radio.Button>
+                <Radio.Button value="fast_6">⚡ 半年内回本 (极速暴利)</Radio.Button>
+                <Radio.Button value="mid_24">2年内回本</Radio.Button>
+                <Radio.Button value="all">不限</Radio.Button>
+              </Radio.Group>
+            </Space>
+
+            <span style={{ fontSize: 12, color: '#64748b', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <RiseOutlined style={{ color: '#16a34a' }} /> 一年回本年化ROI超100%，资产套利顶级神车
+            </span>
+          </div>
         </div>
 
         <Table
