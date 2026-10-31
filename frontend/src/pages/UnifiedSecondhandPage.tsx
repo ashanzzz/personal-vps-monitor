@@ -69,13 +69,12 @@ export const UnifiedSecondhandPage: React.FC = () => {
     }
   }
 
-  const loadData = async () => {
+  const loadData = async (force = false) => {
     setLoading(true)
     try {
       const res = await api.getUnifiedSecondhand({
-        page: 1,
-        page_size: 100,
         platform: platformFilter === 'all' ? undefined : platformFilter,
+        force_refresh: force,
         min_renew: minRenew,
         max_renew: maxRenew,
         min_score: minScore,
@@ -435,7 +434,7 @@ export const UnifiedSecondhandPage: React.FC = () => {
               type="text"
               size="small"
               icon={<ReloadOutlined spin={loading} />}
-              onClick={loadData}
+              onClick={() => loadData(true)}
             >
               刷新集市
             </Button>
@@ -591,7 +590,13 @@ export const UnifiedSecondhandPage: React.FC = () => {
           dataSource={items}
           rowKey="uid"
           loading={loading}
-          pagination={{ pageSize: 15, size: 'small' }}
+          pagination={{
+            pageSize: 20,
+            showSizeChanger: true,
+            pageSizeOptions: ['15', '20', '50', '100'],
+            showTotal: total => `共 ${total} 台在售`,
+            size: 'small',
+          }}
           size="small"
         />
       </Card>

@@ -95,25 +95,54 @@ async def get_my_servers(token: str) -> list[dict[str, Any]]:
         return []
 
 
-async def get_exchange_listings(page: int = 1, page_size: int = 50) -> list[dict[str, Any]]:
-    """GET /api/exchange/listings – marketplace / secondhand listings."""
+async def get_exchange_listings(
+    page: int = 1,
+    page_size: int = 50,
+    offset: int = 0,
+    limit: int = 50,
+    fetch_all: bool = False,
+) -> list[dict[str, Any]]:
+    """GET /api/exchange/listings – marketplace / secondhand listings.
+    ACCK uses cursor-based pagination (offset/limit/next_offset).
+    If fetch_all=True, it traverses all pages until has_more is False.
+    """
     async with httpx.AsyncClient(timeout=TIMEOUT) as c:
-        r = await c.get(
-            f"{BASE}/exchange/listings",
-            params={"page": page, "page_size": page_size},
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
-        )
-        r.raise_for_status()
-        res = r.json()
-        if isinstance(res, dict):
-            if "listings" in res:
+        if not fetch_all:
+            # Map page to offset if offset is 0 but page > 1
+            real_offset = offset if offset > 0 else (page - 1) * page_size
+            real_limit = min(limit or page_size or 50, 50)
+            r = await c.get(
+                f"{BASE}/exchange/listings",
+                params={"offset": real_offset, "limit": real_limit},
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+            )
+            r.raise_for_status()
+            res = r.json()
+            if isinstance(res, dict) and "listings" in res:
                 return res.get("listings") or []
-            data = res.get("data")
-            if isinstance(data, dict):
-                return data.get("list") or []
-            if isinstance(data, list):
-                return data
-        return res if isinstance(res, list) else []
+            return res if isinstance(res, list) else []
+
+        all_listings: list[dict[str, Any]] = []
+        cur_offset = offset
+        for _ in range(20):  # safety cap up to 1000 items
+            r = await c.get(
+                f"{BASE}/exchange/listings",
+                params={"offset": cur_offset, "limit": 50},
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+            )
+            r.raise_for_status()
+            res = r.json()
+            batch = res.get("listings") if isinstance(res, dict) else (res if isinstance(res, list) else [])
+            if not batch:
+                break
+            all_listings.extend(batch)
+            if not isinstance(res, dict) or not res.get("has_more"):
+                break
+            next_off = res.get("next_offset")
+            if next_off is None or next_off == cur_offset:
+                break
+            cur_offset = next_off
+        return all_listings
 
 
 async def buy_preview(token: str, payload: dict[str, Any]) -> dict[str, Any]:

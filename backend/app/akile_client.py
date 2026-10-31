@@ -82,19 +82,63 @@ async def get_ls_store(token: str, region: str) -> dict:
         return r.json()
 
 
-async def get_secondhand_list(token: str, page: int = 1, page_size: int = 30, name: str = "", area_name: str = "") -> dict:
-    """POST /v1/pushshop/GetPushProductList – returns current listings."""
-    payload: dict[str, Any] = {"page_num": page, "page_size": page_size}
+async def get_secondhand_list(
+    token: str,
+    page: int = 1,
+    page_size: int = 30,
+    name: str = "",
+    area_name: str = "",
+    fetch_all: bool = False,
+) -> dict:
+    """POST /v1/pushshop/GetPushProductList – returns current listings.
+    If fetch_all=True, it concurrently traverses all pages until the full catalog is collected.
+    """
+    import asyncio
+    import math
+
+    payload: dict[str, Any] = {"page_num": page, "page_size": min(page_size, 30)}
     if name:
         payload["name"] = name
     if area_name:
         payload["area_name"] = area_name
+
     async with httpx.AsyncClient(timeout=TIMEOUT) as c:
-        r = await c.post(f"{BASE}/v1/pushshop/GetPushProductList",
-                         json=payload,
-                         headers=_headers(token))
+        r = await c.post(
+            f"{BASE}/v1/pushshop/GetPushProductList",
+            json=payload,
+            headers=_headers(token),
+        )
         r.raise_for_status()
-        return r.json()
+        first_page = r.json()
+        if not fetch_all or name:
+            return first_page
+
+        total = first_page.get("total", 0) or 0
+        items = list(first_page.get("list") or [])
+        pages = math.ceil(total / 30)
+        if pages > 1:
+            tasks = []
+            for p in range(2, min(pages + 1, 15)):  # safety cap up to 450 items
+                p_payload: dict[str, Any] = {"page_num": p, "page_size": 30}
+                if area_name:
+                    p_payload["area_name"] = area_name
+                tasks.append(
+                    c.post(
+                        f"{BASE}/v1/pushshop/GetPushProductList",
+                        json=p_payload,
+                        headers=_headers(token),
+                    )
+                )
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+            for resp in responses:
+                if isinstance(resp, httpx.Response) and resp.status_code == 200:
+                    try:
+                        data = resp.json()
+                        items.extend(data.get("list") or [])
+                    except Exception:
+                        pass
+        first_page["list"] = items
+        return first_page
 
 
 async def get_secondhand_areas(token: str) -> list[str]:
