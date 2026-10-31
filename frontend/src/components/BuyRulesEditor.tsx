@@ -191,6 +191,16 @@ function RuleFields({ rule, onPatch }: {
             onChange={e => onPatch({ label: e.target.value })} />
         </span>
         <span>
+          <span style={lbl}>目标网站/平台</span>
+          <Select value={rule.platform || 'all'} style={{ width: 120 }}
+            onChange={v => onPatch({ platform: v })}
+            options={[
+              { value: 'all', label: '全部平台' },
+              { value: 'akile', label: 'Akile Push' },
+              { value: 'acck', label: 'ACCK' },
+            ]} />
+        </span>
+        <span>
           <span style={lbl}>本规则上限(0=不限)</span>
           <InputNumber min={0} value={rule.max_buy} style={{ width: 100 }}
             onChange={v => onPatch({ max_buy: Number(v) || 0 })} />

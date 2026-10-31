@@ -112,6 +112,7 @@ export interface BuyRule {
   id: string
   enabled: boolean
   label: string
+  platform?: 'all' | 'akile' | 'acck' | string // targeted platform
   tags_include: string[]        // match ANY substring in name/node; [] = any
   spec: RuleSpec                // cpu/memory/disk/bandwidth/traffic min-max
   price_type: 'monthly' | 'yearly'
@@ -388,7 +389,7 @@ export const api = {
   buyStorePackage: (platform: string, plan_id: any, order_data: any[] = [], safe_mode = true) =>
     http.post('/api/unified/store/buy', { platform, plan_id, order_data, safe_mode }).then(r => r.data),
 
-  getUnifiedSecondhand: (params?: { page?: number; page_size?: number; min_renew?: number; max_renew?: number; min_score?: number; max_payback?: number; sort_by?: string; sort_order?: string }) =>
+  getUnifiedSecondhand: (params?: { page?: number; page_size?: number; platform?: string; min_renew?: number; max_renew?: number; min_score?: number; max_payback?: number; sort_by?: string; sort_order?: string }) =>
     http.get<{ total: number; items: SecondhandItem[]; counts: Record<string, number> }>('/api/unified/secondhand', { params }).then(r => r.data),
 
   buySecondhandItem: (platform: string, listing_id: number | string, price_cents = 0, safe_mode = true, captcha = '', force_buy_depleted = false) =>

@@ -42,6 +42,12 @@ def resolve_search_prefix(rule: dict) -> str:
 
 def item_matches_sniper_rule(rule: dict, item: dict) -> bool:
     """Fast in-memory match for targeted listing."""
+    rule_plat = rule.get("platform")
+    if rule_plat and str(rule_plat).lower() not in ("all", ""):
+        item_plat = item.get("platform", "akile")
+        if str(item_plat).lower() != str(rule_plat).lower():
+            return False
+
     name = str(item.get("name", "")).strip()
     status = item.get("status", 0)
     if status != 0:

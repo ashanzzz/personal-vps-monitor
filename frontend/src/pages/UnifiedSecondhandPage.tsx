@@ -6,7 +6,7 @@ import {
 import {
   SwapOutlined, SafetyCertificateOutlined, ReloadOutlined,
   ThunderboltOutlined, WarningOutlined, DollarOutlined,
-  FieldTimeOutlined, RiseOutlined
+  FieldTimeOutlined, RiseOutlined, GlobalOutlined
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
@@ -29,6 +29,7 @@ export const UnifiedSecondhandPage: React.FC = () => {
   const [buyResult, setBuyResult] = useState<any>(null)
 
   // 专属续费价格区间与评分/性价比筛选状态
+  const [platformFilter, setPlatformFilter] = useState<string>('all') // 'all', 'akile', 'acck'
   const [renewRange, setRenewRange] = useState<string>('all') // 'heirloom_2' (<=2元), 'budget_10' (<=10元), 'fair_20' (<=20元), 'custom', 'all'
   const [minRenew, setMinRenew] = useState<number | undefined>(undefined)
   const [maxRenew, setMaxRenew] = useState<number | undefined>(undefined)
@@ -74,6 +75,7 @@ export const UnifiedSecondhandPage: React.FC = () => {
       const res = await api.getUnifiedSecondhand({
         page: 1,
         page_size: 100,
+        platform: platformFilter === 'all' ? undefined : platformFilter,
         min_renew: minRenew,
         max_renew: maxRenew,
         min_score: minScore,
@@ -92,7 +94,7 @@ export const UnifiedSecondhandPage: React.FC = () => {
 
   useEffect(() => {
     loadData()
-  }, [minRenew, maxRenew, minScore, maxPayback, sortBy, sortOrder])
+  }, [platformFilter, minRenew, maxRenew, minScore, maxPayback, sortBy, sortOrder])
 
   const openBuyModal = (item: SecondhandItem) => {
     setSelectedItem(item)
@@ -455,6 +457,20 @@ export const UnifiedSecondhandPage: React.FC = () => {
         }}>
           <Space wrap size={12} align="center">
             <span style={{ fontSize: 13, fontWeight: 600, color: '#334155', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <GlobalOutlined style={{ color: '#2563eb' }} /> 网站平台:
+            </span>
+            <Radio.Group
+              value={platformFilter}
+              onChange={e => setPlatformFilter(e.target.value)}
+              buttonStyle="solid"
+              size="small"
+            >
+              <Radio.Button value="all">全部平台</Radio.Button>
+              <Radio.Button value="akile">🔵 Akile ({counts.akile})</Radio.Button>
+              <Radio.Button value="acck">🟢 ACCK ({counts.acck})</Radio.Button>
+            </Radio.Group>
+
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#334155', display: 'flex', alignItems: 'center', gap: 4, marginLeft: 6 }}>
               <DollarOutlined style={{ color: '#059669' }} /> 续费区间:
             </span>
             <Radio.Group

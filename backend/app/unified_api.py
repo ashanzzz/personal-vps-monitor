@@ -732,6 +732,7 @@ async def buy_store_package(
 async def get_unified_secondhand(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
+    platform: str | None = Query(None, description="平台过滤: all, akile, acck"),
     min_renew: float | None = Query(None, description="最低月续费 (元)"),
     max_renew: float | None = Query(None, description="最高月续费 (元)"),
     min_score: float | None = Query(None, description="最低评分 (0-100)"),
@@ -746,7 +747,7 @@ async def get_unified_secondhand(
     items: list[dict[str, Any]] = []
 
     # 1. Akile PushShop
-    if akile_tok:
+    if akile_tok and (not platform or platform.lower() in ("all", "akile")):
         try:
             ak_res = await akile_client.get_secondhand_list(akile_tok, page=page, page_size=page_size)
             raw_list = ak_res.get("list") or []
@@ -840,93 +841,94 @@ async def get_unified_secondhand(
 
     # 2. ACCK Exchange
     try:
-        ac_list = await acck_client.get_exchange_listings(page=page, page_size=page_size)
-        for item in ac_list:
-            iid = item.get("id")
-            try:
-                price_cents = int(float(str(item.get("ask_price_cents", 0))))
-            except (ValueError, TypeError):
-                price_cents = 0
-
-            snapshot = {}
-            if item.get("snapshot_json"):
+        if not platform or platform.lower() in ("all", "acck"):
+            ac_list = await acck_client.get_exchange_listings(page=page, page_size=page_size)
+            for item in ac_list:
+                iid = item.get("id")
                 try:
-                    snapshot = json.loads(item["snapshot_json"])
-                except Exception:
-                    pass
-
-            renew_cents = 0
-            if snapshot.get("renew_price_cents"):
-                try:
-                    renew_cents = int(float(str(snapshot["renew_price_cents"])))
+                    price_cents = int(float(str(item.get("ask_price_cents", 0))))
                 except (ValueError, TypeError):
-                    renew_cents = 0
+                    price_cents = 0
 
-            title = snapshot.get("plan_name") or item.get("intro_text") or f"Exchange-{iid}"
-            area = snapshot.get("area_name", "美国")
-            node = snapshot.get("node_name", "")
-            node_comment = snapshot.get("node_comment", "")
-            intro = item.get("intro_text", "")
-            price_cny = round(price_cents / 100, 2)
-            renew_cny = round(renew_cents / 100, 2) if renew_cents > 0 else 0
+                snapshot = {}
+                if item.get("snapshot_json"):
+                    try:
+                        snapshot = json.loads(item["snapshot_json"])
+                    except Exception:
+                        pass
 
-            flow_total = float(snapshot.get("flow_gb", 0) or 0)
-            flow_used = float(snapshot.get("flow_used_gb", 0) or 0)
-            reset_price_cny = round(float(snapshot.get("reset_flow_price_cents", 0) or 0) / 100, 2)
+                renew_cents = 0
+                if snapshot.get("renew_price_cents"):
+                    try:
+                        renew_cents = int(float(str(snapshot["renew_price_cents"])))
+                    except (ValueError, TypeError):
+                        renew_cents = 0
 
-            eval_res = evaluate_secondhand_listing(
-                price_cny=price_cny,
-                renew_price_cny=renew_cny,
-                flow_total_gb=flow_total,
-                flow_used_gb=flow_used,
-                reset_price_cny=reset_price_cny,
-                name=title,
-                node_name=node,
-                detail=node_comment,
-                intro=intro,
-                area=area,
-                bandwidth_mbps=int(snapshot.get("bandwidth_mbps") or 1000),
-            )
+                title = snapshot.get("plan_name") or item.get("intro_text") or f"Exchange-{iid}"
+                area = snapshot.get("area_name", "美国")
+                node = snapshot.get("node_name", "")
+                node_comment = snapshot.get("node_comment", "")
+                intro = item.get("intro_text", "")
+                price_cny = round(price_cents / 100, 2)
+                renew_cny = round(renew_cents / 100, 2) if renew_cents > 0 else 0
 
-            items.append({
-                "uid": f"acck:{iid}",
-                "platform": "acck",
-                "id": iid,
-                "title": title,
-                "area": area,
-                "node": node,
-                "price_cents": price_cents,
-                "price_cny": price_cny,
-                "renew_price_cny": renew_cny,
-                "bandwidth": snapshot.get("bandwidth_mbps", 0),
-                "flow": flow_total,
-                "due_time": snapshot.get("due_time_unix", 0),
-                "seller": f"User#{item.get('seller_user_id', '')}",
-                "intro": intro,
-                "route": eval_res["route"],
-                "traffic": eval_res["traffic"],
-                "pricing_analysis": eval_res["pricing"],
-                "cost_effectiveness": eval_res["cost_effectiveness"],
-                "sniping": eval_res["sniping_verdict"],
-                "score": eval_res["cost_effectiveness"]["score"],
-                "grade_label": eval_res["cost_effectiveness"]["grade_label"],
-                "badge_color": eval_res["cost_effectiveness"]["badge_color"],
-                "points_per_yuan": eval_res["cost_effectiveness"]["points_per_yuan"],
-                "points_per_usd": eval_res["cost_effectiveness"]["points_per_usd"],
-                "fair_market_value_cny": eval_res["cost_effectiveness"].get("fair_market_value_cny", 0.0),
-                "valuation_rationale": eval_res["cost_effectiveness"].get("valuation_rationale", ""),
-                "value_ratio": eval_res["cost_effectiveness"].get("value_ratio", 1.0),
-                "monthly_leverage": eval_res["cost_effectiveness"].get("monthly_leverage", 1.0),
-                "m_market": eval_res["cost_effectiveness"].get("m_market", 0.0),
-                "annual_saving": eval_res["cost_effectiveness"].get("annual_saving", 0.0),
-                "monthly_cash_savings": eval_res["cost_effectiveness"].get("monthly_cash_savings", 0.0),
-                "payback_months": eval_res["cost_effectiveness"].get("payback_months", 999.0),
-                "annual_roi_percent": eval_res["cost_effectiveness"].get("annual_roi_percent", 0.0),
-                "payback_tier": eval_res["cost_effectiveness"].get("payback_tier", ""),
-                "payback_badge_color": eval_res["cost_effectiveness"].get("payback_badge_color", "default"),
-                "reasons": eval_res["cost_effectiveness"]["reasons"],
-                "raw": item,
-            })
+                flow_total = float(snapshot.get("flow_gb", 0) or 0)
+                flow_used = float(snapshot.get("flow_used_gb", 0) or 0)
+                reset_price_cny = round(float(snapshot.get("reset_flow_price_cents", 0) or 0) / 100, 2)
+
+                eval_res = evaluate_secondhand_listing(
+                    price_cny=price_cny,
+                    renew_price_cny=renew_cny,
+                    flow_total_gb=flow_total,
+                    flow_used_gb=flow_used,
+                    reset_price_cny=reset_price_cny,
+                    name=title,
+                    node_name=node,
+                    detail=node_comment,
+                    intro=intro,
+                    area=area,
+                    bandwidth_mbps=int(snapshot.get("bandwidth_mbps") or 1000),
+                )
+
+                items.append({
+                    "uid": f"acck:{iid}",
+                    "platform": "acck",
+                    "id": iid,
+                    "title": title,
+                    "area": area,
+                    "node": node,
+                    "price_cents": price_cents,
+                    "price_cny": price_cny,
+                    "renew_price_cny": renew_cny,
+                    "bandwidth": snapshot.get("bandwidth_mbps", 0),
+                    "flow": flow_total,
+                    "due_time": snapshot.get("due_time_unix", 0),
+                    "seller": f"User#{item.get('seller_user_id', '')}",
+                    "intro": intro,
+                    "route": eval_res["route"],
+                    "traffic": eval_res["traffic"],
+                    "pricing_analysis": eval_res["pricing"],
+                    "cost_effectiveness": eval_res["cost_effectiveness"],
+                    "sniping": eval_res["sniping_verdict"],
+                    "score": eval_res["cost_effectiveness"]["score"],
+                    "grade_label": eval_res["cost_effectiveness"]["grade_label"],
+                    "badge_color": eval_res["cost_effectiveness"]["badge_color"],
+                    "points_per_yuan": eval_res["cost_effectiveness"]["points_per_yuan"],
+                    "points_per_usd": eval_res["cost_effectiveness"]["points_per_usd"],
+                    "fair_market_value_cny": eval_res["cost_effectiveness"].get("fair_market_value_cny", 0.0),
+                    "valuation_rationale": eval_res["cost_effectiveness"].get("valuation_rationale", ""),
+                    "value_ratio": eval_res["cost_effectiveness"].get("value_ratio", 1.0),
+                    "monthly_leverage": eval_res["cost_effectiveness"].get("monthly_leverage", 1.0),
+                    "m_market": eval_res["cost_effectiveness"].get("m_market", 0.0),
+                    "annual_saving": eval_res["cost_effectiveness"].get("annual_saving", 0.0),
+                    "monthly_cash_savings": eval_res["cost_effectiveness"].get("monthly_cash_savings", 0.0),
+                    "payback_months": eval_res["cost_effectiveness"].get("payback_months", 999.0),
+                    "annual_roi_percent": eval_res["cost_effectiveness"].get("annual_roi_percent", 0.0),
+                    "payback_tier": eval_res["cost_effectiveness"].get("payback_tier", ""),
+                    "payback_badge_color": eval_res["cost_effectiveness"].get("payback_badge_color", "default"),
+                    "reasons": eval_res["cost_effectiveness"]["reasons"],
+                    "raw": item,
+                })
     except Exception as e:
         logger.warning("ACCK Exchange fetch error: %s", e)
 
