@@ -185,6 +185,7 @@ export const UnifiedSecondhandPage: React.FC = () => {
       title: '转让售价 / 续费成本',
       key: 'price',
       width: 140,
+      sorter: (a, b) => (a.price_cny || 0) - (b.price_cny || 0),
       render: (_, r) => (
         <div>
           <span className="mono-num" style={{ fontWeight: 700, color: '#0f172a', fontSize: 14 }}>
@@ -245,7 +246,7 @@ export const UnifiedSecondhandPage: React.FC = () => {
       title: '综合评分 / 性价比比率',
       key: 'sniping',
       width: 195,
-      sorter: (a, b) => (a.points_per_yuan || 0) - (b.points_per_yuan || 0),
+      sorter: (a, b) => (a.score || 0) - (b.score || 0),
       render: (_, r) => {
         const ce = r.cost_effectiveness
         const pr = r.pricing_analysis

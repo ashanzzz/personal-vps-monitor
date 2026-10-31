@@ -614,23 +614,37 @@ def evaluate_cost_effectiveness(
     USD_RATE = 7.25
 
     # 6. 山哥传家宝资产化估值模型与做市商策略 (Annualized Arbitrage Fair Valuation & Market-Making)
-    # 严格遵照山哥三款核心主力做市买卖底牌：
-    # IIJ: 成本¥350，出售底价¥500，买入目标≤¥200
-    # ISP: 目标售价¥400，买入目标¥200-250
-    # SB:  目标售价¥250-300，买入目标¥100-170
-    t_ratio = max(0.1, flow_total_gb / 1000.0)
-    ram_ratio = max(0.25, memory_mb / 1024.0)
-    disk_ratio = max(0.5, disk_gb / 10.0)
-    bw_ratio = max(0.5, bandwidth_mbps / 200.0)
-    phi_capacity = 8.0 * (0.50 * t_ratio + 0.25 * ram_ratio + 0.10 * disk_ratio + 0.15 * min(10.0, bw_ratio))
-
+    # 遵照山哥指导：
+    # 1) 普通国际BGP (C级) 流量根本不值钱！绝不能因为 20000G 就膨胀产能！超过 1000G 边际价值极度递减。
+    # 2) 二手每元性价比必须看真实总代价 (转让售价 + 月供续费 + 换IP成本)，绝不能只除以转让挂牌价！
+    # 3) 5分【拦截避坑】的失血机，其性价比分/元绝不能高达几十，必须与总评级严格对齐！
+    
     route_tier = str(route_info.get("tier") or "C")
-    tier_k_map = {"S": 3.0, "A": 2.3, "B": 1.6, "C": 1.0}
-    k_route = tier_k_map.get(route_tier, 1.0)
+    tier_k_map = {"S": 3.0, "A": 2.2, "B": 1.4, "C": 0.5}
+    k_route = tier_k_map.get(route_tier, 0.5)
+
+    # 对流量做线路加权：C级普通国际流量按对数折算，只有S/A级优质优化流量才具备高商业价值
+    if route_tier == "C":
+        # 普通国际BGP：1000G为基准，超出部分极度弱化 (20000G也只算约1.5倍)
+        t_effective = 1.0 + (math.log10(max(1.0, flow_total_gb / 1000.0)) * 0.35) if flow_total_gb > 1000 else max(0.1, flow_total_gb / 1000.0)
+    else:
+        t_effective = max(0.1, min(5.0, flow_total_gb / 1000.0))
+
+    ram_ratio = max(0.25, min(4.0, memory_mb / 1024.0))
+    disk_ratio = max(0.5, min(4.0, disk_gb / 10.0))
+    bw_ratio = max(0.5, min(10.0, bandwidth_mbps / 200.0))
+    
+    # 基础物理产能
+    phi_capacity = 6.0 * (0.35 * t_effective + 0.25 * ram_ratio + 0.15 * disk_ratio + 0.25 * bw_ratio)
 
     combined = f"{name} {node_name} {detail} {intro}".lower()
     is_dual_isp = ("isp" in combined or "双isp" in combined) and bool(route_info.get("native_ip"))
     k_ip = 1.25 if is_dual_isp else (1.10 if route_info.get("native_ip") else 1.0)
+    
+    # 若IP被阻断，可用产能直接减半
+    if not route_info["ip_clean"]:
+        k_ip *= 0.5
+
     m_market = round(k_route * k_ip * phi_capacity, 1)
 
     monthly_saving = max(0.0, m_market - monthly_renew)
@@ -677,7 +691,14 @@ def evaluate_cost_effectiveness(
             valuation_rationale = "高月租失血机型 (无长期套利溢价，转让价值趋于0)"
 
     # 1. 资产价值倍数 (Value-to-Price Multiplier / 投资杠杆倍数)
-    comp_price = monthly_renew if item_type == "server" else price_cny
+    # 对于二手机器，买家的真实持有门槛是【买入售价 + 首月续费】，绝不能只按低廉的转让挂牌价算！
+    if item_type == "secondhand":
+        comp_price = price_cny + monthly_renew * 0.5
+    elif item_type == "server":
+        comp_price = monthly_renew
+    else:
+        comp_price = price_cny
+
     value_ratio = round(fair_market_value_cny / max(1.0, comp_price), 2)
 
     # 2. 月供产能杠杆倍数 (Monthly Leverage: 实际付的月租享受多少倍商业产出)
@@ -697,7 +718,12 @@ def evaluate_cost_effectiveness(
     health_factor = min(1.0, max(0.05, monthly_saving / max(1.0, m_market * 0.4))) if monthly_renew > 2.5 else 1.0
     eff_capability_points = round(m_market * 10 * health_factor, 1)
 
-    points_per_yuan = round(eff_capability_points / eff_cost_ask, 2)
+    # 铁律守卫：若综合品质评分低于 40 分（属于高月供失血或拦截避坑机型），性价比分/元强行锁死在 0.5 以下，杜绝虚高倒挂！
+    if final_score < 40:
+        points_per_yuan = round(min(0.3, (final_score / 100.0) * (eff_capability_points / eff_cost_ask)), 2)
+    else:
+        points_per_yuan = round(eff_capability_points / eff_cost_ask, 2)
+
     points_per_usd = round(points_per_yuan * USD_RATE, 2)
     cost_per_point_cny = round(comp_price / max(1, final_score), 3)
 
