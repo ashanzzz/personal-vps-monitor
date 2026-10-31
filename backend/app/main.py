@@ -235,11 +235,16 @@ async def lifespan(app: FastAPI):
     _schedule_support_jobs()
     # Daily checkin for AK coins at a random time within the configured window.
     await _schedule_daily_checkin(settings)
+    # Start targeted fast secondhand sniper (every 5 seconds)
+    from .sniper import start_sniper_worker, stop_sniper_worker
+    start_sniper_worker(interval_seconds=5)
+
     scheduler.start()
-    logger.info("Scheduler started (per-page pollers active)")
+    logger.info("Scheduler started (per-page pollers and fast sniper active)")
 
     yield
 
+    stop_sniper_worker()
     scheduler.shutdown()
 
 
@@ -1171,9 +1176,8 @@ async def buy_machine(plan_id: str, _: str = Depends(require_auth), db: AsyncSes
         return {"error": "No token configured"}
 
     from . import akile_client as api
-    cycle = (settings.get("secondhand_buy") or {}).get("cycle", 1)
     try:
-        result = await api.buy_secondhand(token, {"id": plan_id, "cycle": cycle})
+        result = await api.buy_secondhand(token, plan_id, auto_pay=True)
     except httpx.HTTPError as e:
         return {"error": str(e)}
 
