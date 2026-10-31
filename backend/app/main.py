@@ -480,6 +480,26 @@ async def root_fallback():
 async def health_check():
     return {"status": "green", "timestamp": datetime.now().isoformat()}
 
+@app.get("/api/sniper/status", tags=["admin"])
+async def get_sniper_status():
+    from .sniper import _sniper_task
+    from .database import SessionLocal
+    from .config import get_all_settings
+    from .buy_engine import buy_state
+    
+    async with SessionLocal() as db:
+        settings = await get_all_settings(db)
+        
+    cfg = settings.get("secondhand_buy") or {}
+    return {
+        "status": "running" if (_sniper_task and not _sniper_task.done()) else "stopped",
+        "interval_seconds": 5,
+        "secondhand_buy_enabled": cfg.get("enabled", False),
+        "real_purchase_enabled": settings.get("real_purchase_enabled", False),
+        "rules_count": len(cfg.get("rules") or []),
+        "daily_bought": buy_state.daily("secondhand"),
+    }
+
 
 app.include_router(public_api_router)
 app.include_router(control_api_router)
