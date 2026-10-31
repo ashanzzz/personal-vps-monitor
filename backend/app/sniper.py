@@ -62,6 +62,34 @@ def item_matches_sniper_rule(rule: dict, item: dict) -> bool:
         except (ValueError, TypeError):
             return False
 
+    # Spec filtering (CPU, Memory, Disk, Bandwidth, Traffic)
+    spec = rule.get("spec") or {}
+    spec_fields = {
+        "cpu": ["cpu"],
+        "memory": ["memory", "memory_mb"],
+        "disk": ["disk", "disk_gb"],
+        "bandwidth": ["bandwidth", "bandwidth_mbps"],
+        "traffic": ["flow", "flow_gb", "traffic", "traffic_gb"],
+    }
+    for dim, keys in spec_fields.items():
+        rng = spec.get(dim) or {}
+        lo = rng.get("min", 0) or 0
+        hi = rng.get("max", 0) or 0
+        if not lo and not hi:
+            continue
+        val = 0.0
+        for k in keys:
+            if k in item and item[k] is not None:
+                try:
+                    val = float(item[k])
+                    break
+                except (ValueError, TypeError):
+                    pass
+        if lo > 0 and val < lo:
+            return False
+        if hi > 0 and val > hi:
+            return False
+
     return True
 
 
