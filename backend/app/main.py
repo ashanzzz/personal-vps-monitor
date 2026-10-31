@@ -468,6 +468,7 @@ app = FastAPI(
         "persistAuthorization": True,
         "displayRequestDuration": True,
     },
+    lifespan=lifespan,
 )
 
 # 补全根路径静默分流与前端通信兜底探针，杜绝 SPA 路由死锁
