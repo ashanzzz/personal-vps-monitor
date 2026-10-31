@@ -482,7 +482,7 @@ async def health_check():
 
 @app.get("/api/sniper/status", tags=["admin"])
 async def get_sniper_status():
-    from .sniper import _sniper_task
+    from . import sniper
     from .database import SessionLocal
     from .config import get_all_settings
     from .buy_engine import buy_state
@@ -491,8 +491,20 @@ async def get_sniper_status():
         settings = await get_all_settings(db)
         
     cfg = settings.get("secondhand_buy") or {}
+    task = sniper._sniper_task
+    exc_str = None
+    if task and task.done():
+        try:
+            exc = task.exception()
+            exc_str = str(exc) if exc else "None (exited normally)"
+        except Exception as e:
+            exc_str = f"failed to get exc: {e}"
+            
     return {
-        "status": "running" if (_sniper_task and not _sniper_task.done()) else "stopped",
+        "status": "running" if (task and not task.done()) else "stopped",
+        "task_exists": task is not None,
+        "task_done": task.done() if task else None,
+        "task_exception": exc_str,
         "interval_seconds": 5,
         "secondhand_buy_enabled": cfg.get("enabled", False),
         "real_purchase_enabled": settings.get("real_purchase_enabled", False),
