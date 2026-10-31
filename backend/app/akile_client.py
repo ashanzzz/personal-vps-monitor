@@ -4,6 +4,7 @@ Token is passed per-call so it can be updated without restart.
 """
 from __future__ import annotations
 
+from typing import Any
 import httpx
 
 BASE = "https://api.akile.ai/api"
@@ -81,11 +82,16 @@ async def get_ls_store(token: str, region: str) -> dict:
         return r.json()
 
 
-async def get_secondhand_list(token: str, page: int = 1, page_size: int = 100) -> dict:
+async def get_secondhand_list(token: str, page: int = 1, page_size: int = 30, name: str = "", area_name: str = "") -> dict:
     """POST /v1/pushshop/GetPushProductList – returns current listings."""
+    payload: dict[str, Any] = {"page_num": page, "page_size": page_size}
+    if name:
+        payload["name"] = name
+    if area_name:
+        payload["area_name"] = area_name
     async with httpx.AsyncClient(timeout=TIMEOUT) as c:
         r = await c.post(f"{BASE}/v1/pushshop/GetPushProductList",
-                         json={"page": page, "page_size": page_size},
+                         json=payload,
                          headers=_headers(token))
         r.raise_for_status()
         return r.json()

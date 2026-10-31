@@ -125,9 +125,14 @@ async def _purchase(token, page, category, m, rule, rid, cycle, settings) -> Non
         "autobuy.attempt", page=page, rule=rid, plan_id=m.plan_id,
         name=m.name, price=m.price_monthly, cycle=cycle,
     )
-    payload = {"id": m.plan_id, "cycle": cycle}
     try:
-        result = await api.buy_secondhand(token, payload)
+        if category == "secondhand":
+            result = await api.buy_secondhand(token, m.plan_id, auto_pay=True)
+        else:
+            payload = [{"key": "cycle", "value": str(cycle)}]
+            result = await api.make_order(token, payload, order_type="1", plan_id=int(m.plan_id))
+            if isinstance(result, dict) and result.get("order_no"):
+                await api.pay_order(token, result["order_no"], pay_type="balance")
     except Exception as e:  # noqa: BLE001 - log and continue to next candidate
         log_event("autobuy.result", level=logging.WARNING, page=page, rule=rid,
                   plan_id=m.plan_id, ok=False, error=str(e))

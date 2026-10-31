@@ -761,13 +761,20 @@ async def get_unified_secondhand(
                     renew_price_cents = int(float(str(item.get("server_price", 0))))
                 except (ValueError, TypeError):
                     renew_price_cents = 0
+                try:
+                    server_cycle = int(float(str(item.get("server_cycle", 1) or 1)))
+                except (ValueError, TypeError):
+                    server_cycle = 1
+                if server_cycle <= 0:
+                    server_cycle = 1
 
                 title = item.get("name") or item.get("product_name") or f"PushShop-{iid}"
                 area = item.get("area_name", "")
                 node = item.get("node_name", "")
                 detail = item.get("detail", "")
                 price_cny = round(price_cents / 100, 2)
-                renew_cny = round(renew_price_cents / 100, 2) if renew_price_cents > 0 else 0
+                renew_total_cny = round(renew_price_cents / 100, 2) if renew_price_cents > 0 else 0
+                renew_cny = round(renew_total_cny / server_cycle, 2)
 
                 # Traffic normalization
                 flow_total = float(item.get("flow", 0) or 0)

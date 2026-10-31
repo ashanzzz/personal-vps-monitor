@@ -94,6 +94,24 @@ ROUTE_DEFINITIONS = [
         "patterns": [r"ctgnet", r"ctg\b"],
         "weight": 82,
     },
+    {
+        "id": "jppro",
+        "tier": "A",
+        "tier_name": "A级·日本三网优化直连",
+        "isp": "三网优化",
+        "line_name": "日本 Pro 直连优化 (JPPro)",
+        "patterns": [r"jppro", r"jp[\s_\-]*pro"],
+        "weight": 84,
+    },
+    {
+        "id": "laxpro",
+        "tier": "A",
+        "tier_name": "A级·美西三网优化直连",
+        "isp": "三网优化",
+        "line_name": "洛杉矶 Pro 直连优化 (LAXPro)",
+        "patterns": [r"laxpro", r"lax[\s_\-]*pro"],
+        "weight": 82,
+    },
 
     # --- B Tier: Asia-Pacific & Regional Direct BGP ---
     {
