@@ -608,17 +608,31 @@ def evaluate_cost_effectiveness(
         if item_type == "secondhand":
             if price_cny <= target_buy_price:
                 if trade_strategy.get("model_code") in ("ISP", "SB"):
-                    reasons.append(f"🚨 命中山哥绝版传家宝扫货区间(标价¥{price_cny:.1f} ≤ 买入上限¥{target_buy_price:.0f})，极高优先级抄底！")
-                    final_score = max(final_score, 100)
-                    valuation_rationale = f"【绝版传家宝扫货】当前标价¥{price_cny:.1f}落入山哥买入心仪价(≤¥{target_buy_price:.0f})，持有出售底价¥{target_sell_price:.0f}"
+                    # 动态价格折算系数 k_price：
+                    # 标价 0 元时 k=1.00 (满血 100 分)；标价达到买入上限 (250元) 时 k=0.65 (65分及格线)
+                    ratio = min(1.5, price_cny / max(1.0, target_buy_price))
+                    k_price = 1.0 - (0.35 * (ratio ** 0.85))
+                    heirloom_deal_score = int(round(100.0 * max(0.2, k_price)))
+                    final_score = heirloom_deal_score
+
+                    if price_cny <= 50.0:
+                        reasons.append(f"🚨 命中山哥传家宝超低折价扫单区(标价¥{price_cny:.1f} ≤ ¥50)，无脑秒杀 (折算买入分:{heirloom_deal_score})！")
+                    else:
+                        reasons.append(f"🚨 命中山哥传家宝买入底牌区间(标价¥{price_cny:.1f} ≤ 上限¥{target_buy_price:.0f})，价格折算系数k={k_price:.2f} (折算买入分:{heirloom_deal_score})")
+
+                    valuation_rationale = f"【绝版传家宝买入评估】标价¥{price_cny:.1f} (折算系数k={k_price:.2f})，公允出售身价¥{target_sell_price:.0f}"
                 else:
-                    reasons.append(f"🚨 命中山哥旗舰生产力扫货区间(标价¥{price_cny:.1f} ≤ 买入上限¥{target_buy_price:.0f})！")
-                    final_score = max(final_score, 80)
-                    valuation_rationale = f"【旗舰生产力扫货】当前标价¥{price_cny:.1f}落入山哥IIJ买入心仪价(≤¥{target_buy_price:.0f})，持有出售底价¥{target_sell_price:.0f}"
+                    ratio = min(1.5, price_cny / max(1.0, target_buy_price))
+                    k_price = 1.0 - (0.25 * (ratio ** 0.85))
+                    iij_deal_score = int(round(80.0 * max(0.2, k_price)))
+                    final_score = iij_deal_score
+                    reasons.append(f"🚨 命中山哥旗舰生产力扫货区间(标价¥{price_cny:.1f} ≤ 上限¥{target_buy_price:.0f})，价格折算系数k={k_price:.2f} (折算买入分:{iij_deal_score})！")
+                    valuation_rationale = f"【旗舰生产力扫货】标价¥{price_cny:.1f} (折算系数k={k_price:.2f})，公允出售身价¥{target_sell_price:.0f}"
             else:
                 valuation_rationale = f"【山哥关注型号】买入目标¥{target_buy_price:.0f}以内，心理出售底价¥{target_sell_price:.0f} (当前标价¥{price_cny:.1f})"
                 if price_cny > target_sell_price:
                     reasons.append(f"标价¥{price_cny:.1f}高于山哥心仪卖出价(¥{target_sell_price:.0f})，溢价过高")
+                final_score = max(30, int(round(50.0 * (target_sell_price / max(1.0, price_cny)))))
         else:
             valuation_rationale = f"山哥核心主力资产：买入成本¥{trade_strategy.get('cost_basis', 0):.0f}，心理出售底价¥{target_sell_price:.0f}，买入目标≤¥{target_buy_price:.0f}"
     else:
