@@ -6,12 +6,14 @@ import {
 import {
   SwapOutlined, SafetyCertificateOutlined, ReloadOutlined,
   ThunderboltOutlined, WarningOutlined, DollarOutlined,
-  FieldTimeOutlined, RiseOutlined, GlobalOutlined
+  FieldTimeOutlined, RiseOutlined, GlobalOutlined, SettingOutlined
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { api } from '../api'
-import type { SecondhandItem } from '../api'
+import type { SecondhandItem, PageBuyConfig } from '../api'
+import { BuyRulesEditor } from '../components/BuyRulesEditor'
+import { pageBuyDefaults } from '../buyDefaults'
 
 const { Text } = Typography
 
@@ -27,6 +29,50 @@ export const UnifiedSecondhandPage: React.FC = () => {
   const [captcha, setCaptcha] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [buyResult, setBuyResult] = useState<any>(null)
+  const [sniperStatus, setSniperStatus] = useState<any>(null)
+  const [rulesModalOpen, setRulesModalOpen] = useState(false)
+  const [buyConfig, setBuyConfig] = useState<PageBuyConfig | null>(null)
+  const [savingRules, setSavingRules] = useState(false)
+
+  const openRulesModal = async () => {
+    try {
+      const s = await api.getSettings()
+      setBuyConfig(s.secondhand_buy ?? pageBuyDefaults())
+      setRulesModalOpen(true)
+    } catch {
+      message.error('获取抢购配置失败')
+    }
+  }
+
+  const saveRules = async () => {
+    if (!buyConfig) return
+    setSavingRules(true)
+    try {
+      await api.saveSettings({ secondhand_buy: buyConfig })
+      message.success('秒杀规则已保存并实时生效')
+      setRulesModalOpen(false)
+      loadSniper()
+    } catch {
+      message.error('保存秒杀配置失败')
+    } finally {
+      setSavingRules(false)
+    }
+  }
+
+  const loadSniper = async () => {
+    try {
+      const res = await api.getSniperStatus()
+      setSniperStatus(res)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  useEffect(() => {
+    loadSniper()
+    const timer = setInterval(loadSniper, 5000)
+    return () => clearInterval(timer)
+  }, [])
 
   // 专属续费价格区间与评分/性价比筛选状态
   const [platformFilter, setPlatformFilter] = useState<string>('all') // 'all', 'akile', 'acck'
@@ -240,9 +286,11 @@ export const UnifiedSecondhandPage: React.FC = () => {
             </div>
             <div style={{ marginTop: 2 }}>
               {tr.is_depleted ? (
-                <Tag color="error" style={{ fontSize: 10, padding: '0 4px', margin: 0 }}>
-                  已耗尽 🛑 (重置需¥{tr.reset_price_cny})
-                </Tag>
+                <Tooltip title={`资产提示：不影响长期使用权，下月续费自动重置为 ${tr.total_gb}GB 满血；如当期急用可花¥${tr.reset_price_cny}随时重置`}>
+                  <Tag color="orange" style={{ fontSize: 10, padding: '0 4px', margin: 0, cursor: 'help' }}>
+                    当期用尽 ⏳ (下月续费重置)
+                  </Tag>
+                </Tooltip>
               ) : tr.is_low ? (
                 <Tag color="warning" style={{ fontSize: 10, padding: '0 4px', margin: 0 }}>
                   余量偏低 ({tr.remaining_ratio_percent}%)
@@ -293,6 +341,16 @@ export const UnifiedSecondhandPage: React.FC = () => {
                   <div style={{ fontWeight: 700, marginBottom: 4 }}>
                     综合品质评分: {score} 分 {gradeLabel}
                   </div>
+                  {ce?.intent_label ? (
+                    <div style={{ color: score >= 80 ? '#4ade80' : score >= 65 ? '#38bdf8' : '#fbbf24', marginBottom: 4, fontWeight: 700 }}>
+                      🎯 购买决策建议: {ce.intent_label}
+                    </div>
+                  ) : null}
+                  {ce?.renew_intent_tip ? (
+                    <div style={{ color: '#c084fc', marginBottom: 4, fontWeight: 600 }}>
+                      💳 月供心理阶梯: {ce.renew_intent_tip}
+                    </div>
+                  ) : null}
                   <div style={{ color: '#fbbf24', marginBottom: 4, fontWeight: 600 }}>
                     ⚡ 真实每元产出比: {ppy} 分/元 (约 ${ppd} 分/USD)
                   </div>
@@ -320,11 +378,30 @@ export const UnifiedSecondhandPage: React.FC = () => {
                       • 月供产能杠杆: <b>{ml}x</b> (等效市场月租: ¥{mm}/月)
                     </div>
                   ) : null}
-                  {ce?.monthly_points_per_yuan ? (
-                    <div style={{ color: '#94a3b8', marginBottom: 4 }}>
-                      • 长线月供比: {ce.monthly_points_per_yuan} 分/元·月 (${ce.monthly_points_per_usd}/$)
+                  {/* 物理四大维度细分面板 (网络40 / 配置20 / 带宽10 / 流量20) */}
+                  <div style={{ background: 'rgba(255, 255, 255, 0.08)', borderRadius: 6, padding: '6px 8px', margin: '6px 0', border: '1px solid rgba(255, 255, 255, 0.15)' }}>
+                    <div style={{ fontWeight: 700, color: '#38bdf8', marginBottom: 4, fontSize: 11, display: 'flex', justifyContent: 'space-between' }}>
+                      <span>🌐 物理全景: {r.network_tier_name || '6级网络·普通国际无优化BGP'}</span>
+                      <span style={{ color: '#fbbf24' }}>综合底座: {r.hardware_perf_score ?? r.performance_score ?? '—'}/100</span>
                     </div>
-                  ) : null}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px 8px', fontSize: 11 }}>
+                      <div>• 网络线路: <b style={{ color: (r.route_score || 0) >= 30 ? '#4ade80' : (r.route_score || 0) >= 20 ? '#38bdf8' : '#fbbf24' }}>{r.route_score ?? '—'}/40</b></div>
+                      <div>• 性能配置: <b style={{ color: (r.specs_score || 0) >= 15 ? '#4ade80' : '#38bdf8' }}>{r.specs_score ?? '—'}/20</b></div>
+                      <div>• 带宽口径: <b style={{ color: (r.bandwidth_score || 0) >= 8 ? '#4ade80' : (r.bandwidth_score || 0) <= 3 ? '#f87171' : '#fbbf24' }}>{r.bandwidth_score ?? '—'}/10</b>{(r.bandwidth_score || 0) <= 3 ? ' (慢口⚠️)' : ''}</div>
+                      <div>• 流量配额: <b style={{ color: '#4ade80' }}>{r.traffic_score ?? '—'}/20</b></div>
+                    </div>
+                  </div>
+                  {/* 经济套利模型面板 (利润 / 售价 / 回本周期) */}
+                  <div style={{ background: 'rgba(255, 255, 255, 0.05)', borderRadius: 6, padding: '6px 8px', margin: '4px 0', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                    <div style={{ fontWeight: 700, color: '#a78bfa', marginBottom: 4, fontSize: 11 }}>
+                      💰 现金流与套利模型:
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px 8px', fontSize: 11 }}>
+                      <div>• 销售价格: <b style={{ color: (r.sale_price_score || 0) >= 150 ? '#c084fc' : (r.sale_price_score || 0) >= 80 ? '#4ade80' : '#f87171' }}>{r.sale_price_score ?? '—'}/200</b></div>
+                      <div>• 回本套利分: <b style={{ color: (r.arbitrage_score || 0) >= 200 ? '#c084fc' : (r.arbitrage_score || 0) >= 80 ? '#4ade80' : '#fbbf24' }}>{r.arbitrage_score ?? '—'} 分</b></div>
+                      <div style={{ gridColumn: 'span 2' }}>• 综合性价比: <b style={{ color: (r.score || 0) >= 1000 ? '#ec4899' : (r.score || 0) >= 100 ? '#c084fc' : (r.score || 0) >= 80 ? '#4ade80' : '#38bdf8' }}>{r.score ?? '—'} 分</b> (标尺: 80~100超级, 100-N无敌)</div>
+                    </div>
+                  </div>
                   {ce?.fair_market_value_cny ? (
                     <div style={{ color: '#4ade80', marginBottom: 4, fontWeight: 600 }}>
                       💰 公允转让估值: ¥{ce.fair_market_value_cny}
@@ -363,6 +440,11 @@ export const UnifiedSecondhandPage: React.FC = () => {
               <Tag color={color} style={{ fontWeight: 700, fontSize: 11, cursor: 'help', padding: '1px 8px', margin: 0, borderRadius: 4 }}>
                 {score}分 {gradeLabel}
               </Tag>
+              {ce?.intent_label ? (
+                <div style={{ fontSize: 10, fontWeight: 700, marginTop: 2, color: score >= 80 ? '#16a34a' : score >= 65 ? '#2563eb' : '#d97706' }}>
+                  🎯 {ce.intent_label.split(' ')[0]}
+                </div>
+              ) : null}
               <div style={{ fontSize: 11, color: '#2563eb', fontWeight: 600, marginTop: 2 }}>
                 {ppy} 分/元 <span style={{ color: '#64748b', fontWeight: 400 }}>(${ppd}/$)</span>
                 {vr ? (
@@ -441,6 +523,86 @@ export const UnifiedSecondhandPage: React.FC = () => {
           </div>
         }
       >
+        {/* 🎯 定向毫秒级精准秒杀看门狗状态面板 */}
+        {sniperStatus && (
+          <div style={{
+            background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+            border: '1px solid #334155',
+            borderRadius: 8,
+            padding: '12px 16px',
+            marginBottom: 16,
+            color: '#f8fafc',
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  ⚡ 定向极速秒杀看门狗 (每 {sniperStatus.interval_seconds || 5}s 极速轮询)
+                </span>
+                <Tag color={sniperStatus.status === 'running' ? 'success' : 'error'} style={{ margin: 0, fontWeight: 600 }}>
+                  {sniperStatus.status === 'running' ? '● RUNNING 正在监听' : 'STOPPED'}
+                </Tag>
+                <Tag color={sniperStatus.real_purchase_enabled ? 'error' : 'warning'} style={{ margin: 0 }}>
+                  {sniperStatus.real_purchase_enabled ? '🔥 真实自动扣款模式' : '🛡️ 模拟匹配 (Dry-Run)'}
+                </Tag>
+                <span style={{ fontSize: 12, color: '#94a3b8' }}>
+                  今日已抢购: <b style={{ color: '#fbbf24' }}>{sniperStatus.daily_bought ?? 0}</b> 台
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 12, color: '#cbd5e1' }}>
+                <span>物理隔离机制: <Tag color="blue" style={{ margin: 0 }}>Akile/ACCK 独立分流，无任务零刷新</Tag></span>
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<SettingOutlined />}
+                  onClick={openRulesModal}
+                  style={{
+                    background: '#0284c7',
+                    borderColor: '#0284c7',
+                    fontWeight: 600,
+                    boxShadow: '0 2px 4px rgba(2, 132, 199, 0.3)',
+                  }}
+                >
+                  配置秒杀规则
+                </Button>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 12, color: '#94a3b8' }}>当前生效中的定向抢购规则:</span>
+              {sniperStatus.rules && sniperStatus.rules.length > 0 ? (
+                sniperStatus.rules.map((r: any) => (
+                  <Tag
+                    key={r.id}
+                    color="purple"
+                    style={{
+                      background: 'rgba(168, 85, 247, 0.15)',
+                      border: '1px solid rgba(168, 85, 247, 0.4)',
+                      padding: '2px 8px',
+                      color: '#e9d5ff',
+                      fontSize: 12,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <b style={{ color: '#a855f7' }}>[{r.platform ? r.platform.toUpperCase() : 'AKILE'}]</b>
+                    <span>{r.label || r.id}</span>
+                    <span style={{ color: '#4ade80', fontWeight: 700 }}>
+                      ≤ ¥{r.sale_price_max ? (r.sale_price_max / 100).toFixed(0) : 0}
+                    </span>
+                    <span style={{ color: '#94a3b8', fontSize: 11 }}>
+                      (前缀: {r.search_prefix || '自动匹配'})
+                    </span>
+                  </Tag>
+                ))
+              ) : (
+                <span style={{ color: '#64748b', fontSize: 12 }}>暂无启用中的定向秒杀规则</span>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* 山哥专属：续费价格区间、评分与性价比联合筛选条 */}
         <div style={{
           background: '#f8fafc',
@@ -694,10 +856,10 @@ export const UnifiedSecondhandPage: React.FC = () => {
 
           {/* Force Buy Depleted Checkbox */}
           {!safeMode && isDepleted && (
-            <div style={{ padding: '8px 12px', background: '#fef2f2', borderRadius: 6, border: '1px solid #fecaca' }}>
+            <div style={{ padding: '8px 12px', background: '#fffbeb', borderRadius: 6, border: '1px solid #fef3c7' }}>
               <Checkbox checked={forceBuyDepleted} onChange={(e) => setForceBuyDepleted(e.target.checked)}>
-                <span style={{ fontSize: 12, color: '#991b1b', fontWeight: 600 }}>
-                  我已明确知晓该主机 0G 流量已用光，确认强制买入并愿意承担后续 ¥{selectedItem?.traffic?.reset_price_cny} 重置流量费
+                <span style={{ fontSize: 12, color: '#b45309', fontWeight: 600 }}>
+                  已知晓当期流量已用完（长期资产有效：下月续费自动恢复 {selectedItem?.traffic?.total_gb}G 满血，急用亦可花 ¥{selectedItem?.traffic?.reset_price_cny} 重置）
                 </span>
               </Checkbox>
             </div>
@@ -712,6 +874,49 @@ export const UnifiedSecondhandPage: React.FC = () => {
             </div>
           )}
         </div>
+      </Modal>
+
+      {/* 🎯 定向秒杀与自动抢购看门狗规则管理弹窗 */}
+      <Modal
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <ThunderboltOutlined style={{ color: '#0284c7' }} />
+            <span>定向秒杀与自动抢购看门狗规则管理</span>
+          </div>
+        }
+        open={rulesModalOpen}
+        onCancel={() => setRulesModalOpen(false)}
+        width={920}
+        destroyOnClose
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>
+              修改参数后点击保存，后台极速轮询看门狗（5s/次）将在下一周期自动加载生效
+            </span>
+            <Space>
+              <Button onClick={() => setRulesModalOpen(false)}>取消</Button>
+              <Button
+                type="primary"
+                icon={<SafetyCertificateOutlined />}
+                loading={savingRules}
+                onClick={saveRules}
+                style={{ background: '#0284c7', borderColor: '#0284c7' }}
+              >
+                保存并立即生效
+              </Button>
+            </Space>
+          </div>
+        }
+      >
+        {buyConfig ? (
+          <BuyRulesEditor
+            pageLabel="双平台二手集市"
+            value={buyConfig}
+            onChange={setBuyConfig}
+          />
+        ) : (
+          <div style={{ padding: 30, textAlign: 'center', color: '#94a3b8' }}>加载抢购配置中...</div>
+        )}
       </Modal>
     </div>
   )

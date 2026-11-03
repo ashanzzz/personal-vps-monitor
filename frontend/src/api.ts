@@ -119,6 +119,7 @@ export interface BuyRule {
   price_max: number             // fen; cap on chosen-cycle renewal price; 0 = no limit
   sale_price_max: number        // fen; cap on sale price; 0 = no limit
   max_buy: number               // per-rule buy cap; 0 = unlimited
+  search_prefix?: string        // optional search prefix for fast Akile API filtering
 }
 
 export interface PageBuyConfig {
@@ -281,6 +282,10 @@ export const api = {
   getVersion: () =>
     http.get<VersionInfo>('/api/version').then(r => r.data),
 
+  getSniperStatus: () =>
+    http.get<{ status: string; task_exists: boolean; task_done: boolean | null; task_exception: string | null; interval_seconds: number; secondhand_buy_enabled: boolean; real_purchase_enabled: boolean; rules_count: number; rules: any[]; daily_bought: number }>('/api/sniper/status').then(r => r.data),
+
+  // Logs
   getAppLog: (lines = 500) =>
     http.get<{ lines: number; content: string }>('/api/logs/app', { params: { lines } }).then(r => r.data),
 
@@ -493,6 +498,8 @@ export interface CostEffectiveness {
   score: number
   grade: string
   grade_label: string
+  intent_label?: string
+  renew_intent_tip?: string
   badge_color: string
   points_per_yuan?: number
   points_per_usd?: number
@@ -534,6 +541,17 @@ export interface StorePackage {
   score?: number
   grade_label?: string
   badge_color?: string
+  network_tier_level?: number
+  network_tier_name?: string
+  route_score?: number
+  bandwidth_score?: number
+  traffic_score?: number
+  specs_score?: number
+  hardware_perf_score?: number
+  performance_score?: number
+  renew_price_score?: number
+  sale_price_score?: number
+  arbitrage_score?: number
   points_per_yuan?: number
   points_per_usd?: number
   fair_market_value_cny?: number
@@ -568,6 +586,17 @@ export interface SecondhandItem {
   score?: number
   grade_label?: string
   badge_color?: string
+  network_tier_level?: number
+  network_tier_name?: string
+  route_score?: number
+  bandwidth_score?: number
+  traffic_score?: number
+  specs_score?: number
+  hardware_perf_score?: number
+  performance_score?: number
+  renew_price_score?: number
+  sale_price_score?: number
+  arbitrage_score?: number
   points_per_yuan?: number
   points_per_usd?: number
   fair_market_value_cny?: number

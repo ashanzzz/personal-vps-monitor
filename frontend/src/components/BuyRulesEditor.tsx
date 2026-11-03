@@ -207,14 +207,21 @@ function RuleFields({ rule, onPatch }: {
         </span>
       </Space>
 
-      <span>
-        <span style={lbl}>标签包含(匹配名称/节点,任一命中即可;留空=不限)</span>
-        <Select mode="tags" value={rule.tags_include} style={{ width: '100%', maxWidth: 420 }}
-          placeholder="如 jppro、jpiij,回车添加"
-          tokenSeparators={[',', ' ']}
-          open={false}
-          onChange={v => onPatch({ tags_include: v })} />
-      </span>
+      <Space wrap size="middle" style={{ width: '100%' }}>
+        <span style={{ flex: 1, minWidth: 260 }}>
+          <span style={lbl}>标签包含(匹配名称/节点,任一命中即可;留空=不限)</span>
+          <Select mode="tags" value={rule.tags_include} style={{ width: '100%' }}
+            placeholder="如 元旦快乐、HKLite-One,回车添加"
+            tokenSeparators={[',', ' ']}
+            open={false}
+            onChange={v => onPatch({ tags_include: v })} />
+        </span>
+        <span style={{ width: 180 }}>
+          <span style={lbl}>API 快速检索前缀 (可选)</span>
+          <Input value={rule.search_prefix || ''} placeholder="如 HKLite-One"
+            onChange={e => onPatch({ search_prefix: e.target.value })} />
+        </span>
+      </Space>
 
       <Space wrap size="middle">
         {SPEC_META.map(s => (
