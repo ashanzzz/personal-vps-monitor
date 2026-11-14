@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, Float
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, Float, Index
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -159,6 +159,46 @@ class MarketTrade(Base):
     remark: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     sold_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class MarketAssetDailyKline(Base):
+    """Daily aggregated market stats (median price P50, P25, P75, min, max, volume, depth) for canonical asset SKUs.
+    Designed for 1-3 years efficient retention (approx 50 canonical assets * 365 days = ~18,000 rows, <3MB).
+    """
+    __tablename__ = "market_asset_daily_kline"
+    __table_args__ = (
+        Index("ix_asset_kline_date", "date"),
+        Index("ix_asset_kline_asset_date", "asset_id", "date", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    asset_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    date: Mapped[str] = mapped_column(String(16), nullable=False)  # "YYYY-MM-DD"
+    platform: Mapped[str] = mapped_column(String(32), nullable=False, default="all")
+    asset_name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    route_family: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    specs_code: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    monthly_renew_cny: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+    # 核心价格分布 (元) - 以中位数 P50 为核心公允基准
+    price_median: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    price_p25: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    price_p75: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    price_min: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    price_max: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+    # 盘口存量深度与推断成交
+    active_listings: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    inferred_sales: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    inferred_turnover_cny: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    turnover_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+    # 模型公允身价与溢价/折价偏离度
+    fair_model_value: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    premium_spread_pct: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    market_state: Mapped[str] = mapped_column(String(32), nullable=False, default="NORMAL")  # "UNDERVALUED", "NORMAL", "OVERVALUED", "DOWNTURN"
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 async def init_db():

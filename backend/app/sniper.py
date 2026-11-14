@@ -5,10 +5,12 @@ Runs every 5 seconds without triggering rate limits by utilizing Akile's targete
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any
 
 from . import akile_client as api
+from . import acck_client
 from .buy_engine import buy_state
 from .config import get_all_settings
 from .database import AlertEvent, SessionLocal
@@ -29,6 +31,8 @@ def resolve_search_prefix(rule: dict) -> str:
         t_low = str(t).lower()
         if "元旦" in t_low or "hklite" in t_low:
             return "HKLite-One"
+        if "圣诞" in t_low or "hksm" in t_low:
+            return "HKSM-One"
         if "jpiij" in t_low or "iij" in t_low:
             return "JPIIJ"
         if "jppro" in t_low:
@@ -99,36 +103,15 @@ def item_matches_sniper_rule(rule: dict, item: dict) -> bool:
     return True
 
 
-async def run_sniper_cycle() -> None:
-    """One single pass of targeted fast sniping."""
-    async with SessionLocal() as db:
-        settings = await get_all_settings(db)
-
-    cfg = settings.get("secondhand_buy") or {}
-    if not cfg.get("enabled"):
-        return
-
-    token = settings.get("akile_token") or ""
-    if not token:
-        return
-
-    rules = cfg.get("rules") or []
-    enabled_rules = [r for r in rules if r.get("enabled", True)]
-    if not enabled_rules:
-        return
-
-    max_daily = cfg.get("max_total_daily", 2)
-    if max_daily and buy_state.daily("secondhand") >= max_daily:
-        return
-
+async def _run_akile_sniper_pass(rules: list[dict], token: str, settings: dict, max_daily: int) -> None:
     polled_prefixes: set[str] = set()
-    for rule in enabled_rules:
+    for rule in rules:
         prefix = resolve_search_prefix(rule)
         if not prefix or prefix in polled_prefixes:
             continue
         polled_prefixes.add(prefix)
 
-        rid = rule.get("id") or rule.get("label") or "sniper_rule"
+        rid = rule.get("id") or rule.get("label") or "akile_sniper_rule"
         max_buy = rule.get("max_buy", 1)
         if max_buy and buy_state.rule_count("secondhand", rid) >= max_buy:
             continue
@@ -136,12 +119,14 @@ async def run_sniper_cycle() -> None:
         try:
             res = await api.get_secondhand_list(token, page=1, page_size=30, name=prefix)
         except Exception as e:
-            logger.debug("Sniper poll failed for prefix %s: %s", prefix, e)
+            logger.debug("Akile sniper poll failed for prefix %s: %s", prefix, e)
             continue
 
         items = res.get("list") or []
         for item in items:
-            if not item_matches_sniper_rule(rule, item):
+            item_copy = dict(item)
+            item_copy["platform"] = "akile"
+            if not item_matches_sniper_rule(rule, item_copy):
                 continue
 
             pid = str(item.get("id", ""))
@@ -156,29 +141,29 @@ async def run_sniper_cycle() -> None:
             if not settings.get("real_purchase_enabled", False):
                 log_event(
                     "sniper.dry_run_match",
-                    rule=rid, plan_id=pid, name=name, price=price_cny,
-                    msg="【精准秒杀命中·模拟模式】已锁定目标，真实购买未开启",
+                    rule=rid, plan_id=pid, name=name, price=price_cny, platform="akile",
+                    msg="【Akile秒杀命中·模拟模式】已锁定目标，真实购买未开启",
                 )
-                logger.info("[SNIPER DRY-RUN] Matched target %s (ID:%s) for ¥%.2f", name, pid, price_cny)
+                logger.info("[AKILE SNIPER DRY-RUN] Matched target %s (ID:%s) for ¥%.2f", name, pid, price_cny)
                 continue
 
             log_event(
                 "sniper.execute",
-                rule=rid, plan_id=pid, name=name, price=price_cny,
-                msg="【精准秒杀触发·立即扣款购买】",
+                rule=rid, plan_id=pid, name=name, price=price_cny, platform="akile",
+                msg="【Akile秒杀触发·立即扣款购买】",
             )
-            logger.warning("[SNIPER EXECUTE] Sniping %s (ID:%s) for ¥%.2f...", name, pid, price_cny)
+            logger.warning("[AKILE SNIPER EXECUTE] Sniping %s (ID:%s) for ¥%.2f...", name, pid, price_cny)
 
             try:
                 buy_res = await api.buy_secondhand(token, pid, auto_pay=True)
                 code = buy_res.get("status_code", 0) if isinstance(buy_res, dict) else -1
                 ok = code == 0
             except Exception as e:
-                logger.error("[SNIPER ERROR] Purchase failed: %s", e)
+                logger.error("[AKILE SNIPER ERROR] Purchase failed: %s", e)
                 continue
 
             buy_state.record("secondhand", rid)
-            log_event("sniper.result", rule=rid, plan_id=pid, ok=ok, code=code)
+            log_event("sniper.result", rule=rid, plan_id=pid, ok=ok, code=code, platform="akile")
 
             event = {
                 "category": "secondhand",
@@ -187,7 +172,7 @@ async def run_sniper_cycle() -> None:
                 "area": item.get("area_name", "中国香港"),
                 "event_type": "purchased",
                 "old_value": None,
-                "new_value": f"秒杀成功(¥{price_cny})" if ok else f"秒杀失败:{code}",
+                "new_value": f"[Akile] 秒杀成功(¥{price_cny})" if ok else f"[Akile] 秒杀失败:{code}",
                 "notified": False,
             }
             async with SessionLocal() as s:
@@ -201,10 +186,146 @@ async def run_sniper_cycle() -> None:
             from .ws import broadcast
             await broadcast({
                 "type": "purchased",
+                "platform": "akile",
                 "plan_id": pid,
                 "result": {"ok": ok, "sniper": True, "rule": rid},
             })
             break
+
+
+async def _run_acck_sniper_pass(rules: list[dict], token: str, settings: dict, max_daily: int) -> None:
+    try:
+        res = await acck_client.get_exchange_listings()
+        items = res if isinstance(res, list) else res.get("items", [])
+    except Exception as e:
+        logger.debug("ACCK sniper poll failed: %s", e)
+        return
+
+    for rule in rules:
+        rid = rule.get("id") or rule.get("label") or "acck_sniper_rule"
+        max_buy = rule.get("max_buy", 1)
+        if max_buy and buy_state.rule_count("secondhand", rid) >= max_buy:
+            continue
+
+        for it in items:
+            snapshot = {}
+            if it.get("snapshot_json"):
+                try:
+                    snapshot = json.loads(it["snapshot_json"]) if isinstance(it["snapshot_json"], str) else it["snapshot_json"]
+                except Exception:
+                    pass
+
+            item_norm = {
+                "platform": "acck",
+                "id": str(it.get("id", "")),
+                "name": snapshot.get("plan_name") or it.get("intro_text") or f"Exchange-{it.get('id')}",
+                "price": int(float(str(it.get("ask_price_cents", 0)))),
+                "status": 0 if not it.get("sold") and not it.get("closed") else 1,
+                "cpu": snapshot.get("cpu"),
+                "memory": snapshot.get("memory_mb"),
+                "disk": snapshot.get("disk_gb") or snapshot.get("disk"),
+                "bandwidth": snapshot.get("bandwidth_mbps"),
+                "flow": snapshot.get("flow_gb"),
+            }
+
+            if not item_matches_sniper_rule(rule, item_norm):
+                continue
+
+            pid = str(it.get("id", ""))
+            price_cny = round(item_norm["price"] / 100.0, 2)
+            name = item_norm["name"]
+
+            if max_buy and buy_state.rule_count("secondhand", rid) >= max_buy:
+                break
+            if max_daily and buy_state.daily("secondhand") >= max_daily:
+                break
+
+            if not settings.get("real_purchase_enabled", False):
+                log_event(
+                    "sniper.dry_run_match",
+                    rule=rid, plan_id=pid, name=name, price=price_cny, platform="acck",
+                    msg="【ACCK秒杀命中·模拟模式】已锁定目标，真实购买未开启",
+                )
+                logger.info("[ACCK SNIPER DRY-RUN] Matched target %s (ID:%s) for ¥%.2f", name, pid, price_cny)
+                continue
+
+            log_event(
+                "sniper.execute",
+                rule=rid, plan_id=pid, name=name, price=price_cny, platform="acck",
+                msg="【ACCK秒杀触发·立即扣款购买】",
+            )
+            logger.warning("[ACCK SNIPER EXECUTE] Sniping %s (ID:%s) for ¥%.2f...", name, pid, price_cny)
+
+            try:
+                buy_res = await acck_client.buy_exchange_listing(token, int(pid))
+                ok = isinstance(buy_res, dict) and buy_res.get("code", 0) in (0, 200)
+                code = buy_res.get("code", 0) if isinstance(buy_res, dict) else -1
+            except Exception as e:
+                logger.error("[ACCK SNIPER ERROR] Purchase failed: %s", e)
+                continue
+
+            buy_state.record("secondhand", rid)
+            log_event("sniper.result", rule=rid, plan_id=pid, ok=ok, code=code, platform="acck")
+
+            event = {
+                "category": "secondhand",
+                "plan_id": pid,
+                "name": name,
+                "area": snapshot.get("area_name", "美国"),
+                "event_type": "purchased",
+                "old_value": None,
+                "new_value": f"[ACCK] 秒杀成功(¥{price_cny})" if ok else f"[ACCK] 秒杀失败:{code}",
+                "notified": False,
+            }
+            async with SessionLocal() as s:
+                s.add(AlertEvent(**event))
+                await s.commit()
+
+            if ok and settings.get("tg_notify_purchased") and settings.get("tg_bot_token"):
+                from .notify import send_telegram
+                await send_telegram(settings["tg_bot_token"], settings.get("tg_chat_id", ""), event)
+
+            from .ws import broadcast
+            await broadcast({
+                "type": "purchased",
+                "platform": "acck",
+                "plan_id": pid,
+                "result": {"ok": ok, "sniper": True, "rule": rid},
+            })
+            break
+
+
+async def run_sniper_cycle() -> None:
+    """One single pass of targeted fast sniping with strict platform isolation."""
+    async with SessionLocal() as db:
+        settings = await get_all_settings(db)
+
+    cfg = settings.get("secondhand_buy") or {}
+    if not cfg.get("enabled"):
+        return
+
+    rules = cfg.get("rules") or []
+    enabled_rules = [r for r in rules if r.get("enabled", True)]
+    if not enabled_rules:
+        return
+
+    max_daily = cfg.get("max_total_daily", 2)
+    if max_daily and buy_state.daily("secondhand") >= max_daily:
+        return
+
+    # 抢购隔离机制：严格按平台分流目录，杜绝因抢购 Akile 而无限刷新 ACCK
+    akile_rules = [r for r in enabled_rules if r.get("platform", "akile").lower() in ("akile", "")]
+    acck_rules = [r for r in enabled_rules if r.get("platform", "").lower() == "acck"]
+
+    # 1. Akile 抢购刷新 (仅在有启用的 Akile 规则时触发)
+    akile_token = settings.get("akile_token") or ""
+    if akile_rules and akile_token:
+        await _run_akile_sniper_pass(akile_rules, akile_token, settings, max_daily)
+
+    # 2. ACCK 抢购刷新 (仅在有启用的 ACCK 规则时触发，无规则零请求零刷新)
+    acck_token = settings.get("acck_token") or ""
+    if acck_rules and acck_token:
+        await _run_acck_sniper_pass(acck_rules, acck_token, settings, max_daily)
 
 
 async def sniper_worker_loop(interval_seconds: int = 5) -> None:

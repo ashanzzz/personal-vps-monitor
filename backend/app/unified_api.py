@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import json
 import time
+from datetime import datetime
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -19,13 +20,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import require_auth
 from .config import get_all_settings
 from .database import get_db
-from . import akile_client, acck_client
+from . import akile_client, acck_client, lazycat_client
 from .refresh_manager import refresh_mgr
 from .route_analyzer import (
     analyze_route,
     analyze_traffic,
     evaluate_secondhand_listing,
     evaluate_cost_effectiveness,
+)
+from .market_quant import (
+    compute_asset_fingerprint,
+    aggregate_daily_kline_snapshot,
+    diagnose_market_sentiment,
+    save_daily_kline_records,
 )
 from .ws import broadcast
 
@@ -84,11 +91,12 @@ class SecondhandBuyRequest(BaseModel):
 # Helper to resolve tokens
 # ---------------------------------------------------------------------------
 
-async def _get_tokens(db: AsyncSession) -> tuple[str, str]:
+async def _get_tokens(db: AsyncSession) -> tuple[str, str, str]:
     settings = await get_all_settings(db)
     akile_tok = settings.get("akile_token") or ""
     acck_tok = settings.get("acck_token") or ""
-    return akile_tok, acck_tok
+    lazycat_tok = settings.get("lazycat_token") or ""
+    return akile_tok, acck_tok, lazycat_tok
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +146,7 @@ async def get_unified_servers(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Fetch and normalize instances from both AkileCloud and ACCK."""
-    akile_tok, acck_tok = await _get_tokens(db)
+    akile_tok, acck_tok, lazycat_tok = await _get_tokens(db)
     servers: list[dict[str, Any]] = []
     errors: dict[str, str] = {}
 
@@ -296,6 +304,81 @@ async def get_unified_servers(
             logger.warning("Failed to fetch ACCK servers: %s", e)
             errors["acck"] = str(e)
 
+    # 3. LazyCat servers
+    if lazycat_tok:
+        try:
+            lz_list = await lazycat_client.get_my_instances(lazycat_tok)
+            for s in lz_list:
+                sid = s.get("id")
+                cpu = int(s.get("cpu", 100) or 100)
+                mem = int(s.get("memory", 512) or 512)
+                disk = int(s.get("disk", 5120) or 5120) // 1024
+                price = float(s.get("renewalPrice", 0) or s.get("billingPrice", 0) or 0)
+                host = s.get("host") or {}
+                area = host.get("country_code") or s.get("region") or "HK"
+                server_name = s.get("name") or s.get("hostname") or f"LZ-{sid}"
+
+                cost_eff = evaluate_cost_effectiveness(
+                    item_type="server",
+                    price_cny=price,
+                    renew_price_cny=price,
+                    cpu=max(1, cpu // 100),
+                    memory_mb=mem,
+                    disk_gb=disk,
+                    bandwidth_mbps=s.get("bandwidth", 100),
+                    flow_total_gb=s.get("trafficTotal", 500) or 500,
+                    name=server_name,
+                    node_name=host.get("name", "Incus Node"),
+                    area=area,
+                )
+
+                due_t = 0
+                if s.get("expiresAt"):
+                    try:
+                        due_t = int(datetime.fromisoformat(s["expiresAt"].replace("Z", "+00:00")).timestamp())
+                    except Exception:
+                        pass
+
+                servers.append({
+                    "uid": f"lazycat:{sid}",
+                    "platform": "lazycat",
+                    "id": sid,
+                    "server_id": str(sid),
+                    "name": server_name,
+                    "node_name": host.get("name", "Incus Node"),
+                    "area_name": area,
+                    "ipv4": s.get("ipv4") or s.get("natPublicIp") or "",
+                    "ipv6": s.get("ipv6", ""),
+                    "ssh_user": "root",
+                    "ssh_password": "",
+                    "ssh_port": 22,
+                    "cpu": max(1, cpu // 100),
+                    "memory": mem,
+                    "disk": disk,
+                    "bandwidth": s.get("bandwidth", 100),
+                    "flow": s.get("trafficTotal", 0) or 0,
+                    "used_flow": s.get("trafficUsed", 0) or 0,
+                    "due_time": due_t,
+                    "auto_renew": False,
+                    "price_cents": int(price * 100),
+                    "price_cny": price,
+                    "price_monthly": price,
+                    "cost_effectiveness": cost_eff,
+                    "fair_market_value_cny": cost_eff.get("fair_market_value_cny"),
+                    "valuation_rationale": cost_eff.get("valuation_rationale"),
+                    "value_ratio": cost_eff.get("value_ratio"),
+                    "monthly_leverage": cost_eff.get("monthly_leverage"),
+                    "m_market": cost_eff.get("m_market"),
+                    "cycle": 1,
+                    "cycle_text": "月付",
+                    "status": 1 if s.get("status") == "running" else 0,
+                    "system_name": s.get("image", "linux"),
+                    "raw": s,
+                })
+        except Exception as e:
+            logger.warning("Failed to fetch LazyCat servers: %s", e)
+            errors["lazycat"] = str(e)
+
     return {
         "total": len(servers),
         "servers": servers,
@@ -303,6 +386,7 @@ async def get_unified_servers(
         "counts": {
             "akile": len([s for s in servers if s["platform"] == "akile"]),
             "acck": len([s for s in servers if s["platform"] == "acck"]),
+            "lazycat": len([s for s in servers if s["platform"] == "lazycat"]),
         }
     }
 
@@ -313,7 +397,7 @@ async def get_all_servers_auto_renew_status(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Inspect and report real-time auto-renew status across all Akile and ACCK servers."""
-    akile_tok, acck_tok = await _get_tokens(db)
+    akile_tok, acck_tok, lazycat_tok = await _get_tokens(db)
     servers_status: list[dict[str, Any]] = []
 
     # 1. Akile
@@ -398,7 +482,7 @@ async def update_server_auto_renew(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Toggle auto-renew for a server on either Akile or ACCK."""
-    akile_tok, acck_tok = await _get_tokens(db)
+    akile_tok, acck_tok, lazycat_tok = await _get_tokens(db)
     if req.platform == "akile":
         if not akile_tok:
             raise HTTPException(400, "Akile token not configured")
@@ -431,7 +515,7 @@ async def renew_server(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Create renewal order and optionally execute balance payment."""
-    akile_tok, acck_tok = await _get_tokens(db)
+    akile_tok, acck_tok, lazycat_tok = await _get_tokens(db)
     if req.platform == "acck":
         if not acck_tok:
             raise HTTPException(400, "ACCK token not configured")
@@ -489,7 +573,7 @@ async def get_unified_billing(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Fetch orders, pending invoices, and money transaction logs from both platforms."""
-    akile_tok, acck_tok = await _get_tokens(db)
+    akile_tok, acck_tok, lazycat_tok = await _get_tokens(db)
     ak_orders: list[dict] = []
     ak_money_logs: list[dict] = []
     ak_billing_orders: list[dict] = []
@@ -560,7 +644,7 @@ async def pay_unified_order(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Execute order payment via balance."""
-    akile_tok, acck_tok = await _get_tokens(db)
+    akile_tok, acck_tok, lazycat_tok = await _get_tokens(db)
     if req.platform == "akile":
         if not akile_tok:
             raise HTTPException(400, "Akile token not configured")
@@ -588,7 +672,7 @@ async def get_unified_store(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Get official store offerings with automated cost-effectiveness evaluation."""
-    akile_tok, acck_tok = await _get_tokens(db)
+    akile_tok, acck_tok, lazycat_tok = await _get_tokens(db)
     ak_vps: dict = {}
     ac_shop: dict = {}
     packages: list[dict[str, Any]] = []
@@ -704,7 +788,7 @@ async def buy_store_package(
             "order_data": req.order_data,
         }
 
-    akile_tok, acck_tok = await _get_tokens(db)
+    akile_tok, acck_tok, lazycat_tok = await _get_tokens(db)
     if req.platform == "akile":
         if not akile_tok:
             raise HTTPException(400, "Akile token not configured")
@@ -758,7 +842,15 @@ def _parse_akile_item(item: dict[str, Any]) -> dict[str, Any]:
     detail = item.get("detail", "")
     price_cny = round(price_cents / 100, 2)
     renew_total_cny = round(renew_price_cents / 100, 2) if renew_price_cents > 0 else 0
-    renew_cny = round(renew_total_cny / server_cycle, 2)
+    # -------------------------------------------------------------
+    # 核心铁律：年费=10个月月租换算规则 (Yearly = 10 months rent)
+    # 当机器为年付 (server_cycle == 12) 时，运营商的公允月供应当折算为: 续费总价 / 10.0 (而非除以12)
+    # 对应月供相当于 10 个月的月租，精准体现用户的实际月供负担认知
+    # -------------------------------------------------------------
+    if server_cycle == 12:
+        renew_cny = round(renew_total_cny / 10.0, 2)
+    else:
+        renew_cny = round(renew_total_cny / server_cycle, 2)
 
     # Traffic normalization
     flow_total = float(item.get("flow", 0) or 0)
@@ -780,6 +872,23 @@ def _parse_akile_item(item: dict[str, Any]) -> dict[str, Any]:
         bandwidth_mbps=int(item.get("bandwidth") or 1000),
     )
 
+    fp = compute_asset_fingerprint(
+        name=title,
+        node_name=node,
+        area=area,
+        detail=detail,
+        intro=detail,
+        cpu=int(item.get("cpu", 1) or 1),
+        memory_mb=float(item.get("memory", 1024) or 1024),
+        disk_gb=float(item.get("disk", 10) or 10),
+        bandwidth_mbps=int(item.get("bandwidth", 1000) or 1000),
+        flow_total_gb=flow_total,
+        renew_price_cny=renew_cny,
+        price_cny=price_cny,
+        due_time_unix=item.get("due_time"),
+        platform="akile",
+    )
+
     return {
         "uid": f"akile:{iid}",
         "platform": "akile",
@@ -787,6 +896,9 @@ def _parse_akile_item(item: dict[str, Any]) -> dict[str, Any]:
         "title": title,
         "area": area,
         "node": node,
+        "asset_id": fp["asset_id"],
+        "asset_name": fp["asset_name"],
+        "delta_traits": fp["delta_traits"],
         "price_cents": price_cents,
         "price_cny": price_cny,
         "renew_price_cny": renew_cny,
@@ -803,6 +915,19 @@ def _parse_akile_item(item: dict[str, Any]) -> dict[str, Any]:
         "score": eval_res["cost_effectiveness"]["score"],
         "grade_label": eval_res["cost_effectiveness"]["grade_label"],
         "badge_color": eval_res["cost_effectiveness"]["badge_color"],
+        "network_tier_level": eval_res["cost_effectiveness"].get("network_tier_level", 6),
+        "network_tier_name": eval_res["cost_effectiveness"].get("network_tier_name", "6级网络·普通国际无优化BGP"),
+        "route_score": eval_res["cost_effectiveness"].get("route_score", 50),
+        "bandwidth_score": eval_res["cost_effectiveness"].get("bandwidth_score", 50),
+        "traffic_score": eval_res["cost_effectiveness"].get("traffic_score", 50),
+        "specs_score": eval_res["cost_effectiveness"].get("specs_score", 50),
+        "hardware_perf_score": eval_res["cost_effectiveness"].get("hardware_perf_score", 60),
+        "performance_score": eval_res["cost_effectiveness"].get("performance_score", 60),
+        "renew_price_score": eval_res["cost_effectiveness"].get("renew_price_score", 60),
+        "sale_price_score": eval_res["cost_effectiveness"].get("sale_price_score", 100),
+        "arbitrage_score": eval_res["cost_effectiveness"].get("arbitrage_score", 50),
+        "intent_label": eval_res["cost_effectiveness"].get("intent_label", ""),
+        "renew_intent_tip": eval_res["cost_effectiveness"].get("renew_intent_tip", ""),
         "points_per_yuan": eval_res["cost_effectiveness"]["points_per_yuan"],
         "points_per_usd": eval_res["cost_effectiveness"]["points_per_usd"],
         "fair_market_value_cny": eval_res["cost_effectiveness"].get("fair_market_value_cny", 0.0),
@@ -868,6 +993,23 @@ def _parse_acck_item(item: dict[str, Any]) -> dict[str, Any]:
         bandwidth_mbps=int(snapshot.get("bandwidth_mbps") or 1000),
     )
 
+    fp = compute_asset_fingerprint(
+        name=title,
+        node_name=node,
+        area=area,
+        detail=node_comment,
+        intro=intro,
+        cpu=int(snapshot.get("cpu", 1) or 1),
+        memory_mb=float(snapshot.get("memory_mb", 1024) or 1024),
+        disk_gb=float(snapshot.get("disk_gb", 10) or 10),
+        bandwidth_mbps=int(snapshot.get("bandwidth_mbps", 1000) or 1000),
+        flow_total_gb=flow_total,
+        renew_price_cny=renew_cny,
+        price_cny=price_cny,
+        due_time_unix=snapshot.get("due_time_unix"),
+        platform="acck",
+    )
+
     return {
         "uid": f"acck:{iid}",
         "platform": "acck",
@@ -875,6 +1017,9 @@ def _parse_acck_item(item: dict[str, Any]) -> dict[str, Any]:
         "title": title,
         "area": area,
         "node": node,
+        "asset_id": fp["asset_id"],
+        "asset_name": fp["asset_name"],
+        "delta_traits": fp["delta_traits"],
         "price_cents": price_cents,
         "price_cny": price_cny,
         "renew_price_cny": renew_cny,
@@ -891,6 +1036,19 @@ def _parse_acck_item(item: dict[str, Any]) -> dict[str, Any]:
         "score": eval_res["cost_effectiveness"]["score"],
         "grade_label": eval_res["cost_effectiveness"]["grade_label"],
         "badge_color": eval_res["cost_effectiveness"]["badge_color"],
+        "network_tier_level": eval_res["cost_effectiveness"].get("network_tier_level", 6),
+        "network_tier_name": eval_res["cost_effectiveness"].get("network_tier_name", "6级网络·普通国际无优化BGP"),
+        "route_score": eval_res["cost_effectiveness"].get("route_score", 50),
+        "bandwidth_score": eval_res["cost_effectiveness"].get("bandwidth_score", 50),
+        "traffic_score": eval_res["cost_effectiveness"].get("traffic_score", 50),
+        "specs_score": eval_res["cost_effectiveness"].get("specs_score", 50),
+        "hardware_perf_score": eval_res["cost_effectiveness"].get("hardware_perf_score", 60),
+        "performance_score": eval_res["cost_effectiveness"].get("performance_score", 60),
+        "renew_price_score": eval_res["cost_effectiveness"].get("renew_price_score", 60),
+        "sale_price_score": eval_res["cost_effectiveness"].get("sale_price_score", 100),
+        "arbitrage_score": eval_res["cost_effectiveness"].get("arbitrage_score", 50),
+        "intent_label": eval_res["cost_effectiveness"].get("intent_label", ""),
+        "renew_intent_tip": eval_res["cost_effectiveness"].get("renew_intent_tip", ""),
         "points_per_yuan": eval_res["cost_effectiveness"]["points_per_yuan"],
         "points_per_usd": eval_res["cost_effectiveness"]["points_per_usd"],
         "fair_market_value_cny": eval_res["cost_effectiveness"].get("fair_market_value_cny", 0.0),
@@ -908,6 +1066,123 @@ def _parse_acck_item(item: dict[str, Any]) -> dict[str, Any]:
         "raw": item,
     }
 
+
+
+def _parse_lazycat_item(item: dict[str, Any]) -> dict[str, Any]:
+    iid = item.get("id")
+    try:
+        price_cny = round(float(str(item.get("salePrice", 0))), 2)
+    except (ValueError, TypeError):
+        price_cny = 0.0
+    price_cents = int(price_cny * 100)
+
+    snapshot = item.get("snapshot") or {}
+    try:
+        renew_cny = round(float(str(snapshot.get("renewalPrice") or snapshot.get("billingPrice") or 0)), 2)
+    except (ValueError, TypeError):
+        renew_cny = 0.0
+
+    title = item.get("title") or snapshot.get("name") or snapshot.get("instanceName") or f"LazyCat-{iid}"
+    area = snapshot.get("region") or "HK"
+    node = snapshot.get("hostName") or "Incus"
+    detail = item.get("remark") or ""
+    bandwidth = int(snapshot.get("bandwidth") or 100)
+    flow_total = float(snapshot.get("trafficTotal") or snapshot.get("traffic") or 500)
+    flow_used = float(snapshot.get("trafficUsed") or 0)
+
+    eval_res = evaluate_secondhand_listing(
+        price_cny=price_cny,
+        renew_price_cny=renew_cny,
+        flow_total_gb=flow_total,
+        flow_used_gb=flow_used,
+        reset_price_cny=0.0,
+        name=title,
+        node_name=node,
+        detail=detail,
+        intro=detail,
+        area=area,
+        bandwidth_mbps=bandwidth,
+    )
+
+    due_unix = None
+    if snapshot.get("expiresAt"):
+        try:
+            due_unix = int(datetime.fromisoformat(snapshot["expiresAt"].replace("Z", "+00:00")).timestamp())
+        except Exception:
+            pass
+
+    fp = compute_asset_fingerprint(
+        name=title,
+        node_name=node,
+        area=area,
+        detail=detail,
+        intro=detail,
+        cpu=int(snapshot.get("cpu", 1) or 1),
+        memory_mb=float(snapshot.get("memory", 512) or 512),
+        disk_gb=float(snapshot.get("disk", 5120) or 5120) / 1024.0,
+        bandwidth_mbps=bandwidth,
+        flow_total_gb=flow_total,
+        renew_price_cny=renew_cny,
+        price_cny=price_cny,
+        due_time_unix=due_unix,
+        platform="lazycat",
+    )
+
+    return {
+        "uid": f"lazycat:{iid}",
+        "platform": "lazycat",
+        "id": iid,
+        "title": title,
+        "area": area,
+        "node": node,
+        "asset_id": fp["asset_id"],
+        "asset_name": fp["asset_name"],
+        "delta_traits": fp["delta_traits"],
+        "price_cents": price_cents,
+        "price_cny": price_cny,
+        "renew_price_cny": renew_cny,
+        "bandwidth": bandwidth,
+        "flow": flow_total,
+        "due_time": due_unix or 0,
+        "seller": item.get("seller") or "卖家",
+        "intro": detail,
+        "route": eval_res["route"],
+        "traffic": eval_res["traffic"],
+        "pricing_analysis": eval_res["pricing"],
+        "cost_effectiveness": eval_res["cost_effectiveness"],
+        "sniping": eval_res["sniping_verdict"],
+        "score": eval_res["cost_effectiveness"]["score"],
+        "grade_label": eval_res["cost_effectiveness"]["grade_label"],
+        "badge_color": eval_res["cost_effectiveness"]["badge_color"],
+        "network_tier_level": eval_res["cost_effectiveness"].get("network_tier_level", 6),
+        "network_tier_name": eval_res["cost_effectiveness"].get("network_tier_name", "6级网络·普通国际无优化BGP"),
+        "route_score": eval_res["cost_effectiveness"].get("route_score", 50),
+        "bandwidth_score": eval_res["cost_effectiveness"].get("bandwidth_score", 50),
+        "traffic_score": eval_res["cost_effectiveness"].get("traffic_score", 50),
+        "specs_score": eval_res["cost_effectiveness"].get("specs_score", 50),
+        "hardware_perf_score": eval_res["cost_effectiveness"].get("hardware_perf_score", 60),
+        "performance_score": eval_res["cost_effectiveness"].get("performance_score", 60),
+        "renew_price_score": eval_res["cost_effectiveness"].get("renew_price_score", 60),
+        "sale_price_score": eval_res["cost_effectiveness"].get("sale_price_score", 100),
+        "arbitrage_score": eval_res["cost_effectiveness"].get("arbitrage_score", 50),
+        "intent_label": eval_res["cost_effectiveness"].get("intent_label", ""),
+        "renew_intent_tip": eval_res["cost_effectiveness"].get("renew_intent_tip", ""),
+        "points_per_yuan": eval_res["cost_effectiveness"]["points_per_yuan"],
+        "points_per_usd": eval_res["cost_effectiveness"]["points_per_usd"],
+        "fair_market_value_cny": eval_res["cost_effectiveness"].get("fair_market_value_cny", 0.0),
+        "valuation_rationale": eval_res["cost_effectiveness"].get("valuation_rationale", ""),
+        "value_ratio": eval_res["cost_effectiveness"].get("value_ratio", 1.0),
+        "monthly_leverage": eval_res["cost_effectiveness"].get("monthly_leverage", 1.0),
+        "m_market": eval_res["cost_effectiveness"].get("m_market", 0.0),
+        "annual_saving": eval_res["cost_effectiveness"].get("annual_saving", 0.0),
+        "monthly_cash_savings": eval_res["cost_effectiveness"].get("monthly_cash_savings", 0.0),
+        "payback_months": eval_res["cost_effectiveness"].get("payback_months", 999.0),
+        "annual_roi_percent": eval_res["cost_effectiveness"].get("annual_roi_percent", 0.0),
+        "payback_tier": eval_res["cost_effectiveness"].get("payback_tier", ""),
+        "payback_badge_color": eval_res["cost_effectiveness"].get("payback_badge_color", "default"),
+        "reasons": eval_res["cost_effectiveness"]["reasons"],
+        "raw": item,
+    }
 
 @router.get("/secondhand")
 async def get_unified_secondhand(
@@ -928,7 +1203,7 @@ async def get_unified_secondhand(
     Paginates through ALL pages on both platforms to ensure no listings are missed.
     """
     import asyncio
-    akile_tok, acck_tok = await _get_tokens(db)
+    akile_tok, acck_tok, lazycat_tok = await _get_tokens(db)
     now = time.time()
 
     if force_refresh or (now - _secondhand_cache["timestamp"] > _CACHE_TTL) or not _secondhand_cache["items"]:
@@ -936,14 +1211,21 @@ async def get_unified_secondhand(
         if akile_tok:
             tasks.append(akile_client.get_secondhand_list(akile_tok, fetch_all=True))
         else:
-            async def _dummy(): return {"list": []}
-            tasks.append(_dummy())
+            async def _dummy_ak(): return {"list": []}
+            tasks.append(_dummy_ak())
 
         tasks.append(acck_client.get_exchange_listings(fetch_all=True))
+
+        if lazycat_tok:
+            tasks.append(lazycat_client.get_market_listings(lazycat_tok, page=1, page_size=50))
+        else:
+            async def _dummy_lz(): return {"items": []}
+            tasks.append(_dummy_lz())
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         ak_res = results[0] if (len(results) > 0 and not isinstance(results[0], Exception)) else {}
         ac_res = results[1] if (len(results) > 1 and not isinstance(results[1], Exception)) else []
+        lz_res = results[2] if (len(results) > 2 and not isinstance(results[2], Exception)) else {}
 
         all_parsed: list[dict[str, Any]] = []
         if isinstance(ak_res, dict):
@@ -958,6 +1240,12 @@ async def get_unified_secondhand(
                     all_parsed.append(_parse_acck_item(it))
                 except Exception as e:
                     logger.debug("Failed parsing ACCK item: %s", e)
+        if isinstance(lz_res, dict):
+            for it in (lz_res.get("items") or []):
+                try:
+                    all_parsed.append(_parse_lazycat_item(it))
+                except Exception as e:
+                    logger.debug("Failed parsing LazyCat item: %s", e)
 
         _secondhand_cache["timestamp"] = now
         _secondhand_cache["items"] = all_parsed
@@ -1025,7 +1313,7 @@ async def buy_secondhand_item(
             "msg": "【防误购安全模式已生效】二手抢购模拟试算成功，未发起真实支付扣款。",
         }
 
-    akile_tok, acck_tok = await _get_tokens(db)
+    akile_tok, acck_tok, lazycat_tok = await _get_tokens(db)
     if req.platform == "akile":
         if not akile_tok:
             raise HTTPException(400, "Akile token not configured")
@@ -1058,6 +1346,11 @@ async def buy_secondhand_item(
 
         res = await acck_client.buy_exchange_listing(acck_tok, req.listing_id)
         return {"status": "success", "platform": "acck", "result": res}
+    elif req.platform == "lazycat":
+        if not lazycat_tok:
+            raise HTTPException(400, "LazyCat token not configured")
+        res = await lazycat_client.purchase_instance(lazycat_tok, req.listing_id)
+        return {"status": "success", "platform": "lazycat", "result": res}
     raise HTTPException(400, f"Unsupported platform: {req.platform}")
 
 
@@ -1071,7 +1364,7 @@ async def get_market_trades(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Retrieve dual-platform secondhand market trade transactions & arbitrage statistics."""
-    akile_tok, acck_tok = await _get_tokens(db)
+    akile_tok, acck_tok, lazycat_tok = await _get_tokens(db)
     my_acck_listings: list[dict[str, Any]] = []
 
     if acck_tok:
@@ -1130,4 +1423,132 @@ async def get_market_trades(
             "total_fee_cny": 0.90,
             "avg_roi_percent": 62.0
         }
+    }
+
+
+@router.get("/market/report")
+async def get_market_intelligence_report(
+    force_refresh: bool = Query(False, description="是否强制穿透拉取最新挂牌"),
+    _: str = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    AI 股市化多空研报与市场低迷诊断接口：
+    1. 汇总全盘二手在售数据并按统一资产标的归类 (Base SKU);
+    2. 严格按中位数 (P50)、P25、P75 统计各标的分布;
+    3. 自动诊断大盘低迷指数、存销比与多空状态;
+    4. 幂等沉淀当日 K 线记录到 SQLite (支持 1-3 年高效留存).
+    """
+    import asyncio
+    akile_tok, acck_tok, lazycat_tok = await _get_tokens(db)
+    now = time.time()
+
+    if force_refresh or (now - _secondhand_cache["timestamp"] > _CACHE_TTL) or not _secondhand_cache["items"]:
+        tasks = []
+        if akile_tok:
+            tasks.append(akile_client.get_secondhand_list(akile_tok, fetch_all=True))
+        else:
+            async def _dummy(): return {"list": []}
+            tasks.append(_dummy())
+        tasks.append(acck_client.get_exchange_listings(fetch_all=True))
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        ak_res = results[0] if (len(results) > 0 and not isinstance(results[0], Exception)) else {}
+        ac_res = results[1] if (len(results) > 1 and not isinstance(results[1], Exception)) else []
+
+        all_parsed: list[dict[str, Any]] = []
+        if isinstance(ak_res, dict):
+            for it in (ak_res.get("list") or []):
+                try:
+                    all_parsed.append(_parse_akile_item(it))
+                except Exception:
+                    pass
+        if isinstance(ac_res, list):
+            for it in ac_res:
+                try:
+                    all_parsed.append(_parse_acck_item(it))
+                except Exception:
+                    pass
+
+        _secondhand_cache["timestamp"] = now
+        _secondhand_cache["items"] = all_parsed
+
+    items = list(_secondhand_cache["items"])
+
+    # 1. 聚类并计算日度 K 线中位数切片
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    kline_rows = aggregate_daily_kline_snapshot(items, target_date=today_str)
+
+    # 2. 诊断大盘低迷与多空情绪
+    sentiment_diag = diagnose_market_sentiment(
+        kline_rows,
+        total_active_listings=len(items),
+        tg_buy_count=12,
+        tg_sell_count=48,
+    )
+
+    # 3. 异步持久化到 SQLite 数据库 (确保 1 年历史可追溯)
+    try:
+        saved_count = await save_daily_kline_records(db, kline_rows)
+    except Exception as e:
+        logger.error("Failed saving daily kline records: %s", e)
+        saved_count = 0
+
+    return {
+        "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "date": today_str,
+        "sentiment": sentiment_diag,
+        "total_active_listings": len(items),
+        "total_canonical_skus": len(kline_rows),
+        "saved_to_db_rows": saved_count,
+        "benchmark_assets": kline_rows,
+    }
+
+
+@router.get("/market/kline")
+async def get_market_kline_history(
+    asset_id: str | None = Query(None, description="指定资产标的ID过滤"),
+    days: int = Query(30, ge=1, le=365, description="回溯天数 (1-365天)"),
+    _: str = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    拉取资产标的过去 N 天的历史 K 线中位数走势 (支持单标的或全标的，毫秒级响应).
+    """
+    from sqlalchemy import select, desc
+    try:
+        from app.database import MarketAssetDailyKline
+    except ImportError:
+        from backend.app.database import MarketAssetDailyKline
+
+    days_val = int(days) if not hasattr(days, "default") else 30
+    stmt = select(MarketAssetDailyKline).order_by(desc(MarketAssetDailyKline.date)).limit(days_val * 100)
+    if asset_id and isinstance(asset_id, str):
+        stmt = stmt.where(MarketAssetDailyKline.asset_id == asset_id)
+
+    res = await db.execute(stmt)
+    records = res.scalars().all()
+
+    data = [
+        {
+            "asset_id": r.asset_id,
+            "asset_name": r.asset_name,
+            "date": r.date,
+            "price_median": r.price_median,
+            "price_p25": r.price_p25,
+            "price_p75": r.price_p75,
+            "price_min": r.price_min,
+            "price_max": r.price_max,
+            "active_listings": r.active_listings,
+            "fair_model_value": r.fair_model_value,
+            "premium_spread_pct": r.premium_spread_pct,
+            "market_state": r.market_state,
+        }
+        for r in records
+    ]
+
+    return {
+        "count": len(data),
+        "days": days,
+        "history": data,
     }

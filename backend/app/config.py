@@ -18,6 +18,8 @@ DEFAULTS: dict[str, Any] = {
     # --- API & connection ---
     "akile_token": "",
     "acck_token": "",
+    "lazycat_token": "",
+    "lazycat_enabled": True,
     "refresh_interval": 60,          # seconds
     "auto_refresh_token": True,         # keep token alive automatically
     "refresh_margin_min_seconds": 60,   # min random refresh margin (seconds)

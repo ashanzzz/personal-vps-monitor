@@ -416,6 +416,47 @@ async def _daily_checkin() -> None:
                     ))
                     await db.commit()
 
+    # 3. LazyCat (懒猫云) 自动打卡
+    if not settings.get("lazycat_auto_checkin_enabled", True):
+        logger.info("daily_checkin: LazyCat auto-checkin is disabled, skipping")
+    else:
+        lazycat_token = settings.get("lazycat_token") or ""
+        if lazycat_token:
+            from . import lazycat_client
+            try:
+                lz_res = await lazycat_client.checkin(lazycat_token)
+                logger.info("LazyCat daily_checkin result: %s", lz_res)
+                text_repr = str(lz_res)
+                if "已签到" in text_repr or "duplicate" in text_repr.lower():
+                    lz_status = "already_signed"
+                elif "成功" in text_repr or "rewarded" in text_repr.lower() or lz_res.get("points") is not None:
+                    lz_status = "success"
+                elif "失败" in text_repr or "error" in text_repr.lower():
+                    lz_status = "failed"
+                else:
+                    lz_status = "success"
+
+                async with SessionLocal() as db:
+                    db.add(CheckinLog(
+                        platform="lazycat",
+                        checkin_date=today_str,
+                        status=lz_status,
+                        message=text_repr[:500],
+                        details=json.dumps(lz_res, ensure_ascii=False) if isinstance(lz_res, (dict, list)) else str(lz_res),
+                    ))
+                    await db.commit()
+            except Exception as e:
+                logger.exception("LazyCat daily_checkin failed")
+                async with SessionLocal() as db:
+                    db.add(CheckinLog(
+                        platform="lazycat",
+                        checkin_date=today_str,
+                        status="failed",
+                        message=str(e),
+                        details=None,
+                    ))
+                    await db.commit()
+
 
 async def _prune_events() -> None:
     """Delete AlertEvent rows older than event_retention_days."""
@@ -510,6 +551,7 @@ async def get_sniper_status():
         "secondhand_buy_enabled": cfg.get("enabled", False),
         "real_purchase_enabled": settings.get("real_purchase_enabled", False),
         "rules_count": len(cfg.get("rules") or []),
+        "rules": cfg.get("rules") or [],
         "daily_bought": buy_state.daily("secondhand"),
     }
 
@@ -954,6 +996,7 @@ async def get_checkin_status(db: AsyncSession = Depends(get_db)):
 
     akile_today = next((r for r in today_rows if r.platform == "akile"), None)
     acck_today = next((r for r in today_rows if r.platform == "acck"), None)
+    lazycat_today = next((r for r in today_rows if r.platform == "lazycat"), None)
 
     q_hist = select(CheckinLog).order_by(CheckinLog.id.desc()).limit(30)
     hist_rows = (await db.execute(q_hist)).scalars().all()
@@ -979,6 +1022,7 @@ async def get_checkin_status(db: AsyncSession = Depends(get_db)):
             "time_end": settings.get("checkin_time_end", "09:00"),
             "akile_enabled": settings.get("auto_checkin_enabled", True),
             "acck_enabled": settings.get("acck_auto_checkin_enabled", True),
+            "lazycat_enabled": settings.get("lazycat_auto_checkin_enabled", True),
         },
         "status": {
             "akile": {
@@ -990,6 +1034,11 @@ async def get_checkin_status(db: AsyncSession = Depends(get_db)):
                 "checked_in": acck_today.status in ("success", "already_signed") if acck_today else False,
                 "status": acck_today.status if acck_today else "pending",
                 "last_log": serialize_log(acck_today),
+            },
+            "lazycat": {
+                "checked_in": lazycat_today.status in ("success", "already_signed") if lazycat_today else False,
+                "status": lazycat_today.status if lazycat_today else "pending",
+                "last_log": serialize_log(lazycat_today),
             }
         },
         "history": [serialize_log(r) for r in hist_rows]
@@ -1031,6 +1080,151 @@ async def acck_buy_preview_endpoint(payload: dict, _: str = Depends(require_auth
     """【防误购安全模式】安全试算 ACCK 订单信息，严禁发起扣费支付。"""
     from . import acck_client
     return await acck_client.buy_preview("", payload)
+
+
+# ---------------------------------------------------------------------------
+# LazyCat (dash.lazycat.wiki) endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/api/lazycat/checkin", tags=["admin"])
+async def manual_lazycat_checkin(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
+    """手动触发懒猫云每日签到。"""
+    settings = await get_all_settings(db)
+    token = settings.get("lazycat_token", "")
+    if not token:
+        return {"error": "未配置 LazyCat Token，请先在系统设置中填入"}
+    from . import lazycat_client
+    from .database import CheckinLog
+    from datetime import date
+    try:
+        res = await lazycat_client.checkin(token)
+        text_repr = str(res)
+        if "已签到" in text_repr or "duplicate" in text_repr.lower():
+            lz_status = "already_signed"
+        elif "成功" in text_repr or "rewarded" in text_repr.lower() or res.get("points") is not None:
+            lz_status = "success"
+        elif "失败" in text_repr or "error" in text_repr.lower():
+            lz_status = "failed"
+        else:
+            lz_status = "success"
+
+        db.add(CheckinLog(
+            platform="lazycat",
+            checkin_date=date.today().isoformat(),
+            status=lz_status,
+            message=text_repr[:500],
+            details=json.dumps(res, ensure_ascii=False) if isinstance(res, (dict, list)) else str(res),
+        ))
+        await db.commit()
+        return res
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/lazycat/account", tags=["admin"])
+async def get_lazycat_account_data(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
+    """获取懒猫云账户资料、余额、VIP 等级与特权卡状态。"""
+    settings = await get_all_settings(db)
+    token = settings.get("lazycat_token", "")
+    if not token:
+        return {"error": "未配置 LazyCat Token"}
+    from . import lazycat_client
+    try:
+        user_info = await lazycat_client.get_user_info(token)
+        balance = await lazycat_client.get_user_balance(token)
+        vip_card = await lazycat_client.get_vip_card(token)
+        return {
+            "user": user_info,
+            "balance": balance,
+            "vip_card": vip_card,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/lazycat/instances", tags=["admin"])
+async def get_lazycat_user_instances(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
+    """获取懒猫云名下所有实例。"""
+    settings = await get_all_settings(db)
+    token = settings.get("lazycat_token", "")
+    if not token:
+        return []
+    from . import lazycat_client
+    try:
+        return await lazycat_client.get_my_instances(token)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/lazycat/market", tags=["admin"])
+async def get_lazycat_market_listings(
+    region: str | None = None,
+    page: int = 1,
+    pageSize: int = 20,
+    _: str = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取懒猫云交易市场二手在售实例。"""
+    settings = await get_all_settings(db)
+    token = settings.get("lazycat_token", "")
+    if not token:
+        return {"error": "未配置 LazyCat Token"}
+    from . import lazycat_client
+    try:
+        return await lazycat_client.get_market_listings(token, region=region, page=page, page_size=pageSize)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/lazycat/store", tags=["admin"])
+async def get_lazycat_store_catalog():
+    """获取懒猫云公共套餐商店（无须 Token）。"""
+    from . import lazycat_client
+    try:
+        packages = await lazycat_client.get_public_packages()
+        regions = await lazycat_client.get_public_regions()
+        return {"packages": packages, "regions": regions}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/lazycat/buy/{listing_id}", tags=["admin"])
+async def buy_lazycat_instance(
+    listing_id: str,
+    _: str = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """【带安全锁】购买懒猫云二手在售实例。"""
+    settings = await get_all_settings(db)
+    if not settings.get("real_purchase_enabled", False):
+        return {
+            "status_code": 1,
+            "status_msg": "【防误购安全保护锁已开启】未发起真实支付扣费。已拦截懒猫云下单动作！",
+            "dry_run": True,
+            "listing_id": listing_id,
+        }
+    token = settings.get("lazycat_token", "")
+    if not token:
+        return {"error": "未配置 LazyCat Token"}
+    from . import lazycat_client
+    try:
+        return await lazycat_client.purchase_instance(token, listing_id)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/lazycat/lotteries", tags=["admin"])
+async def get_lazycat_lotteries_info(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
+    """获取懒猫云活动中心大转盘抽奖活动。"""
+    settings = await get_all_settings(db)
+    token = settings.get("lazycat_token", "")
+    if not token:
+        return {"error": "未配置 LazyCat Token"}
+    from . import lazycat_client
+    try:
+        return await lazycat_client.get_lotteries(token)
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ---------------------------------------------------------------------------

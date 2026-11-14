@@ -5,6 +5,12 @@ def test_resolve_search_prefix():
     rule1 = {"tags_include": ["元旦快乐"]}
     assert resolve_search_prefix(rule1) == "HKLite-One"
 
+    rule_xmas = {"tags_include": ["圣诞快乐"]}
+    assert resolve_search_prefix(rule_xmas) == "HKSM-One"
+
+    rule_xmas2 = {"tags_include": ["HKSM-One(圣诞快乐)"]}
+    assert resolve_search_prefix(rule_xmas2) == "HKSM-One"
+
     rule2 = {"tags_include": ["hklite-one(元旦快乐)"]}
     assert resolve_search_prefix(rule2) == "HKLite-One"
 

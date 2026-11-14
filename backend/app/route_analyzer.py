@@ -269,8 +269,8 @@ def evaluate_secondhand_listing(
     traffic_info = analyze_traffic(flow_total_gb, flow_used_gb, reset_price_cny)
 
     price_cny = max(0.0, float(price_cny or 0))
-    renew_price_cny = max(0.0, float(renew_price_cny or 0))
-    monthly_renew = renew_price_cny if renew_price_cny > 0 else price_cny
+    # 明确支持 0元续费 (终身免续费/永久传家宝机型)
+    monthly_renew = max(0.0, float(renew_price_cny if renew_price_cny is not None else price_cny))
 
     # Check if budget/perpetual asset (low entry price or low recurring monthly fee)
     # 核心：流量是每月自动重置刷新的资产。如果价格够低，当期流量用尽可忽略，因为我们要的是长远价值！
@@ -370,48 +370,15 @@ def match_user_trade_strategy(
     detail: str = "",
     intro: str = "",
     monthly_renew: float = 0.0,
+    bandwidth_mbps: int = 0,
+    ram_gb: float = 0.0,
+    flow_total_gb: float = 0.0,
 ) -> Optional[Dict[str, Any]]:
     """
-    山哥专属主力核心机型做市报价与心理底牌字典：
-    1. IIJ (Akile JP IIJ 旗舰大口径高配生产力): 买入成本 ¥350，出售底价 ¥500，买入目标 <= ¥200
-    2. ISP (ACCK LAX4837-ISP 绝版双ISP传家宝): 目标售价 ¥400，买入目标 ¥200 - ¥250
-    3. SB (ACCK JPSB 绝版软银 1.11元传家宝): 目标售价 ¥250 - ¥300，买入目标 ¥100 - ¥170
+    做市策略字典：
+    仅用于用户特定做市/监控意向辅助提示，绝不直接硬编码公允月租 fair_monthly_value！
+    公允月租全部由真实物理硬件 (内存、硬盘、带宽、流量) 动态纯数学公式计算产生！
     """
-    combined = f"{name} {node_name} {detail} {intro}".lower()
-
-    # 1. IIJ 旗舰机型 (必须是旗舰高配或特配，绝非普通JPIIJ-Lite等常规路人款)
-    if "iij" in combined and ("pro" in combined or "2000" in combined or "bgp" in combined or "旗舰" in combined or ("lite" not in combined and monthly_renew <= 15.0)):
-        return {
-            "model_code": "IIJ",
-            "model_name": "Akile JP IIJ 旗舰生产力",
-            "buy_target_max": 200.0,
-            "sell_target_min": 500.0,
-            "cost_basis": 350.0,
-            "desc": "性能极强生产力底座(2.5G口+2G内存+20G盘)，成本¥350，非¥500不卖，¥200内闭眼入",
-        }
-
-    # 2. ISP 绝版双ISP传家宝 (月付1.90元)
-    if ("isp" in combined or "双isp" in combined) and monthly_renew <= 2.5:
-        return {
-            "model_code": "ISP",
-            "model_name": "ACCK LAX4837-ISP 绝版双ISP传家宝",
-            "buy_target_max": 250.0,
-            "sell_target_min": 400.0,
-            "cost_basis": 1.90,
-            "desc": "美西双ISP绝版传家宝(1000M口+1200G)，买入目标¥200-250，目标售价¥400",
-        }
-
-    # 3. SB 绝版软银传家宝 (月付1.11元)
-    if ("sb" in combined or "softbank" in combined or "软银" in combined) and monthly_renew <= 2.5:
-        return {
-            "model_code": "SB",
-            "model_name": "ACCK JPSB 绝版软银传家宝",
-            "buy_target_max": 170.0,
-            "sell_target_min": 250.0,
-            "cost_basis": 1.11,
-            "desc": "日本软银绝版传家宝(1000M口+1000G)，买入目标¥100-170，目标售价¥250-300",
-        }
-
     return None
 
 
@@ -452,9 +419,11 @@ def evaluate_cost_effectiveness(
     memory_mb = max(128.0, memory_mb)
 
     price_cny = max(0.1, float(price_cny or 0))
-    renew_price_cny = max(0.0, float(renew_price_cny or 0))
-    monthly_renew = renew_price_cny if (item_type == "secondhand" and renew_price_cny > 0) else price_cny
-    monthly_renew = max(0.1, monthly_renew)
+    # 明确支持 0元续费 (终身免供/永久传家宝机型)
+    if item_type == "secondhand":
+        monthly_renew = max(0.0, float(renew_price_cny if renew_price_cny is not None else price_cny))
+    else:
+        monthly_renew = max(0.0, float(renew_price_cny if (renew_price_cny is not None and renew_price_cny > 0) else price_cny))
     reasons: List[str] = []
 
     # -------------------------------------------------------------
@@ -600,28 +569,142 @@ def evaluate_cost_effectiveness(
     flow_ratio = (flow_total_gb / 1000.0) if route_tier != "C" else t_effective
     phi_norm = 0.40 * flow_ratio + 0.20 * ram_ratio + 0.15 * disk_ratio + 0.25 * min(2.0, bandwidth_mbps / 500.0)
 
-    # 线路市场公允基准月租 (动态对齐 NodeSeek 最新市场实价：参考 vps.taxi 5美元 1T 9929/GIA/CMIN2，10元日本软银):
-    # S 级顶级 (9929 / CN2 GIA / CMIN2): 1T基准锚定 $5.00/月 ≈ ¥36.0/月 (500G规格约 ¥24/月，1T约 ¥36/月)
-    # A 级优化 (软银 / 4837 / CMI / IIJ): 1T基准锚定市场流通价 ¥16.0 ~ ¥22.0/月 (500G轻量款仅需 ¥10~¥12/月)
-    # B 级亚太 (亚太直连 BGP): 基准 ¥11.0/月
-    # C 级普通国际 (无优化): 基准 ¥7.0/月
-    tier_market_base = {"S": 36.0, "A": 16.5, "B": 11.0, "C": 7.0}
-    base_market = tier_market_base.get(route_tier, 7.0)
-
+    # -------------------------------------------------------------
+    # 6. 山哥四大物理维度模型 (网络40分 / 配置20分 / 带宽10分 / 流量20分 + 附加IP 10分)
+    # 遵照山哥指导："提高一下流量的价值，这个如果一个月5T流量，我觉得还值一点点，给个60分，
+    # 这么高性能，才1T流量，用处不大，我跑业务的话，1T都不够用，对吧，如果10T我会给100分以上"
+    # -------------------------------------------------------------
     combined = f"{name} {node_name} {detail} {intro}".lower()
-    is_dual_isp = ("isp" in combined or "双isp" in combined) and bool(route_info.get("native_ip"))
-    k_ip = 1.30 if is_dual_isp else (1.10 if route_info.get("native_ip") else 1.0)
 
-    # 若IP被阻断，可用商业价值直接断崖
+    if any(k in combined for k in ["cn2 gia", "cn2-gia", "cn2_gia", "as4809", "cmin2", "as58807", "lax premium", "三网优化直连"]):
+        network_tier_level = 1
+        network_tier_name = "1级网络·三网顶级优化"
+        tier_base_m = 26.0
+        route_score = 40  # 满分40分
+    elif any(k in combined for k in ["9929", "as9929", "cu9929", "nus9929", "nus 9929"]):
+        network_tier_level = 2
+        network_tier_name = "2级网络·9929精品优化"
+        tier_base_m = 18.0
+        route_score = 36
+    elif any(k in combined for k in ["4837", "as4837", "cu169", "cmi", "as58453", "hkcm"]):
+        network_tier_level = 3
+        network_tier_name = "3级网络·4837/CMI骨干优化"
+        tier_base_m = 13.5
+        route_score = 31
+    elif any(k in combined for k in ["softbank", "软银", "bbtec", "jpsb", "sb-", "iij", "jpiij"]):
+        network_tier_level = 4
+        network_tier_name = "4级网络·软银/IIJ特色直连"
+        tier_base_m = 10.0  # 用户指定锚点: JPSB 1000M 1000G 1C1G = 10元/月
+        route_score = 26
+    elif any(k in combined for k in ["tw-lite", "hkplus", "sgbgp", "twbgp", "jpbgp", "亚太"]) or ("hks" in combined and "nhk" not in combined):
+        network_tier_level = 5
+        network_tier_name = "5级网络·亚太普通直连BGP"
+        tier_base_m = 11.5
+        route_score = 20
+    else:
+        network_tier_level = 6
+        network_tier_name = "6级网络·普通国际无优化BGP"
+        tier_base_m = 10.0  # 用户指定基准: 公允价值 10元/月左右
+        route_score = 14
+
+    # 1. 性能配置评分与硬件规格乘数 (Specs Score & Continuous Multiplier)
+    # 遵照山哥指导："规则最好动态地来通过不一样的内存、硬盘大小、带宽还有每月流量动态地来计算，以实际的数据为准"
+    score_cpu = min(8.0, cpu * 3.0)
+    score_ram = min(8.0, ram_gb * 4.0)
+    score_disk = min(4.0, disk_gb * 0.2)
+    specs_score = int(round(score_cpu + score_ram + score_disk))
+    specs_score = min(20, max(4, specs_score))
+
+    # 硬件连续动态乘数 spec_mult (完全基于真实物理硬件，不依赖任何机型名称)
+    # CPU: 1核=1.0; 2核=1.25; 4核=1.55
+    m_cpu = 1.0 + 0.25 * max(0, cpu - 1)
+    # RAM: 512M=0.70; 1G=1.00; 2G=1.35; 4G=1.70
+    m_ram = 0.50 + 0.50 * (max(0.25, ram_gb) ** 0.55)
+    # DISK: 5G极小盘=0.78 (惩罚小盘); 10G基准=1.00; 20G=1.27; 40G=1.62
+    m_disk = (max(2.0, disk_gb) / 10.0) ** 0.35
+    spec_mult = round(m_cpu * m_ram * m_disk, 3)
+
+    # 2. 带宽口径评分与动态乘数 (Bandwidth Score: 满分 10分)
+    # 动态连续幂律响应: 100M->0.73, 200M->0.88, 1000M->1.00, 2000M->1.10, 5000M->1.25, 10000M->1.38
+    if bandwidth_mbps <= 50:
+        bandwidth_score = 2
+    elif bandwidth_mbps <= 100:
+        bandwidth_score = 4
+    elif bandwidth_mbps <= 200:
+        bandwidth_score = 6
+    elif bandwidth_mbps <= 500:
+        bandwidth_score = 7
+    elif bandwidth_mbps <= 1000:
+        bandwidth_score = 9
+    elif bandwidth_mbps <= 2500:
+        bandwidth_score = 9.5
+    elif bandwidth_mbps <= 5000:
+        bandwidth_score = 9.8
+    else:
+        bandwidth_score = 10
+    bw_mult = round((max(50, bandwidth_mbps) / 1000.0) ** 0.14, 3)
+
+    # 3. 流量配额评分与动态生产力乘数 (以额定月度总配额 flow_total_gb 为真实物理资产)
+    # 动态连续响应: 300G->0.55, 600G->0.77, 1000G->1.00, 2000G->1.41, 5000G->2.24, 10000G->3.16
+    if flow_total_gb <= 300:
+        traffic_score = 6
+    elif flow_total_gb <= 500:
+        traffic_score = 8
+    elif flow_total_gb <= 1000:
+        traffic_score = 14
+    elif flow_total_gb <= 2000:
+        traffic_score = 16
+    elif flow_total_gb <= 5000:
+        traffic_score = 19
+    else:
+        traffic_score = 20
+    flow_mult = round((max(100.0, flow_total_gb) / 1000.0) ** 0.50, 3)
+
+    # 4. 附加 IP 属性与纯净度 (IP Score: 满分 10分)
+    is_dual_isp = ("isp" in combined or "双isp" in combined) and bool(route_info.get("native_ip"))
+    if is_dual_isp:
+        ip_score = 10
+        k_ip = 1.25
+    elif route_info.get("native_ip"):
+        ip_score = 8
+        k_ip = 1.08
+    else:
+        ip_score = 5
+        k_ip = 1.00
+
     if not route_info["ip_clean"]:
+        ip_score = 1
         k_ip *= 0.15
 
-    m_market = round(base_market * k_ip * phi_norm, 1)
+    # 物理全景总得分 (满分 100 分)
+    hardware_perf_score = int(round(route_score + specs_score + bandwidth_score + traffic_score + (ip_score - 5)))
+    hardware_perf_score = min(100, max(10, hardware_perf_score))
+    performance_score = hardware_perf_score
+
+    # 纯动态公允月租计算 (Pure Physics Dynamic Fair Monthly Rent)
+    m_market = round(tier_base_m * bw_mult * flow_mult * spec_mult * k_ip, 1)
+
+    # -------------------------------------------------------------
+    # 核心铁律：6级普通国际无优化网络 (C级) 物理天花板
+    # 普通国际BGP网络素质低下，绝非大流量商业机，不能因为流量大就虚标至150元月租！
+    # 遵照山哥指导：
+    # 1. 6级普通国际流量商业价值严重衰减，公允月租上限严格封顶在 12.0 元/月 (无论流量多大)
+    # 2. 6级网络机器公允二手转让身价封顶在 ¥40~¥50，坚决杜绝百元身价虚标！
+    # -------------------------------------------------------------
+    if network_tier_level == 6:
+        # 6级无优化国际BGP：流量再大也是廉价国际流量，公允月租封顶12元/月
+        flow_mult = min(1.20, flow_mult)
+        m_market = min(12.0, m_market)
+    elif network_tier_level == 5:
+        flow_mult = min(2.0, flow_mult)
+        m_market = min(22.0, m_market)
+
+    # 彻底杜绝文字硬编码策略对公允月租的干预，以实际物理硬件为绝对权威准绳
+    trade_strategy = None
 
     monthly_saving = max(0.0, m_market - monthly_renew)
     annual_saving = round(12.0 * monthly_saving, 1)
 
-    trade_strategy = match_user_trade_strategy(name, node_name, detail, intro, monthly_renew)
     fair_market_value_cny = 0.0
     valuation_rationale = ""
     target_buy_price = None
@@ -631,53 +714,52 @@ def evaluate_cost_effectiveness(
         target_buy_price = trade_strategy["buy_target_max"]
         target_sell_price = trade_strategy["sell_target_min"]
         fair_market_value_cny = trade_strategy["sell_target_min"]
-
-        if item_type == "secondhand":
-            if price_cny <= target_buy_price:
-                if trade_strategy.get("model_code") in ("ISP", "SB"):
-                    # 动态价格折算系数 k_price：
-                    # 标价 0 元时 k=1.00 (满血 100 分)；标价达到买入上限 (250元) 时 k=0.65 (65分及格线)
-                    ratio = min(1.5, price_cny / max(1.0, target_buy_price))
-                    k_price = 1.0 - (0.35 * (ratio ** 0.85))
-                    heirloom_deal_score = int(round(100.0 * max(0.2, k_price)))
-                    final_score = heirloom_deal_score
-
-                    if price_cny <= 50.0:
-                        reasons.append(f"🚨 命中山哥传家宝超低折价扫单区(标价¥{price_cny:.1f} ≤ ¥50)，无脑秒杀 (折算买入分:{heirloom_deal_score})！")
-                    else:
-                        reasons.append(f"🚨 命中山哥传家宝买入底牌区间(标价¥{price_cny:.1f} ≤ 上限¥{target_buy_price:.0f})，价格折算系数k={k_price:.2f} (折算买入分:{heirloom_deal_score})")
-
-                    valuation_rationale = f"【绝版传家宝买入评估】标价¥{price_cny:.1f} (折算系数k={k_price:.2f})，公允出售身价¥{target_sell_price:.0f}"
-                else:
-                    ratio = min(1.5, price_cny / max(1.0, target_buy_price))
-                    k_price = 1.0 - (0.25 * (ratio ** 0.85))
-                    iij_deal_score = int(round(80.0 * max(0.2, k_price)))
-                    final_score = iij_deal_score
-                    reasons.append(f"🚨 命中山哥旗舰生产力扫货区间(标价¥{price_cny:.1f} ≤ 上限¥{target_buy_price:.0f})，价格折算系数k={k_price:.2f} (折算买入分:{iij_deal_score})！")
-                    valuation_rationale = f"【旗舰生产力扫货】标价¥{price_cny:.1f} (折算系数k={k_price:.2f})，公允出售身价¥{target_sell_price:.0f}"
-            else:
-                valuation_rationale = f"【山哥关注型号】买入目标¥{target_buy_price:.0f}以内，心理出售底价¥{target_sell_price:.0f} (当前标价¥{price_cny:.1f})"
-                if price_cny > target_sell_price:
-                    reasons.append(f"标价¥{price_cny:.1f}高于山哥心仪卖出价(¥{target_sell_price:.0f})，溢价过高")
-                final_score = max(30, int(round(50.0 * (target_sell_price / max(1.0, price_cny)))))
-        else:
-            valuation_rationale = f"山哥核心主力资产：买入成本¥{trade_strategy.get('cost_basis', 0):.0f}，心理出售底价¥{target_sell_price:.0f}，买入目标≤¥{target_buy_price:.0f}"
+        valuation_rationale = f"山哥专属做市策略机型 ({trade_strategy['model_name']}，买入目标<=¥{target_buy_price:g}，出售底价¥{target_sell_price:g})"
     else:
-        if monthly_renew <= 2.5:
-            fair_market_value_cny = round(annual_saving, 1)
-            valuation_rationale = f"绝版传家宝 (市场等效月租¥{m_market}/月，年化公允身价¥{fair_market_value_cny}，约10倍年供)"
-        elif is_high_spec_powerhouse and monthly_renew <= 15.0:
-            fair_market_value_cny = 120.0
-            valuation_rationale = "高配生产力优质机型 (2.5G口+2G内存，年化公允转让身价¥120)"
-        elif monthly_renew <= 10.0:
-            fair_market_value_cny = 25.0
-            valuation_rationale = "轻量超值月租机 (公允二手转让身价¥20-30)"
-        elif monthly_renew <= 20.0:
-            fair_market_value_cny = 10.0
-            valuation_rationale = "平价月租机 (建议折价转让，公允身价约¥10)"
+        # 遵照山哥做市与广义指数衰减二手身价方程:
+        # P_fair(R) = P_max * max(0, 1 - (R / 20)^1.25)
+        # 1. 峰值零月供身价 P_max:
+        tier_pmax_map = {
+            1: 350.0,  # 1级: 顶级三网GIA/CMIN2
+            2: 280.0,  # 2级: 9929精品优化 (用户标尺: 正常区间 ¥150~¥250，中枢¥200)
+            3: 240.0,  # 3级: 4837/CMI骨干优化 (双ISP加成后达 ¥300，正常区间 ¥250~¥300)
+            4: 180.0,  # 4级: 软银JPSB/IIJ特色直连 (用户标尺: 正常区间 ¥130~¥200)
+            5: 120.0,  # 5级: 亚太普通直连BGP
+            6: 80.0,   # 6级: 普通国际无优化
+        }
+        base_pmax = tier_pmax_map.get(network_tier_level, 80.0)
+
+        # 核心金融铁律（山哥指导）：
+        # 0.18 ~ 1.5 元极低月供具备“零持有成本囤积期权”（年供仅 ¥2~¥18，卖家无去库存现金流压力）
+        # 优化线路即使是小盘或窄口径，转让底价受期权价值保护，避免三重物理连乘过度削平
+        if monthly_renew <= 1.5 and network_tier_level <= 4:
+            effective_mult = max(0.72, bw_mult * flow_mult * spec_mult)
         else:
-            fair_market_value_cny = 5.0
-            valuation_rationale = "高月租失血机型 (无长期套利溢价，转让价值趋于0)"
+            effective_mult = bw_mult * flow_mult * spec_mult
+
+        p_max = round(base_pmax * effective_mult * k_ip, 1)
+
+        # 2. 月供衰减因子 K_renew (20元为绝对天花板):
+        if monthly_renew >= 20.0:
+            k_renew = 0.0
+        else:
+            k_renew = max(0.0, 1.0 - (monthly_renew / 20.0) ** 1.25)
+
+        fair_market_value_cny = round(p_max * k_renew, 1)
+        if monthly_renew >= 20.0:
+            fair_market_value_cny = 0.0
+            target_buy_price = 0.0
+            target_sell_price = 5.0
+            valuation_rationale = "月供超¥20硬天花板，持续失血负资产 (二手身价归零，坚决不买)"
+        elif fair_market_value_cny <= 15.0:
+            fair_market_value_cny = max(0.0, fair_market_value_cny)
+            target_buy_price = round(fair_market_value_cny * 0.5, 1)
+            target_sell_price = fair_market_value_cny
+            valuation_rationale = f"常规月租机 (二手转让身价约¥{fair_market_value_cny})"
+        else:
+            target_buy_price = round(fair_market_value_cny * 0.70, 1)
+            target_sell_price = fair_market_value_cny
+            valuation_rationale = f"优质低月租资产 (公允转让身价约¥{fair_market_value_cny}，买入目标<=¥{target_buy_price})"
 
     # 1. 资产价值倍数 (Value-to-Price Multiplier / 投资杠杆倍数)
     # 对于二手机器，买家的真实持有门槛是【买入售价 + 首月续费】，绝不能只按低廉的转让挂牌价算！
@@ -719,76 +801,296 @@ def evaluate_cost_effectiveness(
     monthly_points_per_yuan = round(eff_capability_points / eff_cost_renew, 2) if final_score >= 40 else 0.0
     monthly_points_per_usd = round(monthly_points_per_yuan * USD_RATE, 2)
 
-    # 7. 山哥现金流资产套利与回本周期模型 (Payback Period & Arbitrage Cash Flow Engine)
-    # 核心理论：一年内回本(T_payback <= 12个月)是顶级暴利，年化套利ROI超100%
-    monthly_cash_savings = round(max(0.0, m_market - monthly_renew), 2)
-    if monthly_cash_savings > 0 and price_cny > 0:
-        payback_months = round(price_cny / monthly_cash_savings, 1)
-        annual_roi_percent = round((monthly_cash_savings * 12.0 / max(1.0, price_cny)) * 100.0, 1)
-    elif price_cny <= 0:
-        payback_months = 0.0
-        annual_roi_percent = 9999.0
+    # -------------------------------------------------------------
+    # 7. 山哥四维量化打分体系全量重构 (4-Dimensional Quant & Arbitrage Engine)
+    # 维度 1: 机器性能评分 (performance_score: 0 - 100, 对应物理规格与公允月租)
+    # 维度 2: 续费价格评分 (renew_price_score: 0 - 100, 越低越神)
+    # 维度 3: 销售价格评分 (sale_price_score: 0 - 200, 指数函数敏感度模型)
+    # 维度 4: 套利回本评分 (arbitrage_score: 0 - 100, 核心回本现金流)
+    # -------------------------------------------------------------
+
+    # 1. 机器性能评分 (performance_score: 0 - 100)
+    p_base = {"S": 88, "A": 78, "B": 62, "C": 42}.get(route_tier, 60)
+    if is_dual_isp:
+        p_base += 6
+    elif is_native:
+        p_base += 2
+    if bandwidth_mbps >= 10000:
+        p_base += 8
+    elif bandwidth_mbps >= 1000:
+        p_base += 4
+    elif bandwidth_mbps <= 50:
+        p_base -= 5
+    if ram_ratio >= 2.0:
+        p_base += 3
+    if disk_ratio >= 2.0:
+        p_base += 2
+    if cpu >= 2:
+        p_base += 3
+    if flow_total_gb >= 2000:
+        p_base += 4
+    if not route_info["ip_clean"]:
+        p_base -= 25
+    performance_score = min(100, max(10, p_base))
+
+    # 2. 续费价格评分 (renew_price_score: 0 - 100)
+    # 遵照山哥指导："越便宜价格敏感度越低，0-2无感，2-5略微有感觉，6-10稍微敏感，10-20需要高质量硬件条件补充"
+    if monthly_renew <= 2.0:
+        # 0 ~ 2 元: 绝对无感区 (0元, 0.18元, 1元, 2元 敏感度几乎为0，打98~100分顶格神仙免持有成本)
+        renew_price_score = int(round(100 - monthly_renew * 1.0))
+    elif monthly_renew <= 5.0:
+        # 2 ~ 5 元: 略微有感区 (90 ~ 98分)
+        renew_price_score = int(round(98 - (monthly_renew - 2.0) * (8.0 / 3.0)))
+    elif monthly_renew <= 10.0:
+        # 6 ~ 10 元: 稍微敏感区 (75 ~ 90分)
+        renew_price_score = int(round(90 - (monthly_renew - 5.0) * (15.0 / 5.0)))
+    elif monthly_renew <= 20.0:
+        # 10 ~ 20 元: 高敏感区 (50 ~ 75分) - 必须依赖高质量硬件强力补充
+        renew_price_score = int(round(75 - (monthly_renew - 10.0) * (25.0 / 10.0)))
+    elif monthly_renew <= 35.0:
+        renew_price_score = int(round(50 - (monthly_renew - 20.0) * (25.0 / 15.0)))
     else:
+        renew_price_score = max(0, int(round(25 - (monthly_renew - 35.0) * 1.0)))
+
+    # -------------------------------------------------------------
+    # 7. 山哥回本套利与综合性价比模型全量重构 (Universal Payback & Profit Quant Engine)
+    # 遵照山哥指导反推建立：
+    # 核心原则：
+    # 1. 真实价值取决于 "净利润产生的套利回本能力" 与 "月供健康度(无失血)"
+    # 2. 流量是业务生命线：1T不够跑业务属于鸡肋；5T值一点点(给60分)；10T产生巨大商业产能(给100分以上)！
+    # 3. 每月利润 = 公允续费价格 - 当前续费价格
+    # 4. 回本周期 = 销售价格 / 每月利润
+    # -------------------------------------------------------------
+    profit = round(m_market - monthly_renew, 2)
+    margin = profit / max(1.0, m_market)
+    real_cost = price_cny
+
+    is_traffic_depleted = traffic_info.get("is_depleted", False) or (flow_total_gb > 0 and (flow_total_gb - flow_used_gb) <= 5.0)
+
+    if not route_info["ip_clean"]:
+        # IP 被墙属于致命缺陷（核心功能缺失无法连接，换新IP需花¥15-¥35）
+        # 绝不允许打出高分，一票否决封顶压制在 15~28 分避坑残疾机！
+        final_score = min(28, max(5, int(round(25.0 - (price_cny / max(1.0, monthly_renew)) * 3.0))))
         payback_months = 999.0
         annual_roi_percent = 0.0
+        arbitrage_score = 10
+        monthly_cash_savings = 0.0
+        payback_tier = "IP被墙⚠️ (需自费¥35换IP)"
+        payback_badge_color = "red"
+        reasons.append("🛑 致命缺陷：IP处于被墙阻断状态！无法直接访问，需自费¥15~¥35换新IP，属于二手残疾机")
+    elif profit <= 0:
+        # 月供倒挂 (轻度小鸡路人价 vs 重度失血包袱)
+        loss = abs(profit)
+        p_to_r = price_cny / max(1.0, monthly_renew)
+        arbitrage_score = 25
+        monthly_cash_savings = 0.0
 
-    if item_type == "secondhand":
-        if price_cny <= 0.01:
-            payback_tier = "即时回本 (纯白送)"
-            payback_badge_color = "purple"
-            reasons.append("🎁 0元纯白送接盘，即时全额回本，终身白嫖！")
-        elif payback_months <= 6.0:
-            payback_tier = f"半年内回本 ({payback_months:.1f}月·极速暴利)"
-            payback_badge_color = "purple"
-            reasons.append(f"⚡ 半年内闪电回本({payback_months:.1f}个月·首年年化ROI {annual_roi_percent:.1f}%)，宇宙级暴利捡漏！")
-            if final_score >= 40:
-                final_score = max(final_score, 88)  # 提振至神机必抢
-        elif payback_months <= 12.0:
-            payback_tier = f"一年内回本 ({payback_months:.1f}月·超值爆棚)"
-            payback_badge_color = "green"
-            reasons.append(f"🔥 一年内超速回本({payback_months:.1f}个月·首年年化ROI {annual_roi_percent:.1f}%)，顶级套利爆棚！")
-            if final_score >= 40:
-                final_score = max(final_score, 75)  # 提振至超值高性价
-        elif payback_months <= 24.0:
-            payback_tier = f"1~2年回本 ({payback_months:.1f}月·公允)"
-            payback_badge_color = "blue"
-            reasons.append(f"📈 1~2年内可回本({payback_months:.1f}个月·年化ROI {annual_roi_percent:.1f}%)，公允稳健")
-        elif monthly_cash_savings > 0:
-            payback_tier = f"回本漫长 ({payback_months:.1f}月)"
-            payback_badge_color = "orange"
+        if monthly_renew <= 15.0 and loss <= 6.0:
+            # 遵照山哥指导："IIJ不是顶级网络，应该比4837低，而且流量少，给个路人分40-65就好"
+            # 月供处于低位 (<=15元) 且轻度差额的小鸡，属于标准路人流转车，根据转让溢价给出 40~65 分路人分！
+            if p_to_r <= 2.0:
+                final_score = int(round(65.0 - p_to_r * 2.5))
+            elif p_to_r <= 7.0:
+                final_score = int(round(60.0 - (p_to_r - 2.0) * (20.0 / 5.0)))
+            else:
+                final_score = max(10, int(round(40.0 - (p_to_r - 7.0) * 3.0)))
+            payback_months = round(p_to_r * 4.0, 1)
+            annual_roi_percent = 0.0
+            payback_tier = f"常规路人机 (月供¥{monthly_renew:g}·转让¥{price_cny:g})"
+            payback_badge_color = "blue" if final_score >= 48 else "orange"
+            reasons.append(f"📦 常规路人小鸡 (月供¥{monthly_renew:g}·微幅溢价)，二手转让费¥{price_cny:g}，属于正常流转")
         else:
-            payback_tier = "持续失血 (无法回本)"
+            loss_ratio = loss / max(1.0, monthly_renew)
+            final_score = int(round(max(5.0, 35.0 - loss_ratio * 15.0 - p_to_r * 4.0)))
+            payback_months = 999.0
+            annual_roi_percent = 0.0
+            payback_tier = f"高月供失血 (月供¥{monthly_renew:g} > 产出¥{m_market:g})"
             payback_badge_color = "red"
+            reasons.append(f"⚠️ 高月供失血包袱：每月续费¥{monthly_renew:g}远高于公允产出¥{m_market:g}(净亏¥{loss:g}/月)")
     else:
-        payback_tier = f"一手在售 (等效月租¥{m_market}/月)"
-        payback_badge_color = "default"
+        # 正向有利润机型
+        payback_months = round(real_cost / profit, 1) if real_cost > 0 else 0.0
+        annual_roi_percent = round((profit * 12.0 / max(1.0, real_cost)) * 100.0, 1)
+        monthly_cash_savings = profit
 
-    if final_score >= 88:
+        # 1. 回本套利得分 (arbitrage_score)
+        if payback_months <= 1.0 or real_cost <= 0:
+            raw_arb_score = 10000.0
+            arbitrage_score = 10000
+        elif payback_months <= 6.0:
+            if payback_months <= 2.0:
+                raw_arb_score = 10000.0 * math.exp(-(payback_months - 1.0) * 1.5)
+            else:
+                raw_arb_score = 100.0 + (6.0 - payback_months) * 10.0
+            arbitrage_score = int(round(200.0 + 9800.0 * math.exp(-(payback_months - 1.0) * 0.95)))
+        elif payback_months <= 12.0:
+            raw_arb_score = 80.0 + (12.0 - payback_months) * (20.0 / 6.0)
+            arbitrage_score = int(round(200.0 - (payback_months - 6.0) * (80.0 / 6.0)))
+        elif payback_months <= 18.0:
+            raw_arb_score = 65.0 + (18.0 - payback_months) * (15.0 / 6.0)
+            arbitrage_score = int(round(120.0 - (payback_months - 12.0) * (50.0 / 6.0)))
+        elif payback_months <= 24.0:
+            raw_arb_score = 50.0 + (24.0 - payback_months) * (15.0 / 6.0)
+            arbitrage_score = int(round(70.0 - (payback_months - 18.0) * (20.0 / 6.0)))
+        elif payback_months <= 36.0:
+            raw_arb_score = 35.0 + (36.0 - payback_months) * (15.0 / 12.0)
+            arbitrage_score = int(round(50.0 - (payback_months - 24.0) * (15.0 / 12.0)))
+        else:
+            raw_arb_score = max(5.0, 35.0 * math.exp(-(payback_months - 36.0) / 20.0))
+            arbitrage_score = max(5, int(round(35.0 * math.exp(-(payback_months - 36.0) / 20.0))))
+
+        # 2. 综合性价比评分结合利润丰厚度 (Profit Margin Factor)
+        # 传家宝 (0.19元/月) margin = 0.98 -> 满额享受无敌性价比 100-N
+        # 大流量商业机 (10T) margin = 73/126 = 0.58 -> 满额享受无敌性价比 100-N
+        # 微利高月供机 (5T, renew 53, profit 7.2) margin = 0.12 -> 利润微薄，买家每月仍要扛53元高月供
+        # 遵照山哥指导：
+        # 1. 6级普通国际无优化机型 (C级)：
+        #    - 溢价转让 (如 115元/168元): 属于 50~65 分左右（有一定投资价值/可观察/但不能给到80+神机高分）
+        #    - 100元左右: 评定在 58~63 分左右（有投资价值/还不错可观察）
+        #    - 115元左右: 评定在 52~55 分左右（正常市场价/可观察）
+        #    - 168元左右 (2年回本): 评定在 48~50 分左右（公允偏贵/可观察投资价值，不跌入严重失血）
+        #    - 6级网络最高综合得分严格封顶在 68 分以内，杜绝虚高评为80+超级性价比！
+        if network_tier_level == 6:
+            # 6级无优化：基准 50 分左右，根据售价和回本速度在 48 ~ 65 分区间浮动
+            tier6_score = int(round(50.0 + (24.0 - payback_months) * 0.9 + (5.0 - monthly_renew) * 1.5))
+            if price_cny <= 100.0 and monthly_renew <= 5.0:
+                tier6_score = max(tier6_score, 60)
+            elif price_cny <= 120.0 and monthly_renew <= 5.0:
+                tier6_score = max(tier6_score, 54)
+            final_score = min(68, max(42, tier6_score))
+        elif margin >= 0.40 or raw_arb_score >= 1000:
+            final_score = int(round(0.15 * hardware_perf_score + 0.85 * raw_arb_score))
+        else:
+            margin_boost = margin * 70.0
+            p_to_r = price_cny / max(1.0, monthly_renew)
+            final_score = int(round(50.0 + margin_boost + (0.5 - p_to_r) * 5.0))
+            final_score = min(75, max(45, final_score))
+
+        if payback_months <= 6.0:
+            payback_tier = f"半年内回本 ({payback_months:.1f}月·超级性价比)"
+            payback_badge_color = "purple"
+            reasons.append(f"⚡ 半年内极速回本({payback_months:.1f}个月·首年年化ROI {annual_roi_percent:.1f}%)，优秀回本能力！")
+        elif payback_months <= 12.0:
+            payback_tier = f"1年回本 ({payback_months:.1f}月·性价比)"
+            payback_badge_color = "green"
+            reasons.append(f"🔥 1年内超速回本({payback_months:.1f}个月·首年年化ROI {annual_roi_percent:.1f}%)，稳健回本！")
+        elif payback_months <= 18.0:
+            payback_tier = f"1.5年回本 ({payback_months:.1f}月·市场价)"
+            payback_badge_color = "blue"
+            reasons.append(f"📈 1.5年左右回本({payback_months:.1f}个月·年化ROI {annual_roi_percent:.1f}%)，公允市场价")
+        elif payback_months <= 24.0:
+            payback_tier = f"2年回本 ({payback_months:.1f}月·高价格偏贵)"
+            payback_badge_color = "orange"
+            reasons.append(f"⚠️ 2年左右回本({payback_months:.1f}个月)，转让价格偏高")
+        else:
+            payback_tier = f"回本漫长 ({payback_months:.1f}月·低性价比)"
+            payback_badge_color = "red"
+            reasons.append(f"⏳ 回本周期漫长({payback_months:.1f}个月)，严重溢价无性价比")
+
+    # 当期流量微调 (遵照山哥指导："如果他流量用尽了也没关系，如果足够便宜，我下个月续费一样用")
+    # 二手买的是机器的长期资产所有权与续费资格，额定流量配额是下月续费后永久享有的持续生产力！
+    # 仅作当期等待刷新的轻微贴现扣减 (最多仅扣2~3分)，绝不伤筋动骨误杀便宜好机
+    if is_traffic_depleted:
+        depleted_penalty = 3
+        final_score = max(5, final_score - depleted_penalty)
+        reasons.append(f"🔋 资产提示：当期流量已用尽（不影响长期资产价值：下月续费自动恢复{flow_total_gb:g}G满血，价格足够便宜下月照样用）")
+
+    # 4. 评级标签与徽章定义 (完全对齐山哥最新指示)
+    if final_score >= 1000:
         grade = "SSS"
-        grade_label = "【绝版传家宝】"
+        grade_label = "【10000分·当月秒回本神迹】"
         badge_color = "purple"
-    elif final_score >= 75:
-        grade = "A"
-        grade_label = "【旗舰生产力】"
+    elif final_score >= 100:
+        grade = "SS"
+        grade_label = "【100-N·无敌性价比】"
+        badge_color = "magenta"
+    elif final_score >= 80:
+        grade = "S"
+        grade_label = "【80-100·超级性价比】"
         badge_color = "green"
+    elif final_score >= 65:
+        grade = "A"
+        grade_label = "【性价比款】"
+        badge_color = "cyan"
     elif final_score >= 48:
         grade = "B"
-        grade_label = "【普通路人款】"
+        grade_label = "【还凑合·正常市场价】"
         badge_color = "blue"
-    elif final_score >= 25:
+    elif final_score >= 35:
         grade = "C"
-        grade_label = "【轻度失血/偏贵】"
+        grade_label = "【高月供/偏贵溢价】"
         badge_color = "orange"
     else:
         grade = "D"
-        grade_label = "【垃圾/拦截避坑】"
+        grade_label = "【严重失血/拦截避坑】"
         badge_color = "red"
+
+    # 销售价格敏感度评分 (sale_price_score: 0 - 200)
+    base_anchor_price = max(20.0, fair_market_value_cny if fair_market_value_cny > 0 else 80.0)
+    p_ratio = price_cny / base_anchor_price
+    if price_cny <= 0:
+        sale_price_score = 200
+    elif p_ratio <= 0.70:
+        sale_price_score = 200
+    elif p_ratio <= 1.00:
+        sale_price_score = int(round(200.0 - (p_ratio - 0.70) * (20.0 / 0.30)))
+    elif p_ratio <= 1.25:
+        sale_price_score = int(round(180.0 - (p_ratio - 1.00) * (40.0 / 0.25)))
+    else:
+        diff = p_ratio - 1.25
+        decay = math.exp(-diff / 0.45)
+        sale_price_score = int(round(50.0 + 90.0 * decay))
+        sale_price_score = max(5, min(200, sale_price_score))
+
+    # 山哥心智意愿与月供承受阶梯标签
+    if monthly_renew <= 3.0:
+        renew_intent_tip = f"月供¥{monthly_renew:g} (0-3元无感区·肯定会买)"
+    elif monthly_renew <= 5.0:
+        renew_intent_tip = f"月供¥{monthly_renew:g} (3-5元微感区·基本会买)"
+    elif monthly_renew <= 8.0:
+        renew_intent_tip = f"月供¥{monthly_renew:g} (5-8元敏感区·准备充足会买)"
+    elif monthly_renew <= 15.0:
+        renew_intent_tip = f"月供¥{monthly_renew:g} (8-15元高敏感区·急用应急买)"
+    else:
+        renew_intent_tip = f"月供¥{monthly_renew:g} (超20元天花板·坚决不会买)"
+
+    # ACCK 0.18 元续费小鸡的持有门槛规则
+    if monthly_renew <= 0.35 and ("acck" in combined or "exchange" in combined):
+        reasons.append("⚠️ ACCK 规则约束：0.18元续费机新手账号无法购买，必须同时持有一台 ≥¥1.0/月的主机才能保持续费特权")
+
+    if network_tier_level <= 4 and monthly_renew <= 1.5:
+        if price_cny < 120.0 and price_cny > 0.0:
+            reasons.append("⚠️ 价格异常跌破 ¥120 地板：需警惕平台经营风险、拔线或恶性阴跌，切忌盲目接盘")
+
+    if final_score >= 100:
+        intent_label = "肯定买 (无敌性价比)"
+    elif final_score >= 80:
+        intent_label = "基本会买 (超级性价比)"
+    elif final_score >= 65:
+        intent_label = "准备充足会买 (性价比款)"
+    elif final_score >= 48:
+        intent_label = "可能会买/急用买 (公允市场价)"
+    else:
+        intent_label = "不会买 (偏贵避坑)"
 
     return {
         "score": final_score,
         "grade": grade,
         "grade_label": grade_label,
+        "intent_label": intent_label,
+        "renew_intent_tip": renew_intent_tip,
         "badge_color": badge_color,
+        "network_tier_level": network_tier_level,
+        "network_tier_name": network_tier_name,
+        "route_score": route_score,
+        "bandwidth_score": bandwidth_score,
+        "traffic_score": traffic_score,
+        "specs_score": specs_score,
+        "hardware_perf_score": hardware_perf_score,
+        "performance_score": performance_score,
+        "renew_price_score": renew_price_score,
+        "sale_price_score": sale_price_score,
+        "arbitrage_score": arbitrage_score,
         "points_per_yuan": points_per_yuan,
         "points_per_usd": points_per_usd,
         "cost_per_point_cny": cost_per_point_cny,
@@ -810,6 +1112,17 @@ def evaluate_cost_effectiveness(
         "payback_badge_color": payback_badge_color,
         "breakdown": {
             "score": final_score,
+            "network_tier_level": network_tier_level,
+            "network_tier_name": network_tier_name,
+            "route_score": route_score,
+            "bandwidth_score": bandwidth_score,
+            "traffic_score": traffic_score,
+            "specs_score": specs_score,
+            "hardware_perf_score": hardware_perf_score,
+            "performance_score": performance_score,
+            "renew_price_score": renew_price_score,
+            "sale_price_score": sale_price_score,
+            "arbitrage_score": arbitrage_score,
             "tier": tier,
             "monthly_renew": monthly_renew,
         },
