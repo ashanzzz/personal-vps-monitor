@@ -1,5 +1,5 @@
 """
-Third-party read-only API for Akile Monitor.
+Third-party read-only API for 个人 vps 监控.
 
 This namespace exposes a stable, versioned, read-only contract for external
 consumers. It reuses the same machine snapshot data as the internal admin API,

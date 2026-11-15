@@ -99,7 +99,7 @@ async def send_webhook(url: str, event: dict) -> None:
     if not url:
         return
     payload = {
-        "title": "Akile Monitor",
+        "title": "个人 vps 监控",
         "text": _build_text(event),
         "event": event,
     }

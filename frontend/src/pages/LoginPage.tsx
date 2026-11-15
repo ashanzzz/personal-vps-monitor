@@ -51,7 +51,7 @@ export function LoginPage({ onAuthed }: Props) {
     }}>
       <Card style={{ width: 380, background: '#161616', borderColor: '#1f1f1f' }}>
         <div style={{ textAlign: 'center', marginBottom: 20 }}>
-          <Title level={4} style={{ color: '#e0e0e0', marginBottom: 4 }}>🖥 Akile Monitor</Title>
+          <Title level={4} style={{ color: '#e0e0e0', marginBottom: 4 }}>🖥 个人 vps 监控</Title>
           <Text type="secondary">{isSetup ? '首次使用，请设置管理员账号' : '请登录'}</Text>
         </div>
 

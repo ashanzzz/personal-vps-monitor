@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import auth
 from .auth import require_auth
-from .config import PAGE_KEYS, get_all_settings, update_settings
+from .config import PAGE_KEYS, get_all_settings, set_setting, update_settings
 from .database import AccountCache, AlertEvent, MachineSnapshot, PriceHistory, get_db, init_db
 from .logging_setup import read_log_tail, set_level, setup_logging
 from .match import find_official_equivalent
@@ -496,9 +496,10 @@ OPENAPI_TAGS = [
 ]
 
 app = FastAPI(
-    title="个人工具仓库",
+    title="个人 vps 监控",
     description=(
-        "个人工具仓库后端 API：统一管理 AkileCloud 与 ACCK 双平台账户监控、每日自动打卡、资产管理与选购工具。"
+        "个人 VPS / 云服务监控后端 API：统一管理多平台账户（懒猫云 / Akile / ACCK）"
+        "、每日自动打卡、资产管理与选购工具。"
     ),
     version=__version__,
     openapi_tags=OPENAPI_TAGS,
@@ -1174,6 +1175,57 @@ async def get_lazycat_market_listings(
         return await lazycat_client.get_market_listings(token, region=region, page=page, page_size=pageSize)
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.post("/api/lazycat/login", tags=["admin"])
+async def lazycat_login(
+    body: dict,
+    _: str = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """用账号密码（可选 2FA 动态码）登录懒猫云，并把 Token 保存到系统设置。
+
+    请求体：{ username, password, ga_code? }
+    """
+    from . import lazycat_client
+
+    username = body.get("username", "")
+    password = body.get("password", "")
+    ga_code = body.get("ga_code", "") or None
+
+    if not username or not password:
+        return {"error": "请填写懒猫云账号和密码"}
+
+    try:
+        res = await lazycat_client.login(
+            username=username, password=password, totp_code=ga_code
+        )
+    except Exception as e:
+        return {"error": f"登录请求失败: {e}"}
+
+    # 提取 Token：兼容多种响应字段名
+    token = (
+        res.get("token")
+        or res.get("access_token")
+        or res.get("jwt")
+        or (isinstance(res.get("data"), dict) and res["data"].get("token"))
+        or (isinstance(res.get("data"), dict) and res["data"].get("accessToken"))
+    )
+
+    if not token:
+        return {
+            "error": f"登录成功但未在响应中找到 Token 字段，完整响应: {str(res)[:500]}"
+        }
+
+    # 把 Token 写入系统设置
+    await set_setting(db, "lazycat_token", token)
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "message": "懒猫云登录成功，Token 已自动保存",
+        "token_length": len(token),
+    }
 
 
 @app.get("/api/lazycat/store", tags=["admin"])

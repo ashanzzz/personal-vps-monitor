@@ -63,6 +63,12 @@ export function SettingsPage({ settings, onSaved }: Props) {
   const [_2faPending, set2faPending] = useState<{ username: string; password: string } | null>(null)
   const [_2faCode, set2faCode] = useState('')
   const [_2faSubmitting, set2faSubmitting] = useState(false)
+  const [lzUsername, setLzUsername] = useState('')
+  const [lzPassword, setLzPassword] = useState('')
+  const [loggingInLz, setLoggingInLz] = useState(false)
+  const [lz2faPending, setLz2faPending] = useState<{ username: string; password: string } | null>(null)
+  const [lz2faCode, setLz2faCode] = useState('')
+  const [lz2faSubmitting, setLz2faSubmitting] = useState(false)
 
   const loadTokenStatus = useCallback(async () => {
     try {
@@ -150,7 +156,6 @@ export function SettingsPage({ settings, onSaved }: Props) {
     try {
       const status = await api.akileLogin(akileUsername, akilePassword)
       if ((status as any).need_2fa) {
-        // 2FA required — show modal
         set2faPending({ username: akileUsername, password: akilePassword })
         set2faCode('')
         return
@@ -163,6 +168,49 @@ export function SettingsPage({ settings, onSaved }: Props) {
       message.error(e?.response?.data?.detail ?? '登录失败')
     } finally {
       setLoggingIn(false)
+    }
+  }
+
+  const lazycatLogin = async () => {
+    if (!lzUsername || !lzPassword) {
+      message.warning('请输入懒猫云账号和密码')
+      return
+    }
+    setLoggingInLz(true)
+    try {
+      const res = await api.lazycatLogin(lzUsername, lzPassword)
+      if ((res as any).need_2fa) {
+        setLz2faPending({ username: lzUsername, password: lzPassword })
+        setLz2faCode('')
+        return
+      }
+      message.success((res as any).message ?? '懒猫云登录成功，Token 已自动保存')
+      setLzPassword('')
+      loadTokenStatus()
+    } catch (e: any) {
+      message.error(e?.response?.data?.error ?? e?.response?.data?.detail ?? '登录失败')
+    } finally {
+      setLoggingInLz(false)
+    }
+  }
+
+  const submitLz2fa = async () => {
+    if (!lz2faPending || !lz2faCode.trim()) {
+      message.warning('请输入二次验证码')
+      return
+    }
+    setLz2faSubmitting(true)
+    try {
+      const res = await api.lazycatLogin(lz2faPending.username, lz2faPending.password, lz2faCode.trim())
+      message.success((res as any).message ?? '懒猫云登录成功，Token 已自动保存')
+      setLzPassword('')
+      setLz2faPending(null)
+      setLz2faCode('')
+      loadTokenStatus()
+    } catch (e: any) {
+      message.error(e?.response?.data?.error ?? e?.response?.data?.detail ?? '验证失败')
+    } finally {
+      setLz2faSubmitting(false)
     }
   }
 
@@ -200,7 +248,7 @@ export function SettingsPage({ settings, onSaved }: Props) {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: vals.tg_chat_id, text: '🔔 Akile Monitor 测试消息，连接正常！' }),
+          body: JSON.stringify({ chat_id: vals.tg_chat_id, text: '🔔 个人 vps 监控 测试消息，连接正常！' }),
         }
       )
       const data = await res.json()
@@ -296,6 +344,46 @@ export function SettingsPage({ settings, onSaved }: Props) {
               ，复制输出的值粘贴到上方 Token 输入框即可。
             </Text>
           </Form.Item>
+
+          <Collapse
+            ghost
+            style={{ marginBottom: 12 }}
+            items={[
+              {
+                key: 'lazycat-login',
+                label: '懒猫云一键登录（账号 + 密码 + 2FA）',
+                children: (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <Space wrap>
+                      <Input
+                        placeholder="懒猫云账号（手机号/邮箱）"
+                        value={lzUsername}
+                        onChange={e => setLzUsername(e.target.value)}
+                        style={{ width: 220 }}
+                        autoComplete="username"
+                      />
+                      <Input.Password
+                        placeholder="密码"
+                        value={lzPassword}
+                        onChange={e => setLzPassword(e.target.value)}
+                        style={{ width: 200 }}
+                        autoComplete="current-password"
+                      />
+                    </Space>
+                    <Button
+                      type="primary"
+                      icon={<LoginOutlined />}
+                      loading={loggingInLz}
+                      onClick={lazycatLogin}
+                      style={{ alignSelf: 'flex-start' }}
+                    >
+                      登录并保存 Token
+                    </Button>
+                  </div>
+                ),
+              },
+            ]}
+          />
 
           <Space size="large" wrap>
             <Form.Item label="自动续期" name="auto_refresh_token" valuePropName="checked" tooltip="后端拿到首个 Token 后自动续命，无需重新登录">
@@ -663,6 +751,36 @@ export function SettingsPage({ settings, onSaved }: Props) {
           autoComplete="one-time-code"
           style={{ width: 200 }}
           onPressEnter={submit2fa}
+        />
+      </Modal>
+
+      <Modal
+        title="懒猫云二次验证"
+        open={lz2faPending !== null}
+        onCancel={() => { setLz2faPending(null); setLoggingInLz(false) }}
+        footer={[
+          <Button key="cancel" onClick={() => { setLz2faPending(null); setLoggingInLz(false) }}>
+            取消
+          </Button>,
+          <Button key="submit" type="primary" loading={lz2faSubmitting} onClick={submitLz2fa}>
+            验证
+          </Button>,
+        ]}
+        destroyOnClose
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Text type="secondary">
+            懒猫云要求二次验证，请输入你的验证器 App 中的 6 位动态码：
+          </Text>
+        </div>
+        <Input
+          placeholder="6 位验证码"
+          value={lz2faCode}
+          onChange={e => setLz2faCode(e.target.value)}
+          maxLength={6}
+          autoComplete="one-time-code"
+          style={{ width: 200 }}
+          onPressEnter={submitLz2fa}
         />
       </Modal>
 

@@ -1,10 +1,10 @@
 services:
-  akile-monitor:
+  personal-vps-monitor:
     image: ghcr.io/ashanzzz/akile-monitor:latest
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: akile-monitor
+    container_name: personal-vps-monitor
     restart: unless-stopped
     ports:
       - "${PORT:-8080}:80"
@@ -13,7 +13,7 @@ services:
       - PUBLIC_READ_TOKEN=${PUBLIC_READ_TOKEN}
       - PUBLIC_CONTROL_TOKEN=${PUBLIC_CONTROL_TOKEN}
     volumes:
-      - akile-data:/app/data
+      - personal-vps-monitor-data:/app/data
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1/api/version', timeout=5).read()"]
       interval: 30s
@@ -22,4 +22,4 @@ services:
       start_period: 30s
 
 volumes:
-  akile-data:
+  personal-vps-monitor-data:

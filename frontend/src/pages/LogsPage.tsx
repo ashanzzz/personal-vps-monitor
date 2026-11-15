@@ -10,6 +10,7 @@ export function LogsPage() {
   const [content, setContent] = useState('')
   const [lines, setLines] = useState(500)
   const [loading, setLoading] = useState(false)
+  const [logFilter, setLogFilter] = useState('all')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -25,12 +26,24 @@ export function LogsPage() {
 
   useEffect(() => { load() }, [load])
 
+  const filteredContent = () => {
+    if (logFilter === 'all') return content
+    const l = content.split('\n')
+    if (logFilter === 'sniper') {
+      return l.filter(line => line.includes('sniper') || line.includes('SNIPER') || line.includes('秒杀')).join('\n') || '(暂无抢购/秒杀日志)'
+    }
+    if (logFilter === 'autobuy') {
+      return l.filter(line => line.includes('buy') || line.includes('purchased') || line.includes('购买')).join('\n') || '(暂无自动购买日志)'
+    }
+    return content
+  }
+
   const download = () => {
     const blob = new Blob([content], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `akile-monitor-${new Date().toISOString().slice(0, 19)}.log`
+    a.download = `personal-vps-monitor-${new Date().toISOString().slice(0, 19)}.log`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -41,6 +54,16 @@ export function LogsPage() {
       title="调试日志"
       extra={
         <Space>
+          <Select
+            value={logFilter}
+            style={{ width: 150 }}
+            onChange={setLogFilter}
+            options={[
+              { value: 'all', label: '全部运行日志' },
+              { value: 'sniper', label: '🎯 仅看抢购/秒杀' },
+              { value: 'autobuy', label: '🛒 仅看自动购买' },
+            ]}
+          />
           <Select value={lines} style={{ width: 120 }} onChange={setLines}
             options={[
               { value: 200, label: '最近 200 行' },
@@ -54,14 +77,14 @@ export function LogsPage() {
       }
     >
       <Text type="secondary" style={{ fontSize: 12 }}>
-        出问题时点「下载」把日志发给开发者即可定位。日志含 poll.fetch / autobuy.match / autobuy.result / token.refresh 等结构化事件。
+        出问题时点「下载」把日志发给开发者即可定位。日志含 poll.fetch / sniper.dry_run_match / sniper.execute / autobuy 等结构化事件。
       </Text>
       <pre style={{
         marginTop: 12, background: '#0a0a0a', color: '#9fdf9f', padding: 12,
         borderRadius: 6, maxHeight: '65vh', overflow: 'auto', fontSize: 12,
         lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
       }}>
-        {content}
+        {filteredContent()}
       </pre>
     </Card>
   )

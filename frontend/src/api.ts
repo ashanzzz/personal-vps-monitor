@@ -145,6 +145,7 @@ export type ScoreRules = Record<ScoreDimension, number>
 export interface AppSettings {
   // API & connection
   akile_token: string
+  lazycat_token: string
   refresh_interval: number
   auto_refresh_token: boolean
   refresh_margin_min_seconds: number
@@ -264,6 +265,9 @@ export const api = {
 
   akileLogin: (username: string, password: string, ga_code?: string) =>
     http.post<TokenStatus & { need_2fa?: boolean; message?: string }>('/api/akile-login', { username, password, ga_code: ga_code || '' }).then(r => r.data),
+
+  lazycatLogin: (username: string, password: string, ga_code?: string) =>
+    http.post<{ status: string; message?: string; token_length?: number }>('/api/lazycat/login', { username, password, ga_code: ga_code || '' }).then(r => r.data),
 
   // --- Auth ---
   authStatus: () =>

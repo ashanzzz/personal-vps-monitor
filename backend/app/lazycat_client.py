@@ -106,12 +106,20 @@ def _guard_instances_base(url: str, method: str) -> None:
 
 # --- Authentication & User Profile ---
 
-async def login(username: str, password: str, device_fingerprint: str = "") -> dict[str, Any]:
-    """POST /auth/login - Turnstile is currently disabled on dash.lazycat.wiki."""
+async def login(
+    username: str,
+    password: str,
+    device_fingerprint: str = "",
+    totp_code: str | None = None,
+) -> dict[str, Any]:
+    """POST /auth/login - Turnstile is currently disabled on dash.lazycat.wiki.
+
+    totp_code：若账号开启了 2FA（TOTP），传入当前 6 位动态码。
+    """
     payload = {
         "username": username,
         "password": password,
-        "totpCode": None,
+        "totpCode": totp_code,
         "recoveryCode": None,
         "turnstileToken": None,
         "deviceFingerprint": device_fingerprint,
