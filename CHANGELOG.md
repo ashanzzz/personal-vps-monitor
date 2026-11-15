@@ -2,6 +2,17 @@
 
 本项目遵循语义化版本。日期为发布日。
 
+## v0.12.0
+
+懒猫云实例销毁类接口全面封禁（用户铁律）。
+
+### 安全
+- **懒猫云实例绝不可销毁**：按用户明令，懒猫云（dash.lazycat.wiki）的实例不允许以任何方式销毁。已在三个层面永久删除该能力：
+  - `backend/app/lazycat_client.py`：不实现 `destroy` / `destroy-info` / `delete-container` / `DELETE /instances/{id}` / `delete-and-refund` / `admin refund` 任何方法；新增 `ForbiddenLazyCatOperation` 异常与 `_assert_not_forbidden(url, method)` 运行时硬拦截，即使将来误加方法，请求也会在发出前抛错，不会真正打到懒猫云。
+  - `backend/tests/test_lazycat.py`：新增 16 个用例覆盖「6 类销毁路径必须拦截」+「9 类正常运维路径不得误拦」+「客户端不得出现销毁方法」，防止回归。
+  - `/opt/data/projects/lazycat-analyzer/forbidden_apis.js`：逆向管线新增硬性排除表，`generate_api_docs.js` 在生成 API 清单时直接剔除，已跑通并永久移除 4 个销毁接口（`billing.destroyInstance`、`billing.getDestroyInfo`、`instances.delete`、`instances.deleteContainer`）。
+- **前端无销毁入口**：前端与 UI 中不存在任何「销毁实例 / 删除实例」的按钮、菜单、确认弹窗或提示文案——不是加二次确认，而是整个入口不存在。
+
 ## v0.11.0
 
 自动签到随机化 + 签到设置迁移至账户页 + 轮询间隔刻度按钮。

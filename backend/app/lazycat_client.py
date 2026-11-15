@@ -2,6 +2,23 @@
 LazyCatCloud (dash.lazycat.wiki) API client.
 All methods return raw dicts/lists from the API.
 Token is passed per-call so it can be updated dynamically.
+
+=== 【用户铁律 · 永久生效】懒猫云实例绝不可销毁 ===
+
+懒猫云的实例**绝对不能销毁**。本客户端**故意不实现、也不得实现**以下接口：
+
+  POST   /instances/{id}/destroy              —— 销毁实例
+  GET    /instances/{id}/destroy-info         —— 销毁报价信息
+  POST   /instances/{id}/delete-container     —— 删除实例容器
+  DELETE /instances/{id}                      —— 删除实例本体
+  POST   /instances/{id}/delete-and-refund    —— 删除并退款
+  POST   /admin/instances/{id}/refund         —— 管理员退款
+
+同样**禁止**在前端/UI 里出现任何「销毁实例」「删除实例」的按钮、菜单、
+确认弹窗或提示文案——不是加二次确认，而是整个入口不存在。
+
+下面 `_FORBIDDEN_PATHS` + `_assert_not_forbidden()` 是运行时硬拦截：
+即使将来有人误加方法，请求也会在发出前直接抛错，不会真的打到懒猫云。
 """
 from __future__ import annotations
 
@@ -14,6 +31,38 @@ logger = logging.getLogger(__name__)
 
 BASE = "https://dash.lazycat.wiki/api"
 TIMEOUT = 15
+
+# 销毁/删除实例本体 —— 硬性禁止，任何情况下不得调用
+_FORBIDDEN_PATHS = (
+    "/instances/{}/destroy",
+    "/instances/{}/destroy-info",
+    "/instances/{}/delete-container",
+    "/instances/{}/delete-and-refund",
+)
+
+
+class ForbiddenLazyCatOperation(RuntimeError):
+    """试图对懒猫云实例执行销毁/删除类操作时抛出（用户铁律，不可绕过）。"""
+
+
+def _assert_not_forbidden(url: str, method: str = "GET") -> None:
+    """拦截任何指向「销毁/删除实例本体」的请求。"""
+    path = url.split("?")[0].rstrip("/")
+    lowered = path.lower()
+    # 实例本体的 DELETE /instances/{id} —— 仅在 DELETE 方法下视为删除本体
+    if method.upper() == "DELETE":
+        segs = [s for s in lowered.split("/") if s]
+        if "instances" in segs:
+            tail = segs[segs.index("instances"):]
+            if len(tail) == 2 and tail[0] == "instances":
+                raise ForbiddenLazyCatOperation(
+                    "已拦截：懒猫云实例绝不可删除（用户铁律）。URL=%s" % url
+                )
+    for marker in ("/destroy", "/delete-container", "/delete-and-refund", "/refund"):
+        if marker in lowered:
+            raise ForbiddenLazyCatOperation(
+                "已拦截：懒猫云实例绝不可销毁（用户铁律）。URL=%s" % url
+            )
 
 # Default to our clean local proxy (192.168.8.11:7890) to ensure zero Cloudflare 403 blocks
 PROXY = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or "http://192.168.8.11:7890"
@@ -41,6 +90,18 @@ def _headers(token: str | None = None) -> dict[str, str]:
 
 def _get_client(timeout: float = TIMEOUT) -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=timeout, proxy=PROXY)
+
+
+def _guard_instances_base(url: str, method: str) -> None:
+    """DELETE 到 /instances/{id} 是删实例本体 —— 铁律拦截。"""
+    if method.upper() == "DELETE":
+        segs = [s for s in url.split("?")[0].rstrip("/").lower().split("/") if s]
+        if "instances" in segs:
+            tail = segs[segs.index("instances"):]
+            if len(tail) == 2 and tail[0] == "instances":
+                raise ForbiddenLazyCatOperation(
+                    "已拦截：懒猫云实例绝不可删除（用户铁律）。URL=%s" % url
+                )
 
 
 # --- Authentication & User Profile ---
