@@ -249,13 +249,15 @@ async def get_unified_servers(
                 price_cny = round(price_cents / 100, 2)
                 monthly_price = round(price_cny / cycle, 2) if cycle > 0 else price_cny
                 server_name = s.get("server_re_name") or s.get("server_name") or f"ACCK-{sid}"
+                # ACCK 的 disk 单位是 MB（5120 = 5G），直接当 GB 会显示成 5120G
+                disk_gb = max(1, int(s.get("disk", 10240) or 10240) // 1024)
                 cost_eff = evaluate_cost_effectiveness(
                     item_type="server",
                     price_cny=monthly_price,
                     renew_price_cny=monthly_price,
                     cpu=s.get("cpu", 1),
                     memory_mb=s.get("memory", 1024),
-                    disk_gb=s.get("disk", 10),
+                    disk_gb=disk_gb,
                     bandwidth_mbps=s.get("bandwidth", 1000),
                     flow_total_gb=s.get("flow", 1000),
                     name=server_name,
@@ -278,7 +280,7 @@ async def get_unified_servers(
                     "ssh_port": 22,
                     "cpu": s.get("cpu", 1),
                     "memory": s.get("memory", 1024),
-                    "disk": s.get("disk", 10),
+                    "disk": disk_gb,
                     "bandwidth": s.get("bandwidth", 1000),
                     "flow": s.get("flow", 0),
                     "used_flow": 0,
