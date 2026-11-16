@@ -308,23 +308,41 @@ async def get_unified_servers(
             lz_list = await lazycat_client.get_my_instances(lazycat_tok)
             for s in lz_list:
                 sid = s.get("id")
-                cpu = int(s.get("cpu", 100) or 100)
+                # cpu 字段是 CPU 优先级限制(如 10)，真实核数是 cpuCores
+                cores = int(s.get("cpuCores") or max(1, int(s.get("cpu", 100) or 100) // 100))
                 mem = int(s.get("memory", 512) or 512)
-                disk = int(s.get("disk", 5120) or 5120) // 1024
+                disk = max(1, int(s.get("disk", 5120) or 5120) // 1024)  # 字段单位是 MB
                 price = float(s.get("renewalPrice", 0) or s.get("billingPrice", 0) or 0)
                 host = s.get("host") or {}
                 area = host.get("country_code") or s.get("region") or "HK"
                 server_name = s.get("name") or s.get("hostname") or f"LZ-{sid}"
 
+                # 带宽：limitsIngress 形如 "2000Mbit"
+                bw_raw = str(s.get("limitsIngress") or "")
+                try:
+                    bandwidth = int(float(bw_raw.lower().replace("mbit", "").replace("m", "").strip())) or 100
+                except (ValueError, TypeError):
+                    bandwidth = 100
+
+                # 流量：字节字符串 -> GB
+                def _bytes_to_gb(v: Any) -> float:
+                    try:
+                        return round(float(str(v)) / (1024 ** 3), 2)
+                    except (ValueError, TypeError):
+                        return 0.0
+
+                flow_total = _bytes_to_gb(s.get("monthlyTrafficLimit"))
+                flow_used = _bytes_to_gb(s.get("monthlyTrafficUsed"))
+
                 cost_eff = evaluate_cost_effectiveness(
                     item_type="server",
                     price_cny=price,
                     renew_price_cny=price,
-                    cpu=max(1, cpu // 100),
+                    cpu=cores,
                     memory_mb=mem,
                     disk_gb=disk,
-                    bandwidth_mbps=s.get("bandwidth", 100),
-                    flow_total_gb=s.get("trafficTotal", 500) or 500,
+                    bandwidth_mbps=bandwidth,
+                    flow_total_gb=flow_total or 500,
                     name=server_name,
                     node_name=host.get("name", "Incus Node"),
                     area=area,
@@ -350,12 +368,12 @@ async def get_unified_servers(
                     "ssh_user": "root",
                     "ssh_password": "",
                     "ssh_port": 22,
-                    "cpu": max(1, cpu // 100),
+                    "cpu": cores,
                     "memory": mem,
                     "disk": disk,
-                    "bandwidth": s.get("bandwidth", 100),
-                    "flow": s.get("trafficTotal", 0) or 0,
-                    "used_flow": s.get("trafficUsed", 0) or 0,
+                    "bandwidth": bandwidth,
+                    "flow": flow_total,
+                    "used_flow": flow_used,
                     "due_time": due_t,
                     "auto_renew": False,
                     "price_cents": int(price * 100),

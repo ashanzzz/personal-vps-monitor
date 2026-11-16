@@ -369,6 +369,9 @@ export const api = {
     http.post<RefreshState>('/api/unified/refresh/slow').then(r => r.data),
 
   // --- Unified Dual-Platform Management ---
+  getPlatformsHealth: (force = false) =>
+    http.get<PlatformsHealth>('/api/platforms/health', { params: force ? { force: true } : {} }).then(r => r.data),
+
   getUnifiedServers: () =>
     http.get<{ total: number; servers: UnifiedServer[]; counts: Record<string, number> }>('/api/unified/servers').then(r => r.data),
 
@@ -429,7 +432,7 @@ export interface RefreshState {
 
 export interface UnifiedServer {
   uid: string
-  platform: 'akile' | 'acck'
+  platform: 'akile' | 'acck' | 'lazycat'
   id: number
   server_id: string
   name: string
@@ -448,6 +451,12 @@ export interface UnifiedServer {
   price?: number
   price_cents?: number
   price_cny: number
+  price_monthly?: number
+  fair_market_value_cny?: number | null
+  value_ratio?: number | null
+  monthly_leverage?: number | null
+  m_market?: number | null
+  valuation_rationale?: string | null
   cycle: number
   cycle_text?: string
   status: number
@@ -659,6 +668,27 @@ export interface AcckAccountInfo {
   shop?: Record<string, unknown> | null
   errors: string[]
   updated_at: string | null
+}
+
+// --- 平台健康度 ---
+export interface PlatformHealth {
+  key: 'lazycat' | 'akile' | 'acck'
+  name: string
+  host: string
+  configured: boolean
+  token_valid: boolean
+  error: string | null
+  data_source: 'live' | 'cache'
+  data_source_label: string
+  cache_updated_at: string | null
+  display_name?: string | null
+  vip_level?: number | null
+}
+
+export interface PlatformsHealth {
+  checked_at: string
+  cache_ttl_seconds: number
+  platforms: PlatformHealth[]
 }
 
 // --- LazyCat 懒猫云（字段名严格对齐 dash.lazycat.wiki 真实响应）---

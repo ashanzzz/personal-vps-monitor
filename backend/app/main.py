@@ -7,7 +7,9 @@ import asyncio
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
+from typing import Any
 from datetime import datetime, timedelta
 
 import httpx
@@ -127,12 +129,20 @@ async def _run_account_poll() -> None:
     async with SessionLocal() as db:
         settings = await get_all_settings(db)
     token = settings.get("akile_token") or ""
-    if not token:
-        return
-    try:
-        await poll_account(token, settings)
-    except Exception:
-        logger.exception("account poll failed")
+    if token:
+        try:
+            await poll_account(token, settings)
+        except Exception:
+            logger.exception("akile account poll failed")
+
+    # ACCK 与本轮同一节奏同步，避免缓存长期陈旧（此前完全没有定时任务）
+    acck_token = settings.get("acck_token") or ""
+    if acck_token:
+        from .poller import poll_acck_account
+        try:
+            await poll_acck_account(acck_token, settings)
+        except Exception:
+            logger.exception("acck account poll failed")
 
 
 def _reschedule_account_job(settings: dict) -> None:
@@ -905,6 +915,123 @@ async def manual_checkin(_: str = Depends(require_auth), db: AsyncSession = Depe
         return result
     except httpx.HTTPError as e:
         return {"error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Platform Health —— 三平台 Token 实时健康度与数据来源（live / cache）
+# ---------------------------------------------------------------------------
+
+_HEALTH_CACHE: dict[str, Any] = {"at": 0.0, "data": None}
+_HEALTH_TTL_SECONDS = 60.0
+
+
+@app.get("/api/platforms/health", tags=["admin"])
+async def get_platforms_health(
+    force: bool = False,
+    _: str = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """实测各平台 Token 是否可用，并标明数据是远端实时还是本地缓存。
+
+    force=true 跳过 60 秒内存缓存，强制重新探测。
+    """
+    now = time.monotonic()
+    if not force and _HEALTH_CACHE["data"] is not None and (now - _HEALTH_CACHE["at"]) < _HEALTH_TTL_SECONDS:
+        return _HEALTH_CACHE["data"]
+
+    settings = await get_all_settings(db)
+
+    async def probe_lazycat(token: str) -> dict[str, Any]:
+        if not token:
+            return {"token_valid": False, "error": "未配置 Token"}
+        try:
+            info = await lazycat_client.get_user_info(lazycat_client.clean_token(token))
+            user = info.get("user") or {}
+            return {
+                "token_valid": True,
+                "error": None,
+                "display_name": user.get("username"),
+                "vip_level": user.get("vipLevel"),
+            }
+        except httpx.HTTPStatusError as e:
+            return {"token_valid": False, "error": f"HTTP {e.response.status_code}"}
+        except Exception as e:
+            return {"token_valid": False, "error": f"{type(e).__name__}: {str(e)[:120]}"}
+
+    async def probe_akile(token: str) -> dict[str, Any]:
+        if not token:
+            return {"token_valid": False, "error": "未配置 Token"}
+        try:
+            await akile_client.get_user_info(token)
+            return {"token_valid": True, "error": None}
+        except httpx.HTTPStatusError as e:
+            return {"token_valid": False, "error": f"HTTP {e.response.status_code}"}
+        except Exception as e:
+            return {"token_valid": False, "error": f"{type(e).__name__}: {str(e)[:120]}"}
+
+    async def probe_acck(token: str) -> dict[str, Any]:
+        if not token:
+            return {"token_valid": False, "error": "未配置 Token"}
+        from . import acck_client
+        try:
+            await acck_client.get_user_info(token)
+            return {"token_valid": True, "error": None}
+        except httpx.HTTPStatusError as e:
+            return {"token_valid": False, "error": f"HTTP {e.response.status_code}"}
+        except Exception as e:
+            return {"token_valid": False, "error": f"{type(e).__name__}: {str(e)[:120]}"}
+
+    lz_tok = settings.get("lazycat_token") or ""
+    ak_tok = settings.get("akile_token") or ""
+    ac_tok = settings.get("acck_token") or ""
+
+    lz_res, ak_res, ac_res = await asyncio.gather(
+        probe_lazycat(lz_tok), probe_akile(ak_tok), probe_acck(ac_tok)
+    )
+
+    # 缓存时间戳
+    ak_row = await db.scalar(select(AccountCache).where(AccountCache.id == 1))
+    ac_row = await db.scalar(select(AccountCache).where(AccountCache.id == 2))
+
+    payload = {
+        "checked_at": datetime.now().isoformat(timespec="seconds"),
+        "cache_ttl_seconds": _HEALTH_TTL_SECONDS,
+        "platforms": [
+            {
+                "key": "lazycat",
+                "name": "懒猫云",
+                "host": "dash.lazycat.wiki",
+                "configured": bool(lz_tok),
+                "data_source": "live",
+                "data_source_label": "远端实时",
+                "cache_updated_at": None,
+                **lz_res,
+            },
+            {
+                "key": "akile",
+                "name": "AkileCloud",
+                "host": "api.akile.ai",
+                "configured": bool(ak_tok),
+                "data_source": "cache",
+                "data_source_label": "本地缓存（5 分钟同步）",
+                "cache_updated_at": ak_row.updated_at.isoformat() if ak_row and ak_row.updated_at else None,
+                **ak_res,
+            },
+            {
+                "key": "acck",
+                "name": "ACCK",
+                "host": "acck.io",
+                "configured": bool(ac_tok),
+                "data_source": "cache",
+                "data_source_label": "本地缓存",
+                "cache_updated_at": ac_row.updated_at.isoformat() if ac_row and ac_row.updated_at else None,
+                **ac_res,
+            },
+        ],
+    }
+    _HEALTH_CACHE["at"] = now
+    _HEALTH_CACHE["data"] = payload
+    return payload
 
 
 # ---------------------------------------------------------------------------

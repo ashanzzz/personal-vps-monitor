@@ -14,6 +14,7 @@ import { api, clearToken, getToken, setUnauthorizedHandler } from './api'
 import type { AlertEvent, AppSettings, VersionInfo, RefreshState } from './api'
 import { useWebSocket } from './useWebSocket'
 import { UnifiedDashboard } from './pages/UnifiedDashboard'
+import { PlatformOverviewPage } from './pages/PlatformOverviewPage'
 import { UnifiedStorePage } from './pages/UnifiedStorePage'
 import { UnifiedSecondhandPage } from './pages/UnifiedSecondhandPage'
 import { UnifiedBillingPage } from './pages/UnifiedBillingPage'
@@ -32,6 +33,7 @@ const { Text } = Typography
 
 type PageKey =
   | 'overview'
+  | 'servers'
   | 'store'
   | 'secondhand'
   | 'billing'
@@ -196,7 +198,8 @@ export default function App() {
               }}
               style={{ borderRight: 0, padding: '8px 0' }}
               items={[
-                { key: 'overview', icon: <DashboardOutlined />, label: '系统大盘' },
+                { key: 'overview', icon: <DashboardOutlined />, label: '平台总览' },
+                { key: 'servers', icon: <CloudServerOutlined />, label: '实例资产' },
                 { key: 'store', icon: <ShoppingCartOutlined />, label: '一手新购' },
                 { key: 'secondhand', icon: <SwapOutlined />, label: '二手集市' },
                 { key: 'billing', icon: <CreditCardOutlined />, label: '账单与支付' },
@@ -225,7 +228,8 @@ export default function App() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                 <span style={{ fontSize: 16, fontWeight: 700, color: '#0f172a' }}>
                   {{
-                    overview: '双平台核心大盘',
+                    overview: '平台总览',
+                    servers: '实例资产',
                     store: '官方一手云服务器商城',
                     secondhand: '二手交易与捡漏集市',
                     billing: '统一订单与账单支付中心',
@@ -297,7 +301,8 @@ export default function App() {
                 <Spin size="large" style={{ display: 'block', margin: '140px auto' }} />
               ) : (
                 <>
-                  {page === 'overview' && <UnifiedDashboard />}
+                  {page === 'overview' && <PlatformOverviewPage onGotoSettings={() => setPage('settings')} />}
+                  {page === 'servers' && <UnifiedDashboard />}
                   {page === 'store' && <UnifiedStorePage />}
                   {page === 'secondhand' && <UnifiedSecondhandPage />}
                   {page === 'billing' && <UnifiedBillingPage />}
