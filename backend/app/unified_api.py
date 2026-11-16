@@ -23,8 +23,6 @@ from .database import get_db
 from . import akile_client, acck_client, lazycat_client
 from .refresh_manager import refresh_mgr
 from .route_analyzer import (
-    analyze_route,
-    analyze_traffic,
     evaluate_secondhand_listing,
     evaluate_cost_effectiveness,
 )
@@ -519,7 +517,7 @@ async def renew_server(
     if req.platform == "acck":
         if not acck_tok:
             raise HTTPException(400, "ACCK token not configured")
-        
+
         # ACCK renews in 1-month increments; loop cycle times if requested
         cycle_count = max(1, req.cycle)
         orders_created = []
@@ -1327,7 +1325,7 @@ async def buy_secondhand_item(
         if not req.force_buy_depleted:
             try:
                 listings = await acck_client.get_exchange_listings(1, 100)
-                matched = next((l for l in listings if l.get("id") == req.listing_id), None)
+                matched = next((lst for lst in listings if lst.get("id") == req.listing_id), None)
                 if matched and matched.get("snapshot_json"):
                     sn = json.loads(matched["snapshot_json"])
                     f_total = float(sn.get("flow_gb", 0) or 0)
@@ -1365,13 +1363,6 @@ async def get_market_trades(
 ) -> dict[str, Any]:
     """Retrieve dual-platform secondhand market trade transactions & arbitrage statistics."""
     akile_tok, acck_tok, lazycat_tok = await _get_tokens(db)
-    my_acck_listings: list[dict[str, Any]] = []
-
-    if acck_tok:
-        try:
-            res = await acck_client.get_order_list(acck_tok, 1, 20)
-        except Exception:
-            pass
 
     # Standard trade record for the current test arbitrage
     trades = [

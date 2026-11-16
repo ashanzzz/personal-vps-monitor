@@ -4,11 +4,10 @@ Standardizes heterogeneous VPS listings into canonical financial asset SKUs,
 computes daily robust median price distribution, tracks volume, and diagnoses market downturns.
 """
 
-import math
 import statistics
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -366,7 +365,7 @@ def diagnose_market_sentiment(
     # 3. 统计全盘标的溢价状态分布
     accumulated_count = sum(1 for r in kline_rows if r["market_state"] == "DOWNTURN_ACCUMULATED")
     oversold_count = sum(1 for r in kline_rows if r["market_state"] == "UNDERVALUED_OVERSOLD")
-    bubble_count = sum(1 for r in kline_rows if r["market_state"] == "OVERVALUED_BUBBLE")
+    bubble_count = sum(1 for r in kline_rows if r["market_state"] == "OVERVALUED_BUBBLE")  # noqa: F841  预留：泡沫标的占比统计
 
     # 4. 判定大盘宏观低迷程度
     # 低迷得分 (0-100): 分数越高越低迷冷清

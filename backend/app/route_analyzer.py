@@ -550,7 +550,7 @@ def evaluate_cost_effectiveness(
     # 1) 普通国际BGP (C级) 流量根本不值钱！绝不能因为 20000G 就膨胀产能！超过 1000G 边际价值极度递减。
     # 2) 二手每元性价比必须看真实总代价 (转让售价 + 月供续费 + 换IP成本)，绝不能只除以转让挂牌价！
     # 3) 5分【拦截避坑】的失血机，其性价比分/元绝不能高达几十，必须与总评级严格对齐！
-    
+
     route_tier = str(route_info.get("tier") or "C")
 
     # 对流量做线路加权：C级普通国际流量按对数折算，只有S/A级优质优化流量才具备高商业价值
@@ -562,12 +562,12 @@ def evaluate_cost_effectiveness(
 
     ram_ratio = max(0.25, min(4.0, memory_mb / 1024.0))
     disk_ratio = max(0.5, min(4.0, disk_gb / 10.0))
-    bw_ratio = max(0.5, min(10.0, bandwidth_mbps / 200.0))
+    bw_ratio = max(0.5, min(10.0, bandwidth_mbps / 200.0))  # noqa: F841  预留：接入带宽加权评分后使用
 
     # 物理配置动态综合加权 (以 1000G / 1C1G / 10G / 500M~1000M 标准物理机型为 1.0 基准)
     # 严格对齐山哥市场动态：硬件、流量多少直接决定公允产出比，绝不能机械一刀切！
     flow_ratio = (flow_total_gb / 1000.0) if route_tier != "C" else t_effective
-    phi_norm = 0.40 * flow_ratio + 0.20 * ram_ratio + 0.15 * disk_ratio + 0.25 * min(2.0, bandwidth_mbps / 500.0)
+    phi_norm = 0.40 * flow_ratio + 0.20 * ram_ratio + 0.15 * disk_ratio + 0.25 * min(2.0, bandwidth_mbps / 500.0)  # noqa: F841  预留：物理配置归一化系数
 
     # -------------------------------------------------------------
     # 6. 山哥四大物理维度模型 (网络40分 / 配置20分 / 带宽10分 / 流量20分 + 附加IP 10分)

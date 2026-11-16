@@ -529,10 +529,10 @@ async def get_sniper_status():
     from .database import SessionLocal
     from .config import get_all_settings
     from .buy_engine import buy_state
-    
+
     async with SessionLocal() as db:
         settings = await get_all_settings(db)
-        
+
     cfg = settings.get("secondhand_buy") or {}
     task = sniper._sniper_task
     exc_str = None
@@ -542,7 +542,7 @@ async def get_sniper_status():
             exc_str = str(exc) if exc else "None (exited normally)"
         except Exception as e:
             exc_str = f"failed to get exc: {e}"
-            
+
     return {
         "status": "running" if (task and not task.done()) else "stopped",
         "task_exists": task is not None,
@@ -1002,16 +1002,16 @@ async def get_checkin_status(db: AsyncSession = Depends(get_db)):
     q_hist = select(CheckinLog).order_by(CheckinLog.id.desc()).limit(30)
     hist_rows = (await db.execute(q_hist)).scalars().all()
 
-    def serialize_log(l):
-        if not l:
+    def serialize_log(log_row):
+        if not log_row:
             return None
         return {
-            "id": l.id,
-            "platform": l.platform,
-            "checkin_date": l.checkin_date,
-            "status": l.status,
-            "message": l.message,
-            "created_at": l.created_at.isoformat() if l.created_at else None,
+            "id": log_row.id,
+            "platform": log_row.platform,
+            "checkin_date": log_row.checkin_date,
+            "status": log_row.status,
+            "message": log_row.message,
+            "created_at": log_row.created_at.isoformat() if log_row.created_at else None,
         }
 
     return {
