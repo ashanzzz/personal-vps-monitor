@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Alert, App as AntApp, Badge, Button, Card, Col, Descriptions, Empty, Row,
-  Space, Spin, Statistic, Table, Tag, Tooltip, Typography,
+  Alert, App as AntApp, Badge, Button, Card, Col, Descriptions, Row,
+  Space, Spin, Statistic, Table, Tooltip, Typography,
 } from 'antd'
 import {
   ApiOutlined, CheckCircleFilled, CloseCircleFilled, CloudServerOutlined,
   ReloadOutlined, SyncOutlined, ThunderboltOutlined, WarningOutlined,
 } from '@ant-design/icons'
-import type { ColumnsType } from 'antd/es/table'
 import { api } from '../api'
 import type { PlatformHealth, PlatformsHealth, UnifiedServer } from '../api'
 
@@ -47,6 +46,17 @@ function daysLeft(ts: number | null | undefined): number | null {
   if (!ts) return null
   const ms = ts > 1e11 ? ts : ts * 1000
   return Math.ceil((ms - Date.now()) / 86400000)
+}
+
+interface PlatformSummary {
+  key: string
+  name: string
+  count: number
+  nearestDue: number | null
+  cost: number
+  mode: 'live' | 'cache'
+  lastSynced: string | null
+  onGo?: () => void
 }
 
 const PLATFORM_COLOR: Record<string, string> = {
@@ -93,115 +103,23 @@ export function PlatformOverviewPage({ onGotoSettings }: { onGotoSettings?: () =
   }
 
   const platforms = health?.platforms ?? []
+
+  const summaries: PlatformSummary[] = platforms.map((p) => {
+    const rows = servers.filter((s) => s.platform === p.key)
+    const dues = rows.map((r) => r.due_time).filter((v): v is number => Boolean(v))
+    const cost = rows.reduce((sum, r) => sum + (Number(r.price_monthly) || 0), 0)
+    return {
+      key: p.key,
+      name: p.name,
+      count: rows.length,
+      nearestDue: dues.length ? Math.min(...dues) : null,
+      cost,
+      mode: p.data_source,
+      lastSynced: p.cache_updated_at,
+    }
+  })
   const broken = platforms.filter(p => p.configured && !p.token_valid)
   const unconfigured = platforms.filter(p => !p.configured)
-
-  const columns: ColumnsType<UnifiedServer> = [
-    {
-      title: '平台',
-      key: 'platform',
-      width: 100,
-      filters: [
-        { text: '懒猫云', value: 'lazycat' },
-        { text: 'Akile', value: 'akile' },
-        { text: 'ACCK', value: 'acck' },
-      ],
-      onFilter: (v, r) => r.platform === v,
-      render: (_: unknown, r) => {
-        const label = r.platform === 'lazycat' ? '懒猫云' : r.platform === 'akile' ? 'Akile' : 'ACCK'
-        return <Tag color={PLATFORM_COLOR[r.platform] ?? 'default'}>{label}</Tag>
-      },
-    },
-    {
-      title: '名称',
-      key: 'name',
-      render: (_: unknown, r) => <Text strong>{r.name}</Text>,
-    },
-    {
-      title: '区域',
-      key: 'area',
-      width: 160,
-      render: (_: unknown, r) => (
-        <Text type="secondary">{r.node_name || r.area_name || '—'}</Text>
-      ),
-    },
-    {
-      title: '配置',
-      key: 'spec',
-      width: 150,
-      render: (_: unknown, r) => `${r.cpu ?? '—'}C / ${r.memory ?? '—'}M / ${r.disk ?? '—'}G`,
-    },
-    {
-      title: 'IP',
-      key: 'ip',
-      width: 150,
-      render: (_: unknown, r) => (r.ipv4 ? <Text code>{r.ipv4}</Text> : '—'),
-    },
-    {
-      title: '流量',
-      key: 'flow',
-      width: 130,
-      render: (_: unknown, r) => {
-        const used = Number(r.used_flow ?? 0)
-        const total = Number(r.flow ?? 0)
-        if (!total) return '—'
-        return `${used}G / ${total}G`
-      },
-    },
-    {
-      title: '远端更新',
-      key: 'synced',
-      width: 150,
-      render: (_: unknown, r) => {
-        if (r.sync_mode === 'live') {
-          return (
-            <Space size={4}>
-              <ThunderboltOutlined style={{ color: '#059669', fontSize: 11 }} />
-              <Text style={{ fontSize: 12, color: '#059669' }}>实时拉取</Text>
-            </Space>
-          )
-        }
-        if (!r.last_synced_at) {
-          return <Text type="danger" style={{ fontSize: 12 }}>从未同步</Text>
-        }
-        const mins = Math.round((Date.now() - new Date(r.last_synced_at).getTime()) / 60000)
-        const stale = mins > 10
-        return (
-          <Space direction="vertical" size={0}>
-            <Text style={{ fontSize: 12 }}>{fmtTime(r.last_synced_at)}</Text>
-            <Text type={stale ? 'warning' : 'secondary'} style={{ fontSize: 11 }}>
-              {ago(r.last_synced_at)}
-            </Text>
-          </Space>
-        )
-      },
-    },
-    {
-      title: '到期',
-      key: 'due',
-      width: 150,
-      render: (_: unknown, r) => {
-        const left = daysLeft(r.due_time)
-        if (!r.due_time) return '—'
-        return (
-          <Space direction="vertical" size={0}>
-            <Text>{fmtDate(r.due_time)}</Text>
-            {left !== null && (
-              <Text type={left <= 7 ? 'danger' : 'secondary'} style={{ fontSize: 11 }}>
-                {left >= 0 ? `剩 ${left} 天` : `已过期 ${-left} 天`}
-              </Text>
-            )}
-          </Space>
-        )
-      },
-    },
-    {
-      title: '月费',
-      key: 'price',
-      width: 100,
-      render: (_: unknown, r) => (r.price_monthly != null ? `¥${Number(r.price_monthly).toFixed(2)}` : '—'),
-    },
-  ]
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -256,28 +174,79 @@ export function PlatformOverviewPage({ onGotoSettings }: { onGotoSettings?: () =
         </Row>
       </Card>
 
-      <Card
-        title={<Space><CloudServerOutlined /><span>全部实例</span></Space>}
-        extra={
-          <Space size={12}>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              共 {servers.length} 台 · 懒猫云 {counts.lazycat ?? 0} / Akile {counts.akile ?? 0} / ACCK {counts.acck ?? 0}
-            </Text>
-          </Space>
-        }
-      >
-        {servers.length === 0 ? (
-          <Empty description="暂无实例（或各平台凭证已失效）" />
-        ) : (
-          <Table<UnifiedServer>
-            rowKey={r => r.uid}
-            size="small"
-            columns={columns}
-            dataSource={servers}
-            pagination={{ pageSize: 20, hideOnSinglePage: true }}
-            scroll={{ x: 1100 }}
-          />
-        )}
+      <Card title={<Space><CloudServerOutlined /><span>平台资产汇总</span></Space>}>
+        <Table<PlatformSummary>
+          rowKey="key"
+          size="small"
+          pagination={false}
+          dataSource={summaries}
+          columns={[
+            {
+              title: '平台',
+              key: 'name',
+              width: 130,
+              render: (_: unknown, r) => (
+                <Space size={6}>
+                  <span style={{ width: 3, height: 14, background: PLATFORM_COLOR[r.key] ?? '#94a3b8', borderRadius: 2 }} />
+                  <Text strong>{r.name}</Text>
+                </Space>
+              ),
+            },
+            {
+              title: '实例',
+              key: 'count',
+              width: 80,
+              render: (_: unknown, r) => `${r.count} 台`,
+            },
+            {
+              title: '最近到期',
+              key: 'due',
+              width: 160,
+              render: (_: unknown, r) => {
+                if (!r.nearestDue) return '—'
+                const left = daysLeft(r.nearestDue)
+                return (
+                  <Space size={4}>
+                    <Text>{fmtDate(r.nearestDue)}</Text>
+                    {left !== null && (
+                      <Text type={left <= 7 ? 'danger' : 'secondary'} style={{ fontSize: 11 }}>
+                        {left >= 0 ? `剩 ${left} 天` : '已过期'}
+                      </Text>
+                    )}
+                  </Space>
+                )
+              },
+            },
+            {
+              title: '月费合计',
+              key: 'cost',
+              width: 100,
+              render: (_: unknown, r) => (r.cost > 0 ? `¥${r.cost.toFixed(2)}` : '—'),
+            },
+            {
+              title: '数据新鲜度',
+              key: 'fresh',
+              render: (_: unknown, r) => (
+                <Space size={4}>
+                  {r.mode === 'live'
+                    ? <><ThunderboltOutlined style={{ color: '#059669', fontSize: 11 }} /><Text style={{ fontSize: 12, color: '#059669' }}>实时拉取</Text></>
+                    : <><SyncOutlined style={{ color: '#b45309', fontSize: 11 }} /><Text style={{ fontSize: 12 }}>{ago(r.lastSynced)}</Text></>}
+                </Space>
+              ),
+            },
+            {
+              title: '',
+              key: 'op',
+              width: 90,
+              render: (_: unknown, r) => (
+                <Button size="small" type="link" onClick={() => r.onGo && r.onGo()}>查看明细</Button>
+              ),
+            },
+          ]}
+        />
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          明细已按平台拆分到各自页面，此处只做汇总，避免三平台数据混在一张表里。
+        </Text>
       </Card>
     </div>
   )
