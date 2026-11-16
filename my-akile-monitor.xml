@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <Container version="2">
-  <Name>servers-checkin-hub</Name>
+  <Name>个人 vps 监控</Name>
   <Repository>ghcr.io/ashanzzz/servers-checkin-hub:latest</Repository>
   <Registry>https://ghcr.io</Registry>
   <Network>bridge</Network>
@@ -9,10 +9,10 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/ashanzzz/servers-checkin-hub/issues</Support>
   <Project>https://github.com/ashanzzz/servers-checkin-hub</Project>
-  <Overview>个人工具仓库 — 统一管理 AkileCloud 与 ACCK 双平台自动化工具箱：支持双平台每日自动打卡与 Token 续期、账户资产看板、新机与二手机监控告警、以及具备安全防误购保护锁的选购与试算接口。</Overview>
+  <Overview>个人 vps 监控 — 统一管理多平台云服务器（懒猫云 / AkileCloud / ACCK）：每日自动打卡与 Token 续期、账户资产看板、新机与二手机监控告警、以及具备安全防误购保护锁的选购与试算接口。支持在设置页用账号密码一键登录懒猫云并自动保存 Token。</Overview>
   <Category>Tools: Status:Stable</Category>
   <WebUI>http://[IP]:[PORT:80]/</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/ashanzzz/servers-checkin-hub/master/my-servers-checkin-hub.xml</TemplateURL>
+  <TemplateURL>https://raw.githubusercontent.com/ashanzzz/servers-checkin-hub/master/my-akile-monitor.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/ashanzzz/servers-checkin-hub/master/frontend/public/favicon.svg</Icon>
   <ExtraParams/>
   <PostArgs/>
