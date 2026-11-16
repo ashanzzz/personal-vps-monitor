@@ -149,6 +149,34 @@ export function PlatformOverviewPage({ onGotoSettings }: { onGotoSettings?: () =
       },
     },
     {
+      title: '远端更新',
+      key: 'synced',
+      width: 150,
+      render: (_: unknown, r) => {
+        if (r.sync_mode === 'live') {
+          return (
+            <Space size={4}>
+              <ThunderboltOutlined style={{ color: '#059669', fontSize: 11 }} />
+              <Text style={{ fontSize: 12, color: '#059669' }}>实时拉取</Text>
+            </Space>
+          )
+        }
+        if (!r.last_synced_at) {
+          return <Text type="danger" style={{ fontSize: 12 }}>从未同步</Text>
+        }
+        const mins = Math.round((Date.now() - new Date(r.last_synced_at).getTime()) / 60000)
+        const stale = mins > 10
+        return (
+          <Space direction="vertical" size={0}>
+            <Text style={{ fontSize: 12 }}>{fmtTime(r.last_synced_at)}</Text>
+            <Text type={stale ? 'warning' : 'secondary'} style={{ fontSize: 11 }}>
+              {ago(r.last_synced_at)}
+            </Text>
+          </Space>
+        )
+      },
+    },
+    {
       title: '到期',
       key: 'due',
       width: 150,

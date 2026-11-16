@@ -681,6 +681,21 @@ async def poll_account(token: str, settings: dict) -> None:
 
     async with SessionLocal() as db:
         row = await db.scalar(select(AccountCache).where(AccountCache.id == 1))
+        prev = {}
+        if row is not None and row.data:
+            try:
+                prev = json.loads(row.data)
+            except Exception:
+                prev = {}
+        # 只有真的拿到远端数据（profile + servers 都成功）才推进 last_success_at，
+        # 失败时保留上一次成功时间，避免用旧缓存冒充最新。
+        ok = profile is not None and bool(servers) and not any(
+            e.startswith("servers:") for e in errors
+        )
+        payload["last_attempt_at"] = datetime.utcnow().isoformat()
+        payload["last_success_at"] = (
+            payload["last_attempt_at"] if ok else prev.get("last_success_at")
+        )
         if row is None:
             db.add(AccountCache(id=1, data=json.dumps(payload)))
         else:
@@ -750,6 +765,19 @@ async def poll_acck_account(token: str, settings: dict) -> None:
 
     async with SessionLocal() as db:
         row = await db.scalar(select(AccountCache).where(AccountCache.id == 2))
+        prev = {}
+        if row is not None and row.data:
+            try:
+                prev = json.loads(row.data)
+            except Exception:
+                prev = {}
+        ok = profile is not None and bool(servers) and not any(
+            e.startswith("servers:") for e in errors
+        )
+        payload["last_attempt_at"] = datetime.utcnow().isoformat()
+        payload["last_success_at"] = (
+            payload["last_attempt_at"] if ok else prev.get("last_success_at")
+        )
         if row is None:
             db.add(AccountCache(id=2, data=json.dumps(payload)))
         else:

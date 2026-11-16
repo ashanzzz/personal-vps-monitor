@@ -5,7 +5,10 @@ Token is passed per-call so it can be updated without restart.
 from __future__ import annotations
 
 from typing import Any
+
 import httpx
+
+from .token_utils import bare_header
 
 BASE = "https://api.akile.ai/api"
 BASE_AI = "https://api.akile.ai/api"
@@ -17,13 +20,14 @@ REFRESH_TIMEOUT = 25
 
 
 def _headers(token: str) -> dict:
-    return {"Authorization": token, "Content-Type": "application/json"}
+    # Akile 要裸 JWT：加 Bearer 前缀反而 401
+    return {"Authorization": bare_header(token), "Content-Type": "application/json"}
 
 
 def _ai_headers(token: str) -> dict:
     """Headers for endpoints that require the akile.ai host."""
     return {
-        "Authorization": token,
+        "Authorization": bare_header(token),
         "Origin": "https://akile.ai",
         "Referer": "https://akile.ai/",
         "User-Agent": (
@@ -43,7 +47,7 @@ async def refresh_token(token: str) -> str:
     Raises RuntimeError if the refresh did not succeed.
     """
     headers = {
-        "Authorization": token,  # interceptor expects raw token, no Bearer prefix
+        "Authorization": bare_header(token),  # 裸 JWT，且必须剥掉 JSON 引号
         "Origin": "https://akile.ai",
         "Referer": "https://akile.ai/",
         "User-Agent": (

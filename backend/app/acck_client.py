@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+
 import httpx
+
+from .token_utils import bearer_header
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +19,8 @@ TIMEOUT = 15
 
 
 def _headers(token: str) -> dict[str, str]:
-    auth = token.strip()
-    if not auth.startswith("Bearer "):
-        auth = f"Bearer {auth}"
+    # 先剥引号/Bearer 再统一加前缀，否则 `Bearer "eyJ..."` 必然 401
+    auth = bearer_header(token)
     return {
         "Authorization": auth,
         "Content-Type": "application/json",

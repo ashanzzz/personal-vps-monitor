@@ -452,6 +452,8 @@ export interface UnifiedServer {
   price_cents?: number
   price_cny: number
   price_monthly?: number
+  last_synced_at?: string | null
+  sync_mode?: 'live' | 'cache'
   fair_market_value_cny?: number | null
   value_ratio?: number | null
   monthly_leverage?: number | null

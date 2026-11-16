@@ -25,6 +25,8 @@ from __future__ import annotations
 import logging
 import os
 from typing import Any
+
+from .token_utils import clean_token as _shared_clean_token
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -69,23 +71,8 @@ PROXY = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or "http:/
 
 
 def clean_token(token: Any) -> str:
-    """清洗 Token：剥掉残留首尾引号、空白与 Bearer 前缀，只保留裸 JWT。
-
-    懒猫云登录响应里 token 有时被包成 JSON 字符串（带引号），
-    直接拼进 Authorization 会导致全部接口 401。
-    """
-    if not isinstance(token, str):
-        return ""
-    t = token.strip()
-    # 先剥 Bearer 前缀，再剥引号：两者顺序反了会漏掉 'Bearer "xxx"'
-    if t.lower().startswith("bearer "):
-        t = t[7:].strip()
-    while len(t) >= 2 and t[0] in ('"', "'") and t[-1] == t[0]:
-        t = t[1:-1].strip()
-    t = t.strip().strip('"').strip("'").strip()
-    if t.lower().startswith("bearer "):
-        t = t[7:].strip()
-    return t
+    """委托给共享实现 token_utils.clean_token（三平台统一口径）。"""
+    return _shared_clean_token(token)
 
 
 def _headers(token: str | None = None) -> dict[str, str]:

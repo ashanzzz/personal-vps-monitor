@@ -15,11 +15,12 @@ from datetime import datetime
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import require_auth
 from .config import get_all_settings
-from .database import get_db
+from .database import AccountCache, get_db
 from . import akile_client, acck_client, lazycat_client
 from .refresh_manager import refresh_mgr
 from .route_analyzer import (
@@ -395,10 +396,32 @@ async def get_unified_servers(
             logger.warning("Failed to fetch LazyCat servers: %s", e)
             errors["lazycat"] = str(e)
 
+    # 给每台实例标注「与远端最后成功同步时间」与数据模式（live / cache）
+    async def _last_success(cache_id: int) -> str | None:
+        row = await db.scalar(select(AccountCache).where(AccountCache.id == cache_id))
+        if row is None or not row.data:
+            return None
+        try:
+            return json.loads(row.data).get("last_success_at")
+        except Exception:
+            return None
+
+    stamps = {
+        "akile": await _last_success(1),
+        "acck": await _last_success(2),
+        # 懒猫云每次请求都直连远端，本次请求时刻即最后同步时刻
+        "lazycat": datetime.now().isoformat(timespec="seconds"),
+    }
+    for srv in servers:
+        plat = srv.get("platform", "")
+        srv["last_synced_at"] = stamps.get(plat)
+        srv["sync_mode"] = "live" if plat == "lazycat" else "cache"
+
     return {
         "total": len(servers),
         "servers": servers,
         "errors": errors,
+        "last_synced_at": stamps,
         "counts": {
             "akile": len([s for s in servers if s["platform"] == "akile"]),
             "acck": len([s for s in servers if s["platform"] == "acck"]),
