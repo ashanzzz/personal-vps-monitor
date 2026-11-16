@@ -1,21 +1,19 @@
 import React, { useState, useEffect } from 'react'
 import {
-  Card, Table, Button, Modal, Switch, Typography, Input,
-  App as AntApp, Tag, Tooltip, Checkbox, Alert, Space, Radio, InputNumber, Select
+  Card, Table, Button,
+  App as AntApp, Tag, Tooltip, Space, Radio, InputNumber, Select
 } from 'antd'
 import {
-  SwapOutlined, SafetyCertificateOutlined, ReloadOutlined,
-  ThunderboltOutlined, WarningOutlined, DollarOutlined,
+  SwapOutlined, ReloadOutlined, ThunderboltOutlined, DollarOutlined,
   FieldTimeOutlined, RiseOutlined, GlobalOutlined, SettingOutlined
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { api } from '../api'
 import type { SecondhandItem, PageBuyConfig } from '../api'
-import { BuyRulesEditor } from '../components/BuyRulesEditor'
 import { pageBuyDefaults } from '../buyDefaults'
-
-const { Text } = Typography
+import { SecondhandBuyModal } from '../components/SecondhandBuyModal'
+import { SecondhandRulesModal } from '../components/SecondhandRulesModal'
 
 export const UnifiedSecondhandPage: React.FC = () => {
   const { message } = AntApp.useApp()
@@ -765,160 +763,30 @@ export const UnifiedSecondhandPage: React.FC = () => {
       </Card>
 
       {/* Buy Modal */}
-      <Modal
-        title={`二手转让抢单 - ${selectedItem?.title}`}
-        open={buyModalOpen}
-        onCancel={() => setBuyModalOpen(false)}
-        onOk={handleExecuteBuy}
-        confirmLoading={submitting}
-        okText={safeMode ? '执行试算 (防误购)' : (isDepleted && !forceBuyDepleted ? '流量耗尽(需勾选强制)' : '确认立即付款抢单')}
-        okButtonProps={{ disabled: !safeMode && isDepleted && !forceBuyDepleted }}
-        cancelText="取消"
-        width={560}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '10px 0' }}>
-          <div>
-            <Text type="secondary">交易市场：</Text>
-            <Tag color={selectedItem?.platform === 'akile' ? 'blue' : 'green'} style={{ textTransform: 'uppercase' }}>
-              {selectedItem?.platform === 'akile' ? 'Akile PushShop' : 'ACCK Exchange'}
-            </Tag>
-          </div>
+      <SecondhandBuyModal
+        buyModalOpen={buyModalOpen}
+        setBuyModalOpen={setBuyModalOpen}
+        selectedItem={selectedItem}
+        safeMode={safeMode}
+        setSafeMode={setSafeMode}
+        forceBuyDepleted={forceBuyDepleted}
+        setForceBuyDepleted={setForceBuyDepleted}
+        captcha={captcha}
+        setCaptcha={setCaptcha}
+        submitting={submitting}
+        buyResult={buyResult}
+        handleExecuteBuy={handleExecuteBuy}
+        isDepleted={isDepleted}
+      />
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <Text type="secondary">转让标价：</Text>
-              <span className="mono-num" style={{ fontSize: 18, fontWeight: 700, color: '#0f172a' }}>
-                ¥{selectedItem?.price_cny?.toFixed(2)}
-              </span>
-            </div>
-            <div>
-              <Text type="secondary">线路评估：</Text>
-              <Tag color={selectedItem?.route?.tier === 'S' ? 'purple' : 'blue'}>
-                {selectedItem?.route?.tier_label} ({selectedItem?.route?.primary_route})
-              </Tag>
-            </div>
-          </div>
-
-          {/* Traffic Warning Alert */}
-          {isDepleted && (
-            <Alert
-              type="error"
-              showIcon
-              icon={<WarningOutlined />}
-              message="【重大风控预警：可用流量已全部耗尽！】"
-              description={
-                <div style={{ fontSize: 12 }}>
-                  <div>当前主机可用流量为 <b>0 GB</b>（总计 {selectedItem?.traffic?.total_gb}GB 已全被原号主用光）。</div>
-                  <div>官方重置流量单价为 <b>¥{selectedItem?.traffic?.reset_price_cny}</b>。</div>
-                  <div style={{ marginTop: 4, fontWeight: 600, color: '#b91c1c' }}>
-                    真实买入总成本 = 挂售价 ¥{selectedItem?.price_cny} + 流量重置费 ¥{selectedItem?.traffic?.reset_price_cny} = <b>¥{selectedItem?.pricing_analysis?.real_total_cost_cny}</b>！
-                  </div>
-                </div>
-              }
-            />
-          )}
-
-          {/* Detailed Traffic Info */}
-          <div style={{ padding: 10, background: '#f8fafc', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span>已用流量：<b>{selectedItem?.traffic?.used_gb ?? 0} GB</b></span>
-              <span>总额度：<b>{selectedItem?.traffic?.total_gb ?? 0} GB</b></span>
-              <span>剩余可用：<b style={{ color: isDepleted ? '#dc2626' : '#15803d' }}>{selectedItem?.traffic?.remaining_gb ?? 0} GB</b></span>
-            </div>
-          </div>
-
-          {selectedItem?.platform === 'akile' && !safeMode && (
-            <div>
-              <Text type="secondary">图形验证码（Akile 下单）：</Text>
-              <Input
-                placeholder="请输入 Akile 验证码（如需要）"
-                value={captcha}
-                onChange={(e) => setCaptcha(e.target.value)}
-                style={{ marginTop: 4 }}
-              />
-            </div>
-          )}
-
-          {/* Safe Mode Switch */}
-          <div style={{ padding: 12, background: safeMode ? '#eff6ff' : '#fffbeb', borderRadius: 6, border: `1px solid ${safeMode ? '#bfdbfe' : '#fde68a'}` }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-              <span style={{ fontWeight: 600, color: safeMode ? '#1d4ed8' : '#b45309', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <SafetyCertificateOutlined />
-                防误购安全模式 (Safe Dry-Run)
-              </span>
-              <Switch checked={safeMode} onChange={setSafeMode} />
-            </div>
-            <p style={{ margin: 0, fontSize: 12, color: safeMode ? '#1e40af' : '#92400e' }}>
-              {safeMode
-                ? '已开启安全保护锁：点击确认仅对订单参数和接口合法性做试算校验，不发起真实资金扣除。'
-                : '⚠️ 警告：保护锁已关闭！点击确认将直接从您的账户余额划扣并抢购该二手主机！'}
-            </p>
-          </div>
-
-          {/* Force Buy Depleted Checkbox */}
-          {!safeMode && isDepleted && (
-            <div style={{ padding: '8px 12px', background: '#fffbeb', borderRadius: 6, border: '1px solid #fef3c7' }}>
-              <Checkbox checked={forceBuyDepleted} onChange={(e) => setForceBuyDepleted(e.target.checked)}>
-                <span style={{ fontSize: 12, color: '#b45309', fontWeight: 600 }}>
-                  已知晓当期流量已用完（长期资产有效：下月续费自动恢复 {selectedItem?.traffic?.total_gb}G 满血，急用亦可花 ¥{selectedItem?.traffic?.reset_price_cny} 重置）
-                </span>
-              </Checkbox>
-            </div>
-          )}
-
-          {buyResult && (
-            <div style={{ padding: 10, background: '#f8fafc', borderRadius: 6, border: '1px solid #e2e8f0' }}>
-              <div style={{ fontWeight: 600, marginBottom: 4, color: '#0f172a' }}>回执：</div>
-              <pre style={{ margin: 0, fontSize: 11, maxHeight: 150, overflow: 'auto', fontFamily: 'monospace' }}>
-                {JSON.stringify(buyResult, null, 2)}
-              </pre>
-            </div>
-          )}
-        </div>
-      </Modal>
-
-      {/* 🎯 定向秒杀与自动抢购看门狗规则管理弹窗 */}
-      <Modal
-        title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <ThunderboltOutlined style={{ color: '#0284c7' }} />
-            <span>定向秒杀与自动抢购看门狗规则管理</span>
-          </div>
-        }
-        open={rulesModalOpen}
-        onCancel={() => setRulesModalOpen(false)}
-        width={920}
-        destroyOnClose
-        footer={
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 12, color: '#94a3b8' }}>
-              修改参数后点击保存，后台极速轮询看门狗（5s/次）将在下一周期自动加载生效
-            </span>
-            <Space>
-              <Button onClick={() => setRulesModalOpen(false)}>取消</Button>
-              <Button
-                type="primary"
-                icon={<SafetyCertificateOutlined />}
-                loading={savingRules}
-                onClick={saveRules}
-                style={{ background: '#0284c7', borderColor: '#0284c7' }}
-              >
-                保存并立即生效
-              </Button>
-            </Space>
-          </div>
-        }
-      >
-        {buyConfig ? (
-          <BuyRulesEditor
-            pageLabel="双平台二手集市"
-            value={buyConfig}
-            onChange={setBuyConfig}
-          />
-        ) : (
-          <div style={{ padding: 30, textAlign: 'center', color: '#94a3b8' }}>加载抢购配置中...</div>
-        )}
-      </Modal>
+      <SecondhandRulesModal
+        rulesModalOpen={rulesModalOpen}
+        setRulesModalOpen={setRulesModalOpen}
+        buyConfig={buyConfig}
+        setBuyConfig={setBuyConfig}
+        savingRules={savingRules}
+        saveRules={saveRules}
+      />
     </div>
   )
 }
