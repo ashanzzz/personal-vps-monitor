@@ -1196,10 +1196,26 @@ async def lazycat_login(
     if not username or not password:
         return {"error": "请填写懒猫云账号和密码"}
 
+    def _looks_like_2fa(text: str) -> bool:
+        low = text.lower()
+        return any(k in low for k in (
+            "totp", "2fa", "two-factor", "two_factor", "verification code",
+            "verify code", "otp", "二次验证", "两步验证", "动态码", "验证码",
+        ))
+
     try:
         res = await lazycat_client.login(
             username=username, password=password, totp_code=ga_code
         )
+    except httpx.HTTPStatusError as e:
+        detail = e.response.text[:500]
+        if _looks_like_2fa(detail):
+            return {
+                "need_2fa": True,
+                "message": "该账号开启了二次验证，请输入验证器 App 中的 6 位动态码后重试",
+                "detail": detail,
+            }
+        return {"error": f"登录失败（HTTP {e.response.status_code}）: {detail}"}
     except Exception as e:
         return {"error": f"登录请求失败: {e}"}
 
@@ -1213,8 +1229,15 @@ async def lazycat_login(
     )
 
     if not token:
+        raw = str(res)[:500]
+        if _looks_like_2fa(raw):
+            return {
+                "need_2fa": True,
+                "message": "该账号开启了二次验证，请输入验证器 App 中的 6 位动态码后重试",
+                "detail": raw,
+            }
         return {
-            "error": f"登录成功但未在响应中找到 Token 字段，完整响应: {str(res)[:500]}"
+            "error": f"登录成功但未在响应中找到 Token 字段，完整响应: {raw}"
         }
 
     # 把 Token 写入系统设置

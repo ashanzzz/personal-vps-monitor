@@ -5,7 +5,7 @@ import {
 } from 'antd'
 import {
   SaveOutlined, SendOutlined, ReloadOutlined, CheckCircleTwoTone,
-  WarningTwoTone, CloseCircleTwoTone, LoginOutlined,
+  WarningTwoTone, CloseCircleTwoTone, LoginOutlined, SafetyOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import type { AppSettings, TokenStatus, VersionInfo } from '../api'
@@ -178,14 +178,19 @@ export function SettingsPage({ settings, onSaved }: Props) {
     }
     setLoggingInLz(true)
     try {
-      const res = await api.lazycatLogin(lzUsername, lzPassword)
+      const res = await api.lazycatLogin(lzUsername, lzPassword, lz2faCode.trim() || undefined)
       if ((res as any).need_2fa) {
+        if (lz2faCode.trim()) {
+          message.error('2FA 动态码不正确或已过期，请重新输入')
+          return
+        }
         setLz2faPending({ username: lzUsername, password: lzPassword })
         setLz2faCode('')
         return
       }
       message.success((res as any).message ?? '懒猫云登录成功，Token 已自动保存')
       setLzPassword('')
+      setLz2faCode('')
       loadTokenStatus()
     } catch (e: any) {
       message.error(e?.response?.data?.error ?? e?.response?.data?.detail ?? '登录失败')
@@ -369,6 +374,15 @@ export function SettingsPage({ settings, onSaved }: Props) {
                         style={{ width: 200 }}
                         autoComplete="current-password"
                       />
+                      <Input
+                        placeholder="2FA 动态码（可选，6 位）"
+                        value={lz2faCode}
+                        onChange={e => setLz2faCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        style={{ width: 170 }}
+                        maxLength={6}
+                        autoComplete="one-time-code"
+                        prefix={<SafetyOutlined />}
+                      />
                     </Space>
                     <Button
                       type="primary"
@@ -379,6 +393,10 @@ export function SettingsPage({ settings, onSaved }: Props) {
                     >
                       登录并保存 Token
                     </Button>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      账号未开启二次验证时可留空 2FA；若开启，请打开验证器 App（Google Authenticator /
+                      Microsoft Authenticator 等）填入当前 6 位动态码，动态码 30 秒刷新一次。
+                    </Text>
                   </div>
                 ),
               },
