@@ -269,6 +269,16 @@ export const api = {
   lazycatLogin: (username: string, password: string, ga_code?: string) =>
     http.post<{ status: string; message?: string; token_length?: number }>('/api/lazycat/login', { username, password, ga_code: ga_code || '' }).then(r => r.data),
 
+  // --- LazyCat 懒猫云 ---
+  getLazyCatAccount: () =>
+    http.get<LazyCatAccount>('/api/lazycat/account').then(r => r.data),
+
+  getLazyCatInstances: () =>
+    http.get<LazyCatInstance[] | { error: string }>('/api/lazycat/instances').then(r => r.data),
+
+  lazycatCheckin: () =>
+    http.post<Record<string, unknown>>('/api/lazycat/checkin').then(r => r.data),
+
   // --- Auth ---
   authStatus: () =>
     http.get<{ initialized: boolean }>('/api/auth/status').then(r => r.data),
@@ -649,6 +659,36 @@ export interface AcckAccountInfo {
   shop?: Record<string, unknown> | null
   errors: string[]
   updated_at: string | null
+}
+
+// --- LazyCat 懒猫云 ---
+export interface LazyCatInstance {
+  id?: string | number
+  name?: string
+  hostname?: string
+  status?: string
+  state?: string
+  ip?: string
+  ipv4?: string
+  region?: string
+  area?: string
+  node?: string
+  expired_at?: string
+  expire_time?: string
+  due_date?: string
+  cpu?: string | number
+  memory?: string | number
+  disk?: string | number
+  bandwidth?: string | number
+  [key: string]: unknown
+}
+
+export interface LazyCatAccount {
+  error?: string
+  user?: Record<string, unknown>
+  balance?: Record<string, unknown>
+  vip_card?: Record<string, unknown>
+  [key: string]: unknown
 }
 
 export interface AccountProfile {

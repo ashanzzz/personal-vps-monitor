@@ -7,7 +7,7 @@ import {
   DashboardOutlined, SwapOutlined, ShoppingCartOutlined,
   CreditCardOutlined, BellOutlined, SettingOutlined, LogoutOutlined,
   FileTextOutlined, WalletOutlined, SafetyCertificateOutlined,
-  ReloadOutlined, ThunderboltOutlined, SyncOutlined
+  ReloadOutlined, ThunderboltOutlined, SyncOutlined, CloudServerOutlined
 } from '@ant-design/icons'
 
 import { api, clearToken, getToken, setUnauthorizedHandler } from './api'
@@ -19,6 +19,7 @@ import { UnifiedSecondhandPage } from './pages/UnifiedSecondhandPage'
 import { UnifiedBillingPage } from './pages/UnifiedBillingPage'
 import { AccountPage } from './pages/AccountPage'
 import { AcckAccountPage } from './pages/AcckAccountPage'
+import { LazyCatAccountPage } from './pages/LazyCatAccountPage'
 import { AlertHistory } from './pages/AlertHistory'
 import { SettingsPage } from './pages/SettingsPage'
 import { LoginPage } from './pages/LoginPage'
@@ -36,6 +37,7 @@ type PageKey =
   | 'billing'
   | 'account'
   | 'acck'
+  | 'lazycat'
   | 'alerts'
   | 'logs'
   | 'settings'
@@ -183,7 +185,7 @@ export default function App() {
           >
             <div className="ashan-logo">
               <div className="ashan-logo-icon">A</div>
-              {!collapsed && <div className="ashan-logo-text">Ashan VPS Server Hub</div>}
+              {!collapsed && <div className="ashan-logo-text">个人 vps 监控</div>}
             </div>
             <Menu
               mode="inline"
@@ -201,6 +203,7 @@ export default function App() {
                 { type: 'divider' },
                 { key: 'account', icon: <WalletOutlined />, label: 'Akile 资产' },
                 { key: 'acck', icon: <SafetyCertificateOutlined />, label: 'ACCK 资产' },
+                { key: 'lazycat', icon: <CloudServerOutlined />, label: '懒猫云资产' },
                 {
                   key: 'alerts',
                   icon: <BellOutlined />,
@@ -228,6 +231,7 @@ export default function App() {
                     billing: '统一订单与账单支付中心',
                     account: 'Akile 平台资产',
                     acck: 'ACCK 平台资产',
+                    lazycat: '懒猫云平台资产',
                     alerts: '系统预警历史',
                     logs: '服务运行日志',
                     settings: '系统与刷新设置',
@@ -235,6 +239,7 @@ export default function App() {
                 </span>
                 <span className="badge-online">Akile 永续保活</span>
                 <span className="badge-proxy">ACCK 7天 Token 复用</span>
+                <span className="badge-proxy">懒猫云 每日签到</span>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -298,6 +303,7 @@ export default function App() {
                   {page === 'billing' && <UnifiedBillingPage />}
                   {page === 'account' && <AccountPage />}
                   {page === 'acck' && <AcckAccountPage />}
+                  {page === 'lazycat' && <LazyCatAccountPage onGotoSettings={() => setPage('settings')} />}
                   {page === 'alerts' && <AlertHistory events={events} />}
                   {page === 'logs' && <LogsPage />}
                   {page === 'settings' && <SettingsPage settings={settings} onSaved={setSettings} />}
