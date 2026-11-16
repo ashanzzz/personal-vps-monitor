@@ -62,6 +62,25 @@ proxies:
     reality-opts:
       public-key: fSA2tLImc06SvOdAubf2tI2q_w9J9F9cuatYzkMXhUg
       short-id: c653e997
+  - name: "懒猫云-HK-SS2022"
+    type: ss
+    server: 167.104.96.167
+    port: 55966
+    cipher: 2022-blake3-aes-128-gcm
+    password: "4iHVwPPj/ENy6UvVulkOHA=="
+    udp: true
+```
+
+proxy-groups 里把两个节点都放进去，用 url-test 自动选快的：
+
+```yaml
+proxy-groups:
+  - name: "PROXY"
+    type: url-test
+    url: "http://www.gstatic.com/generate_204"
+    interval: 300
+    tolerance: 50
+    proxies: ["懒猫云-HK-Reality", "懒猫云-HK-SS2022"]
 ```
 
 注意：原版 Clash Premium 内核不认 Reality，必须 mihomo 系（Clash Verge Rev /
@@ -79,3 +98,29 @@ ws_url = wss://dash.lazycat.wiki/api/ws/instances/{id}/terminal?token=<jwt>
 
 前端的 `GET /api/lazycat/instances/{id}/terminal` 会返回该 ws 地址，
 详情抽屉里的「打开终端」直接跳官方 xterm.js 页面。
+
+## 第二个协议：SS2022 兜底（2026-11-16 追加）
+
+Reality 在个别网络会被 QoE 限速或识别，加一条 Shadowsocks 2022 走另一个端口兜底。
+
+- 入站：`:8443`，`2022-blake3-aes-128-gcm`（该算法自带防重放，不要用老 SS 的 aes-256-gcm）
+- 端口映射：TCP **55966 → 8443**（mapping id 47529）
+- 实测出口同样是美国 Pavlov Media 住宅 IP，`chatgpt.com` 200 / `google.com` 200 / `youtube.com` 200
+- **速度比 Reality 低一个数量级**（单线程约 0.6 MB/s vs 3.2 MB/s）：SS 没有多路复用、
+  也没有 BBR 类拥塞控制，跨境高延迟链路上很吃亏。所以它是兜底，不是主力。
+
+分享链接：
+
+```
+ss://2022-blake3-aes-128-gcm:4iHVwPPj/ENy6UvVulkOHA==@167.104.96.167:55966#懒猫云-HK-SS2022
+```
+
+配置变更前已备份：`/etc/sing-box/config.json.bak.<timestamp>`。
+
+## 两个节点怎么选
+
+| 场景 | 用哪个 |
+|------|--------|
+| 日常看视频、下大文件 | Reality（3.2 MB/s） |
+| Reality 被限速/握手失败 | SS2022 兜底 |
+| 客户端不支持 Reality | SS2022 |
