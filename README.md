@@ -1,18 +1,20 @@
-# 个人工具仓库 (Personal Tools Hub)
+# 个人 vps 监控 (Personal VPS Monitor)
 
-统一管理 **AkileCloud** 与 **ACCK** 双平台的个人服务器自动化工具箱。支持双平台账户资产看板、每日自动打卡签到、新机与二手机监控告警、以及具备安全防误购保护锁的选购与订单试算模块。
+统一管理 **懒猫云**、**AkileCloud**、**ACCK** 多平台个人云服务器账户的监控与自动化中心。支持多平台账户资产看板、每日自动签到、新机与二手机监控告警、以及具备安全防误购保护锁的选购与订单试算模块。
 
 ## 核心功能
 
-* **多平台每日自动打卡**：
+* **多平台每日自动签到**：
+  * **懒猫云**：每日自动签到领取积分，支持设置页账号 + 密码 + 2FA 一键登录并自动保存 Token；
   * **AkileCloud**：每日随机时间自动签到获取 AK 币，打卡时自动调用 `/v1/user/refreshToken` 顺带延长 Token 有效期（实现 Token 永续）；
   * **ACCK**：自动打卡获取 AC 积分与权益，同步拉取积分流水与日志。
-* **双平台资产看板**：
-  * 聚合展示 Akile 与 ACCK 的账户余额、积分、实名状态、到期服务器实例。
-* **市场监控与告警（Akile）**：
+* **多平台资产看板**：
+  * 聚合展示懒猫云、Akile 与 ACCK 的账户余额、积分、实名状态、会员等级与到期服务器实例。
+* **市场监控与告警（Akile / 懒猫云）**：
   * 支持新机 VPS、轻量机、二手机上架/下架/价格变化实时告警，支持 Telegram 推送。
 * **安全防误购保护机制（Safe Dry-Run）**：
   * 内置**防误购保护锁**（`safe_buy_mode=True`，`real_purchase_enabled=False`），默认全面拦截所有自动扣费与下单动作，购买相关逻辑仅在模拟模式下运行，杜绝资金损失。
+  * **懒猫云实例销毁类接口已永久封禁**：逆向产物、客户端封装、UI 与文档中均不存在销毁入口，运行时另有硬拦截。
 
 ## 快速部署
 
@@ -47,7 +49,7 @@ docker compose up -d --build
 
 1. SSH 到 Unraid 或使用 Web Terminal，运行：
    ```bash
-   wget https://raw.githubusercontent.com/ashanzzz/servers-checkin-hub/master/my-akile-monitor.xml \
+   wget https://raw.githubusercontent.com/ashanzzz/personal-vps-monitor/master/my-akile-monitor.xml \
      -O /boot/config/plugins/dockerMan/templates-user/my-akile-monitor.xml
    ```
 
@@ -70,7 +72,7 @@ docker compose up -d --build
 在 Unraid 主机上以 root 运行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ashanzzz/servers-checkin-hub/master/unraid-deploy.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ashanzzz/personal-vps-monitor/master/unraid-deploy.sh | bash
 ```
 
 然后按脚本提示在 WebGUI 中完成容器创建。

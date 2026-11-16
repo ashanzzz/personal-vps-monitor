@@ -4,7 +4,7 @@
 
 set -e
 
-TEMPLATE_URL="https://raw.githubusercontent.com/ashanzzz/servers-checkin-hub/master/my-akile-monitor.xml"
+TEMPLATE_URL="https://raw.githubusercontent.com/ashanzzz/personal-vps-monitor/master/my-akile-monitor.xml"
 TEMPLATE_DIR="/boot/config/plugins/dockerMan/templates-user"
 TEMPLATE_FILE="$TEMPLATE_DIR/my-akile-monitor.xml"
 

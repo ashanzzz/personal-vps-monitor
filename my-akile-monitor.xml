@@ -7,13 +7,13 @@
   <MyIP/>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/ashanzzz/servers-checkin-hub/issues</Support>
-  <Project>https://github.com/ashanzzz/servers-checkin-hub</Project>
+  <Support>https://github.com/ashanzzz/personal-vps-monitor/issues</Support>
+  <Project>https://github.com/ashanzzz/personal-vps-monitor</Project>
   <Overview>个人 vps 监控 — 统一管理多平台云服务器（懒猫云 / AkileCloud / ACCK）：每日自动打卡与 Token 续期、账户资产看板、新机与二手机监控告警、以及具备安全防误购保护锁的选购与试算接口。支持在设置页用账号密码一键登录懒猫云并自动保存 Token。</Overview>
   <Category>Tools: Status:Stable</Category>
   <WebUI>http://[IP]:[PORT:80]/</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/ashanzzz/servers-checkin-hub/master/my-akile-monitor.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/ashanzzz/servers-checkin-hub/master/frontend/public/favicon.svg</Icon>
+  <TemplateURL>https://raw.githubusercontent.com/ashanzzz/personal-vps-monitor/master/my-akile-monitor.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/ashanzzz/personal-vps-monitor/master/frontend/public/favicon.svg</Icon>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>
