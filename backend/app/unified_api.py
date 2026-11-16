@@ -93,7 +93,7 @@ async def _get_tokens(db: AsyncSession) -> tuple[str, str, str]:
     settings = await get_all_settings(db)
     akile_tok = settings.get("akile_token") or ""
     acck_tok = settings.get("acck_token") or ""
-    lazycat_tok = settings.get("lazycat_token") or ""
+    lazycat_tok = lazycat_client.clean_token(settings.get("lazycat_token") or "")
     return akile_tok, acck_tok, lazycat_tok
 
 

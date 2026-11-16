@@ -70,3 +70,29 @@ def test_no_destroy_method_on_client():
     present = forbidden_names & set(dir(lazycat_client))
     assert not present, f"客户端出现了被禁止的销毁方法: {present}"
 
+
+
+# ---------------------------------------------------------------------------
+# Token 清洗：登录响应里的 token 可能带引号，直接拼 Authorization 会导致全接口 401
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("raw,expected", [
+    ('"eyJhbGciOiJIUzI1NiJ9.payload.sig"', "eyJhbGciOiJIUzI1NiJ9.payload.sig"),
+    ("'eyJabc.def.ghi'", "eyJabc.def.ghi"),
+    ("  eyJabc.def.ghi  ", "eyJabc.def.ghi"),
+    ("Bearer eyJabc.def.ghi", "eyJabc.def.ghi"),
+    ("bearer eyJabc.def.ghi", "eyJabc.def.ghi"),
+    ('Bearer "eyJabc.def.ghi"', "eyJabc.def.ghi"),
+    ("", ""),
+    (None, ""),
+    (12345, ""),
+])
+def test_clean_token(raw, expected):
+    assert lazycat_client.clean_token(raw) == expected
+
+
+def test_headers_use_cleaned_token():
+    """带引号的 token 不得原样进入 Authorization 头。"""
+    h = lazycat_client._headers('"eyJabc.def.ghi"')
+    assert h["Authorization"] == "Bearer eyJabc.def.ghi"
+    assert '"' not in h["Authorization"]

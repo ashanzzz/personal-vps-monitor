@@ -68,6 +68,26 @@ def _assert_not_forbidden(url: str, method: str = "GET") -> None:
 PROXY = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or "http://192.168.8.11:7890"
 
 
+def clean_token(token: Any) -> str:
+    """清洗 Token：剥掉残留首尾引号、空白与 Bearer 前缀，只保留裸 JWT。
+
+    懒猫云登录响应里 token 有时被包成 JSON 字符串（带引号），
+    直接拼进 Authorization 会导致全部接口 401。
+    """
+    if not isinstance(token, str):
+        return ""
+    t = token.strip()
+    # 先剥 Bearer 前缀，再剥引号：两者顺序反了会漏掉 'Bearer "xxx"'
+    if t.lower().startswith("bearer "):
+        t = t[7:].strip()
+    while len(t) >= 2 and t[0] in ('"', "'") and t[-1] == t[0]:
+        t = t[1:-1].strip()
+    t = t.strip().strip('"').strip("'").strip()
+    if t.lower().startswith("bearer "):
+        t = t[7:].strip()
+    return t
+
+
 def _headers(token: str | None = None) -> dict[str, str]:
     headers = {
         "Content-Type": "application/json",
@@ -81,10 +101,9 @@ def _headers(token: str | None = None) -> dict[str, str]:
         "Accept": "application/json, text/plain, */*",
     }
     if token:
-        auth = token.strip()
-        if not auth.startswith("Bearer "):
-            auth = f"Bearer {auth}"
-        headers["Authorization"] = auth
+        auth = clean_token(token)
+        if auth:
+            headers["Authorization"] = f"Bearer {auth}"
     return headers
 
 

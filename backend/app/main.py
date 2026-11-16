@@ -30,6 +30,7 @@ from .token_manager import ensure_fresh, refresh_now, token_status
 from .version import __version__, get_version_info
 from .ws import broadcast, connect, disconnect
 from . import akile_client
+from . import lazycat_client
 from .public_api import router as public_api_router
 from .control_api import router as control_api_router
 from .unified_api import router as unified_api_router
@@ -420,9 +421,8 @@ async def _daily_checkin() -> None:
     if not settings.get("lazycat_auto_checkin_enabled", True):
         logger.info("daily_checkin: LazyCat auto-checkin is disabled, skipping")
     else:
-        lazycat_token = settings.get("lazycat_token") or ""
+        lazycat_token = lazycat_client.clean_token(settings.get("lazycat_token") or "")
         if lazycat_token:
-            from . import lazycat_client
             try:
                 lz_res = await lazycat_client.checkin(lazycat_token)
                 logger.info("LazyCat daily_checkin result: %s", lz_res)
@@ -1091,10 +1091,9 @@ async def acck_buy_preview_endpoint(payload: dict, _: str = Depends(require_auth
 async def manual_lazycat_checkin(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     """手动触发懒猫云每日签到。"""
     settings = await get_all_settings(db)
-    token = settings.get("lazycat_token", "")
+    token = lazycat_client.clean_token(settings.get("lazycat_token", ""))
     if not token:
         return {"error": "未配置 LazyCat Token，请先在系统设置中填入"}
-    from . import lazycat_client
     from .database import CheckinLog
     from datetime import date
     try:
@@ -1126,10 +1125,9 @@ async def manual_lazycat_checkin(_: str = Depends(require_auth), db: AsyncSessio
 async def get_lazycat_account_data(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     """获取懒猫云账户资料、余额、VIP 等级与特权卡状态。"""
     settings = await get_all_settings(db)
-    token = settings.get("lazycat_token", "")
+    token = lazycat_client.clean_token(settings.get("lazycat_token", ""))
     if not token:
         return {"error": "未配置 LazyCat Token"}
-    from . import lazycat_client
     try:
         user_info = await lazycat_client.get_user_info(token)
         balance = await lazycat_client.get_user_balance(token)
@@ -1147,10 +1145,9 @@ async def get_lazycat_account_data(_: str = Depends(require_auth), db: AsyncSess
 async def get_lazycat_user_instances(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     """获取懒猫云名下所有实例。"""
     settings = await get_all_settings(db)
-    token = settings.get("lazycat_token", "")
+    token = lazycat_client.clean_token(settings.get("lazycat_token", ""))
     if not token:
         return []
-    from . import lazycat_client
     try:
         return await lazycat_client.get_my_instances(token)
     except Exception as e:
@@ -1167,10 +1164,9 @@ async def get_lazycat_market_listings(
 ):
     """获取懒猫云交易市场二手在售实例。"""
     settings = await get_all_settings(db)
-    token = settings.get("lazycat_token", "")
+    token = lazycat_client.clean_token(settings.get("lazycat_token", ""))
     if not token:
         return {"error": "未配置 LazyCat Token"}
-    from . import lazycat_client
     try:
         return await lazycat_client.get_market_listings(token, region=region, page=page, page_size=pageSize)
     except Exception as e:
@@ -1187,7 +1183,6 @@ async def lazycat_login(
 
     请求体：{ username, password, ga_code? }
     """
-    from . import lazycat_client
 
     username = body.get("username", "")
     password = body.get("password", "")
@@ -1220,13 +1215,14 @@ async def lazycat_login(
         return {"error": f"登录请求失败: {e}"}
 
     # 提取 Token：兼容多种响应字段名
-    token = (
+    raw_token = (
         res.get("token")
         or res.get("access_token")
         or res.get("jwt")
         or (isinstance(res.get("data"), dict) and res["data"].get("token"))
         or (isinstance(res.get("data"), dict) and res["data"].get("accessToken"))
     )
+    token = lazycat_client.clean_token(raw_token)
 
     if not token:
         raw = str(res)[:500]
@@ -1240,13 +1236,22 @@ async def lazycat_login(
             "error": f"登录成功但未在响应中找到 Token 字段，完整响应: {raw}"
         }
 
+    # 落库前先实测 Token 是否真的可用，避免"登录成功但全是 401"
+    try:
+        await lazycat_client.get_user_info(token)
+    except Exception as e:
+        return {
+            "error": f"登录返回了 Token 但校验失败（{type(e).__name__}: {e}），"
+                     f"Token 前 12 位={token[:12]}，长度={len(token)}"
+        }
+
     # 把 Token 写入系统设置
     await set_setting(db, "lazycat_token", token)
     await db.commit()
 
     return {
         "status": "ok",
-        "message": "懒猫云登录成功，Token 已自动保存",
+        "message": "懒猫云登录成功，Token 已校验可用并保存",
         "token_length": len(token),
     }
 
@@ -1254,7 +1259,6 @@ async def lazycat_login(
 @app.get("/api/lazycat/store", tags=["admin"])
 async def get_lazycat_store_catalog():
     """获取懒猫云公共套餐商店（无须 Token）。"""
-    from . import lazycat_client
     try:
         packages = await lazycat_client.get_public_packages()
         regions = await lazycat_client.get_public_regions()
@@ -1278,10 +1282,9 @@ async def buy_lazycat_instance(
             "dry_run": True,
             "listing_id": listing_id,
         }
-    token = settings.get("lazycat_token", "")
+    token = lazycat_client.clean_token(settings.get("lazycat_token", ""))
     if not token:
         return {"error": "未配置 LazyCat Token"}
-    from . import lazycat_client
     try:
         return await lazycat_client.purchase_instance(token, listing_id)
     except Exception as e:
@@ -1292,10 +1295,9 @@ async def buy_lazycat_instance(
 async def get_lazycat_lotteries_info(_: str = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     """获取懒猫云活动中心大转盘抽奖活动。"""
     settings = await get_all_settings(db)
-    token = settings.get("lazycat_token", "")
+    token = lazycat_client.clean_token(settings.get("lazycat_token", ""))
     if not token:
         return {"error": "未配置 LazyCat Token"}
-    from . import lazycat_client
     try:
         return await lazycat_client.get_lotteries(token)
     except Exception as e:
