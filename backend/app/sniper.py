@@ -1,6 +1,6 @@
 """
 Targeted high-frequency second-level sniper for high-value secondhand packages.
-Runs every 5 seconds without triggering rate limits by utilizing Akile's targeted name filter.
+Runs every 60 seconds (minimum) using Akile's targeted name filter, keeping upstream load low.
 """
 from __future__ import annotations
 
@@ -327,7 +327,7 @@ async def run_sniper_cycle() -> None:
         await _run_acck_sniper_pass(acck_rules, acck_token, settings, max_daily)
 
 
-async def sniper_worker_loop(interval_seconds: int = 5) -> None:
+async def sniper_worker_loop(interval_seconds: int = 60) -> None:
     """Infinite worker loop polling targeted packages every N seconds."""
     logger.info("Fast targeted sniper worker started (interval=%ds)", interval_seconds)
     while not _stop_event.is_set():
@@ -344,7 +344,7 @@ async def sniper_worker_loop(interval_seconds: int = 5) -> None:
     logger.info("Fast targeted sniper worker stopped")
 
 
-def start_sniper_worker(interval_seconds: int = 5) -> asyncio.Task:
+def start_sniper_worker(interval_seconds: int = 60) -> asyncio.Task:
     global _sniper_task
     _stop_event.clear()
     if _sniper_task is None or _sniper_task.done():

@@ -88,7 +88,7 @@ export default function App() {
       api.getRefreshStatus().then(st => {
         setRefreshState(st)
       }).catch(() => {})
-    }, 2000)
+    }, 10000)
     return () => clearInterval(timer)
   }, [])
 

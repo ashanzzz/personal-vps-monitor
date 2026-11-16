@@ -101,9 +101,10 @@ def _reschedule_page_jobs(settings: dict) -> None:
     jitter = settings.get("random_jitter_enabled", True)
     for index, page in enumerate(PAGE_KEYS):
         cfg = settings.get(f"{page}_buy") or {}
-        base = max(5, int(cfg.get("refresh_interval", 60) or 60))
+        # 硬下限 60s：不要高频刷对方站点（尤其市场），1 分钟一次足够
+        base = max(MIN_POLL_INTERVAL_SECONDS, int(cfg.get("refresh_interval", 60) or 60))
         interval = int(base * random.uniform(0.8, 1.2)) if jitter else base
-        interval = max(5, interval)
+        interval = max(MIN_POLL_INTERVAL_SECONDS, interval)
         job_id = f"poll_{page}"
         start_offset = _PAGE_JOB_START_OFFSETS.get(page, index * 15)
         _schedule_interval_job(
@@ -246,9 +247,9 @@ async def lifespan(app: FastAPI):
     _schedule_support_jobs()
     # Daily checkin for AK coins at a random time within the configured window.
     await _schedule_daily_checkin(settings)
-    # Start targeted fast secondhand sniper (every 5 seconds)
+    # 二手捡漏 worker：默认 60s 一轮，不再 5 秒高频扫对方站点
     from .sniper import start_sniper_worker, stop_sniper_worker
-    start_sniper_worker(interval_seconds=5)
+    start_sniper_worker(interval_seconds=SNIPER_INTERVAL_SECONDS)
 
     scheduler.start()
     logger.info("Scheduler started (per-page pollers and fast sniper active)")
@@ -920,6 +921,9 @@ async def manual_checkin(_: str = Depends(require_auth), db: AsyncSession = Depe
 # ---------------------------------------------------------------------------
 # Platform Health —— 三平台 Token 实时健康度与数据来源（live / cache）
 # ---------------------------------------------------------------------------
+
+MIN_POLL_INTERVAL_SECONDS = 60
+SNIPER_INTERVAL_SECONDS = 60
 
 _HEALTH_CACHE: dict[str, Any] = {"at": 0.0, "data": None}
 _HEALTH_TTL_SECONDS = 60.0

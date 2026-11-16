@@ -70,7 +70,8 @@ export const UnifiedSecondhandPage: React.FC = () => {
 
   useEffect(() => {
     loadSniper()
-    const timer = setInterval(loadSniper, 5000)
+    // 60s 一轮：不要高频刷对方站点
+    const timer = setInterval(loadSniper, 60000)
     return () => clearInterval(timer)
   }, [])
 

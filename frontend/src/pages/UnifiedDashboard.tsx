@@ -70,7 +70,8 @@ export const UnifiedDashboard: React.FC = () => {
 
   // Polling loop based on current interval
   useEffect(() => {
-    const intervalSec = refreshState?.current_interval || 30
+    // 硬下限 60s，避免高频刷平台接口
+    const intervalSec = Math.max(60, refreshState?.current_interval || 60)
     const timer = setInterval(() => {
       loadData()
     }, intervalSec * 1000)
