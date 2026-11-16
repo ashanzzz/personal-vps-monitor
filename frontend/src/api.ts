@@ -273,6 +273,17 @@ export const api = {
   getLazyCatAccount: () =>
     http.get<LazyCatAccount>('/api/lazycat/account').then(r => r.data),
 
+  getLazyCatInstance: (id: number) =>
+    http.get<LazyCatInstance & { error?: string }>(`/api/lazycat/instances/${id}`).then(r => r.data),
+  addLazyCatPort: (id: number, body: { protocol: string; privatePort: number; remark?: string }) =>
+    http.post<{ message?: string; mapping?: LazyCatPortMapping; error?: string; detail?: string }>(
+      `/api/lazycat/instances/${id}/ports`, body,
+    ).then(r => r.data),
+  deleteLazyCatPort: (id: number, portId: number) =>
+    http.delete<{ message?: string; error?: string }>(`/api/lazycat/instances/${id}/ports/${portId}`).then(r => r.data),
+  getLazyCatTerminal: (id: number) =>
+    http.get<{ ws_url: string; official_page: string; error?: string }>(`/api/lazycat/instances/${id}/terminal`).then(r => r.data),
+
   getLazyCatInstances: () =>
     http.get<LazyCatInstance[] | { error: string }>('/api/lazycat/instances').then(r => r.data),
 
@@ -726,7 +737,33 @@ export interface LazyCatInstance {
   monthlyTrafficUsed?: string | number | null
   expiresAt?: string
   portLimit?: number
+  port_limit?: number
+  sshPort?: number
+  ssh_port?: number
+  portMappings?: LazyCatPortMapping[] | null
+  port_mappings?: LazyCatPortMapping[] | null
+  nat_public_ip?: string
+  host_public_ip?: string
+  hidePublicIpOnlyCopy?: boolean
+  hide_public_ip_only_copy?: boolean
+  limitsIngress?: string
+  limitsEgress?: string
+  remainingQuota?: string
+  remaining_quota?: string
+  created_at?: string
   allow_instance_deletion?: boolean
+}
+
+export interface LazyCatPortMapping {
+  id: number
+  protocol: string
+  ipVersion?: string
+  ip_version?: string
+  publicPort?: number
+  public_port?: number
+  privatePort?: number
+  private_port?: number
+  remark?: string | null
 }
 
 export interface LazyCatUser {

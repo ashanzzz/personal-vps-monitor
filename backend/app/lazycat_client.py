@@ -210,6 +210,68 @@ async def get_my_instances(token: str) -> list[dict[str, Any]]:
         return res if isinstance(res, list) else []
 
 
+async def get_instance_detail(token: str, instance_id: int | str) -> dict[str, Any]:
+    """GET /instances/{id} — 单实例详情，含 port_mappings / ssh_port / port_limit。"""
+    async with _get_client() as c:
+        r = await c.get(f"{BASE}/instances/{instance_id}", headers=_headers(token))
+        r.raise_for_status()
+        res = r.json()
+        return res.get("instance") or res
+
+
+async def add_port_mapping(
+    token: str,
+    instance_id: int | str,
+    protocol: str = "tcp",
+    private_port: int = 22,
+    remark: str | None = None,
+) -> dict[str, Any]:
+    """POST /instances/{id}/ports — 新增端口映射，公网端口由平台自动分配。
+
+    实测：body {protocol, privatePort} 即可，返回
+    {"message": "Port mapping added", "mapping": {id, publicPort, privatePort, ipVersion}}
+    """
+    body: dict[str, Any] = {"protocol": protocol, "privatePort": int(private_port)}
+    if remark:
+        body["remark"] = remark
+    async with _get_client() as c:
+        r = await c.post(f"{BASE}/instances/{instance_id}/ports", headers=_headers(token), json=body)
+        r.raise_for_status()
+        return r.json()
+
+
+async def delete_port_mapping(token: str, instance_id: int | str, port_id: int | str) -> dict[str, Any]:
+    """DELETE /instances/{id}/ports/{portId} — 删除端口映射。
+
+    注意：该端点要求带 JSON body（空 body 会 400 "Body cannot be empty"），传 {} 即可。
+    """
+    async with _get_client() as c:
+        r = await c.request(
+            "DELETE",
+            f"{BASE}/instances/{instance_id}/ports/{port_id}",
+            headers=_headers(token),
+            json={},
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+def build_terminal_ws_url(token: str, instance_id: int | str, host: str = "dash.lazycat.wiki") -> str:
+    """实例终端 WebSocket 地址（实测可用，前端交给 xterm.js 或直接打开）。
+
+    官方实现：wss://<host>/api/ws/instances/{id}/terminal?token=<jwt>
+    - 二进制帧 = PTY 输出
+    - 文本帧 = 键盘输入
+    - JSON {type:"resize",cols,rows} = 调整终端尺寸
+    """
+    from urllib.parse import quote
+
+    return (
+        f"wss://{host}/api/ws/instances/{instance_id}/terminal"
+        f"?token={quote(clean_token(token), safe='')}"
+    )
+
+
 # --- Secondary Market (instanceMarket) ---
 
 async def get_market_config(token: str) -> dict[str, Any]:

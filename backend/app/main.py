@@ -1307,6 +1307,91 @@ async def get_lazycat_user_instances(_: str = Depends(require_auth), db: AsyncSe
         return {"error": str(e)}
 
 
+class LazyCatPortRequest(BaseModel):
+    protocol: str = "tcp"
+    privatePort: int = 22
+    remark: str | None = None
+
+
+@app.get("/api/lazycat/instances/{instance_id}", tags=["admin"])
+async def get_lazycat_instance_detail(
+    instance_id: int,
+    _: str = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """单实例详情：配置、到期、流量、SSH 端口、端口映射列表。"""
+    settings = await get_all_settings(db)
+    token = lazycat_client.clean_token(settings.get("lazycat_token", ""))
+    if not token:
+        return {"error": "未配置 LazyCat Token"}
+    try:
+        return await lazycat_client.get_instance_detail(token, instance_id)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/lazycat/instances/{instance_id}/ports", tags=["admin"])
+async def add_lazycat_port(
+    instance_id: int,
+    req: LazyCatPortRequest,
+    _: str = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """新增端口映射（公网端口由平台自动分配）。"""
+    settings = await get_all_settings(db)
+    token = lazycat_client.clean_token(settings.get("lazycat_token", ""))
+    if not token:
+        return {"error": "未配置 LazyCat Token"}
+    try:
+        return await lazycat_client.add_port_mapping(
+            token, instance_id, protocol=req.protocol, private_port=req.privatePort, remark=req.remark
+        )
+    except httpx.HTTPStatusError as e:
+        return {"error": f"新增失败 HTTP {e.response.status_code}", "detail": e.response.text[:300]}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.delete("/api/lazycat/instances/{instance_id}/ports/{port_id}", tags=["admin"])
+async def delete_lazycat_port(
+    instance_id: int,
+    port_id: int,
+    _: str = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """删除端口映射（不影响实例本身）。"""
+    settings = await get_all_settings(db)
+    token = lazycat_client.clean_token(settings.get("lazycat_token", ""))
+    if not token:
+        return {"error": "未配置 LazyCat Token"}
+    try:
+        return await lazycat_client.delete_port_mapping(token, instance_id, port_id)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/lazycat/instances/{instance_id}/terminal", tags=["admin"])
+async def get_lazycat_terminal(
+    instance_id: int,
+    _: str = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """返回实例终端的 WebSocket 地址（官方 xterm.js 同款端点）。
+
+    该 URL 内含登录 Token，只在已认证的请求里返回，前端直接 new WebSocket(url) 即可，
+    也可用它拼一个「在官方页面打开终端」的入口。
+    """
+    settings = await get_all_settings(db)
+    token = lazycat_client.clean_token(settings.get("lazycat_token", ""))
+    if not token:
+        return {"error": "未配置 LazyCat Token"}
+    return {
+        "ws_url": lazycat_client.build_terminal_ws_url(token, instance_id),
+        "official_page": f"https://dash.lazycat.wiki/terminal?instance={instance_id}",
+        "protocol": "xterm.js: 二进制帧=PTY 输出，文本帧=输入，{type:'resize'} 调尺寸",
+    }
+
+
 @app.get("/api/lazycat/market", tags=["admin"])
 async def get_lazycat_market_listings(
     region: str | None = None,
