@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   Card, Form, Input, InputNumber, Switch, Select, Button, Collapse,
-  Divider, message, Typography, Radio, TimePicker, Space, Affix, Modal,
+  Divider, message, Typography, Radio, TimePicker, Space, Affix, Modal, Tabs,
 } from 'antd'
 import {
   SaveOutlined, SendOutlined, ReloadOutlined, CheckCircleTwoTone,
@@ -270,6 +270,15 @@ export function SettingsPage({ settings, onSaved }: Props) {
     <div style={{ maxWidth: 760, margin: '0 auto', paddingBottom: 72 }}>
       <Form form={form} layout="vertical" onFinish={handleSave}>
         {/* ── Card 1: API & connection ── */}
+        <Tabs
+          defaultActiveKey="credentials"
+          items={[
+            {
+              key: 'credentials',
+              label: '平台凭证',
+              forceRender: true,
+              children: (
+                <>
         <Card size="small" title="API 与连接" style={{ marginBottom: 16 }}>
           <Form.Item label="Akile Token" name="akile_token" rules={[{ required: true, message: '必填' }]}>
             <Input.Password placeholder="your-token" autoComplete="off" />
@@ -513,7 +522,15 @@ export function SettingsPage({ settings, onSaved }: Props) {
             ),
           }]} />
         </Card>
-
+                </>
+              ),
+            },
+            {
+              key: 'sync',
+              label: '同步与监控',
+              forceRender: true,
+              children: (
+                <>
         {/* ── Card: Checkin schedule ── */}
         <Card size="small" title="每日自动打卡与时间设置" style={{ marginBottom: 16 }}>
           <Space size="large" wrap style={{ marginBottom: 16 }}>
@@ -622,7 +639,15 @@ export function SettingsPage({ settings, onSaved }: Props) {
             ),
           }]} />
         </Card>
-
+                </>
+              ),
+            },
+            {
+              key: 'notify',
+              label: '通知',
+              forceRender: true,
+              children: (
+                <>
         {/* ── Card 3: Telegram ── */}
         <Card size="small" title="Telegram 通知" style={{ marginBottom: 16 }}>
           <Form.Item label="Bot Token" name="tg_bot_token">
@@ -683,7 +708,15 @@ export function SettingsPage({ settings, onSaved }: Props) {
             </>
           ),
         }]} />
-
+                </>
+              ),
+            },
+            {
+              key: 'system',
+              label: '系统',
+              forceRender: true,
+              children: (
+                <>
         {/* ── Card 5: 版本信息 ── */}
         <Card size="small" title="版本信息" style={{ marginBottom: 16 }}>
           <Space size="large" wrap>
@@ -729,6 +762,11 @@ export function SettingsPage({ settings, onSaved }: Props) {
             </>
           ),
         }]} />
+                </>
+              ),
+            },
+          ]}
+        />
 
         <Affix offsetBottom={0}>
           <div style={{ background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(4px)', padding: '12px 0', borderTop: '1px solid #f0f0f0' }}>
