@@ -12,45 +12,9 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '../api'
 import type { LazyCatAccount, LazyCatInstance, LazyCatPortMapping } from '../api'
+import { show, fmtBytes, fmtDiskMb, fmtDate, daysLeft } from '../lib/format'
 
 const { Text } = Typography
-
-function show(v: unknown): string {
-  if (v === null || v === undefined || v === '') return '—'
-  if (typeof v === 'boolean') return v ? '是' : '否'
-  return String(v)
-}
-
-function fmtBytes(bytes: number | null): string {
-  if (bytes === null || !Number.isFinite(bytes)) return '—'
-  const gb = bytes / 1024 ** 3
-  if (gb >= 1024) return `${(gb / 1024).toFixed(2)} TB`
-  if (gb >= 1) return `${gb.toFixed(gb >= 100 ? 0 : 1)} GB`
-  return `${(bytes / 1024 ** 2).toFixed(1)} MB`
-}
-
-function fmtDisk(mb: unknown): string {
-  const n = Number(mb)
-  if (!Number.isFinite(n) || n <= 0) return '—'
-  return n >= 1024 ? `${(n / 1024).toFixed(n % 1024 === 0 ? 0 : 1)}G` : `${n}M`
-}
-
-function fmtDate(v: unknown): string {
-  if (!v) return '—'
-  const d = new Date(String(v))
-  if (Number.isNaN(d.getTime())) return show(v)
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
-
-function daysLeft(v: unknown): number | null {
-  if (!v) return null
-  const t = new Date(String(v)).getTime()
-  if (Number.isNaN(t)) return null
-  return Math.ceil((t - Date.now()) / 86400000)
-}
 
 export function LazyCatAccountPage({ onGotoSettings }: { onGotoSettings?: () => void }) {
   const { message } = AntApp.useApp()
@@ -297,7 +261,7 @@ export function LazyCatAccountPage({ onGotoSettings }: { onGotoSettings?: () => 
         const parts = [
           cpu ? `${cpu}C` : null,
           r.memory ? `${r.memory}M` : null,
-          r.disk ? fmtDisk(r.disk) : null,
+          r.disk ? fmtDiskMb(r.disk) : null,
         ].filter(Boolean)
         return parts.length ? parts.join(' / ') : '—'
       },

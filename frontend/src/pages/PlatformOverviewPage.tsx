@@ -9,44 +9,9 @@ import {
 } from '@ant-design/icons'
 import { api } from '../api'
 import type { PlatformHealth, PlatformsHealth, UnifiedServer } from '../api'
+import { fmtTime, timeAgo, fmtDate, daysLeft } from '../lib/format'
 
 const { Text } = Typography
-
-function fmtTime(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
-}
-
-function ago(iso: string | null | undefined): string {
-  if (!iso) return '从未同步'
-  const t = new Date(iso).getTime()
-  if (Number.isNaN(t)) return '未知'
-  const sec = Math.max(0, Math.round((Date.now() - t) / 1000))
-  if (sec < 60) return `${sec} 秒前`
-  const min = Math.round(sec / 60)
-  if (min < 60) return `${min} 分钟前`
-  const hr = Math.round(min / 60)
-  if (hr < 24) return `${hr} 小时前`
-  return `${Math.round(hr / 24)} 天前`
-}
-
-function fmtDate(ts: number | null | undefined): string {
-  if (!ts) return '—'
-  const ms = ts > 1e11 ? ts : ts * 1000
-  const d = new Date(ms)
-  if (Number.isNaN(d.getTime())) return '—'
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-}
-
-function daysLeft(ts: number | null | undefined): number | null {
-  if (!ts) return null
-  const ms = ts > 1e11 ? ts : ts * 1000
-  return Math.ceil((ms - Date.now()) / 86400000)
-}
 
 interface PlatformSummary {
   key: string
@@ -230,7 +195,7 @@ export function PlatformOverviewPage({ onGotoSettings }: { onGotoSettings?: () =
                 <Space size={4}>
                   {r.mode === 'live'
                     ? <><ThunderboltOutlined style={{ color: '#059669', fontSize: 11 }} /><Text style={{ fontSize: 12, color: '#059669' }}>实时拉取</Text></>
-                    : <><SyncOutlined style={{ color: '#b45309', fontSize: 11 }} /><Text style={{ fontSize: 12 }}>{ago(r.lastSynced)}</Text></>}
+                    : <><SyncOutlined style={{ color: '#b45309', fontSize: 11 }} /><Text style={{ fontSize: 12 }}>{timeAgo(r.lastSynced)}</Text></>}
                 </Space>
               ),
             },
@@ -334,7 +299,7 @@ function PlatformCard({
                       ) : (
                         <CloseCircleFilled style={{ color: '#ef4444', fontSize: 11 }} />
                       )}
-                      {ago(platform.cache_updated_at)}
+                      {timeAgo(platform.cache_updated_at)}
                     </Space>
                   )}
                 </Text>

@@ -12,46 +12,13 @@ import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { api, fmtPrice } from '../api'
 import type { AccountInfo, MyServer, AppSettings } from '../api'
+import { show, timeAgo, pick, checkedInToday } from '../lib/format'
 
 const { Text } = Typography
 
-// Render a value that may be string/number/bool into something printable.
-function show(v: unknown): string {
-  if (v === null || v === undefined || v === '') return '—'
-  if (typeof v === 'boolean') return v ? '是' : '否'
-  return String(v)
-}
 
-// Human "N ago" for the cache timestamp. Input is ISO8601 UTC.
-function timeAgo(iso: string | null | undefined): string {
-  if (!iso) return '从未'
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return '未知'
-  const sec = Math.max(0, Math.round((Date.now() - then) / 1000))
-  if (sec < 60) return `${sec} 秒前`
-  const min = Math.round(sec / 60)
-  if (min < 60) return `${min} 分钟前`
-  const hr = Math.round(min / 60)
-  if (hr < 24) return `${hr} 小时前`
-  return `${Math.round(hr / 24)} 天前`
-}
 
-// Pick the first present key from a server object (Akile field names vary).
-function pick(s: MyServer, keys: string[]): unknown {
-  for (const k of keys) if (s[k] !== undefined && s[k] !== null && s[k] !== '') return s[k]
-  return undefined
-}
 
-// Whether last_checkin_time (unix seconds) falls on the local calendar today.
-function checkedInToday(ts: number | null | undefined): boolean {
-  if (!ts) return false
-  const then = new Date(ts * 1000)
-  if (Number.isNaN(then.getTime())) return false
-  const now = new Date()
-  return then.getFullYear() === now.getFullYear()
-    && then.getMonth() === now.getMonth()
-    && then.getDate() === now.getDate()
-}
 
 export function AccountPage() {
   const { message } = AntApp.useApp()

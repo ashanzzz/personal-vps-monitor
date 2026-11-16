@@ -11,32 +11,9 @@ import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { api } from '../api'
 import type { AcckAccountInfo, AcckServer } from '../api'
+import { show, timeAgo, pick } from '../lib/format'
 
 const { Text } = Typography
-
-function show(v: unknown): string {
-  if (v === null || v === undefined || v === '') return '—'
-  if (typeof v === 'boolean') return v ? '是' : '否'
-  return String(v)
-}
-
-function timeAgo(iso: string | null | undefined): string {
-  if (!iso) return '从未'
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return '未知'
-  const sec = Math.max(0, Math.round((Date.now() - then) / 1000))
-  if (sec < 60) return `${sec} 秒前`
-  const min = Math.round(sec / 60)
-  if (min < 60) return `${min} 分钟前`
-  const hr = Math.round(min / 60)
-  if (hr < 24) return `${hr} 小时前`
-  return `${Math.round(hr / 24)} 天前`
-}
-
-function pick(s: AcckServer, keys: string[]): unknown {
-  for (const k of keys) if (s[k] !== undefined && s[k] !== null && s[k] !== '') return s[k]
-  return undefined
-}
 
 export function AcckAccountPage() {
   const { message } = AntApp.useApp()
