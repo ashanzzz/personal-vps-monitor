@@ -1129,14 +1129,24 @@ async def get_lazycat_account_data(_: str = Depends(require_auth), db: AsyncSess
     if not token:
         return {"error": "未配置 LazyCat Token"}
     try:
-        user_info = await lazycat_client.get_user_info(token)
-        balance = await lazycat_client.get_user_balance(token)
-        vip_card = await lazycat_client.get_vip_card(token)
-        return {
-            "user": user_info,
-            "balance": balance,
-            "vip_card": vip_card,
-        }
+        user_info, balance, vip_card, checkin = await asyncio.gather(
+            lazycat_client.get_user_info(token),
+            lazycat_client.get_user_balance(token),
+            lazycat_client.get_vip_card(token),
+            lazycat_client.get_checkin_status(token),
+            return_exceptions=True,
+        )
+        payload = {}
+        for key, val in (
+            ("user", user_info),
+            ("balance", balance),
+            ("vip_card", vip_card),
+            ("checkin", checkin),
+        ):
+            payload[key] = None if isinstance(val, BaseException) else val
+        if payload["user"] is None:
+            return {"error": "Token 已失效或无权访问，请重新在系统配置中一键登录"}
+        return payload
     except Exception as e:
         return {"error": str(e)}
 

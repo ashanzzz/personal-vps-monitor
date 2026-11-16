@@ -661,34 +661,90 @@ export interface AcckAccountInfo {
   updated_at: string | null
 }
 
-// --- LazyCat 懒猫云 ---
-export interface LazyCatInstance {
-  id?: string | number
+// --- LazyCat 懒猫云（字段名严格对齐 dash.lazycat.wiki 真实响应）---
+export interface LazyCatHost {
   name?: string
-  hostname?: string
+  country_code?: string
+  nat_public_ip?: string
+}
+
+export interface LazyCatInstance {
+  id?: number
+  name?: string
+  incusId?: string
   status?: string
-  state?: string
-  ip?: string
-  ipv4?: string
-  region?: string
-  area?: string
-  node?: string
-  expired_at?: string
-  expire_time?: string
-  due_date?: string
-  cpu?: string | number
-  memory?: string | number
-  disk?: string | number
-  bandwidth?: string | number
-  [key: string]: unknown
+  image?: string
+  imageName?: string
+  cpu?: number
+  cpuCores?: number
+  memory?: number
+  disk?: number
+  ipv4?: string | null
+  ipv6?: string | null
+  host?: LazyCatHost
+  hostCountryCode?: string
+  networkMode?: string
+  natPublicIp?: string
+  hostPublicIp?: string
+  createdAt?: string
+  packageName?: string
+  planName?: string
+  billingPrice?: number
+  monthlyTrafficLimit?: string | number | null
+  monthlyTrafficUsed?: string | number | null
+  expiresAt?: string
+  portLimit?: number
+  allow_instance_deletion?: boolean
+}
+
+export interface LazyCatUser {
+  id?: number
+  username?: string
+  email?: string
+  role?: string
+  vipLevel?: number
+  instanceCreateGrant?: boolean
+}
+
+export interface LazyCatBalance {
+  balance?: number
+  frozen?: number
+  totalRecharge?: number
+  totalConsume?: number
+  thisMonthConsume?: number
+  vipLevel?: number
+  vipProgress?: number
+  vipNextLevel?: number
+  vipNextThreshold?: number
+}
+
+export interface LazyCatVipCard {
+  enabled?: boolean
+  cardName?: string
+  minVipLevel?: number
+  userVipLevel?: number
+  canClaim?: boolean
+  claimBlockReason?: string
+  card?: Record<string, unknown> | null
+}
+
+export interface LazyCatCheckin {
+  enabled?: boolean
+  checkedIn?: boolean
+  points?: number
+  minPoints?: number
+  maxPoints?: number
+  instances?: number
+  day?: string
+  nextResetAt?: string
 }
 
 export interface LazyCatAccount {
   error?: string
-  user?: Record<string, unknown>
-  balance?: Record<string, unknown>
-  vip_card?: Record<string, unknown>
-  [key: string]: unknown
+  user?: LazyCatUser | null
+  balance?: LazyCatBalance | null
+  vip_card?: LazyCatVipCard | null
+  checkin?: LazyCatCheckin | null
 }
 
 export interface AccountProfile {

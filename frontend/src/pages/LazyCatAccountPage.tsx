@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Alert, App as AntApp, Button, Card, Col, Descriptions, Empty, Row,
+  Alert, App as AntApp, Button, Card, Col, Descriptions, Empty, Progress, Row,
   Space, Spin, Statistic, Table, Tag, Typography,
 } from 'antd'
 import {
   CloudServerOutlined, ReloadOutlined, WalletOutlined, CrownOutlined,
-  CheckCircleOutlined, LoginOutlined,
+  CheckCircleOutlined, LoginOutlined, GlobalOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '../api'
@@ -19,20 +19,35 @@ function show(v: unknown): string {
   return String(v)
 }
 
-function pick(obj: Record<string, unknown> | null | undefined, keys: string[]): unknown {
-  if (!obj) return undefined
-  for (const k of keys) {
-    const v = obj[k]
-    if (v !== undefined && v !== null && v !== '') return v
-  }
-  return undefined
+function fmtBytes(bytes: number | null): string {
+  if (bytes === null || !Number.isFinite(bytes)) return '—'
+  const gb = bytes / 1024 ** 3
+  if (gb >= 1024) return `${(gb / 1024).toFixed(2)} TB`
+  if (gb >= 1) return `${gb.toFixed(gb >= 100 ? 0 : 1)} GB`
+  return `${(bytes / 1024 ** 2).toFixed(1)} MB`
 }
 
-function num(obj: Record<string, unknown> | null | undefined, keys: string[]): number | null {
-  const v = pick(obj, keys)
-  if (v === undefined) return null
-  const n = Number(v)
-  return Number.isFinite(n) ? n : null
+function fmtDisk(mb: unknown): string {
+  const n = Number(mb)
+  if (!Number.isFinite(n) || n <= 0) return '—'
+  return n >= 1024 ? `${(n / 1024).toFixed(n % 1024 === 0 ? 0 : 1)}G` : `${n}M`
+}
+
+function fmtDate(v: unknown): string {
+  if (!v) return '—'
+  const d = new Date(String(v))
+  if (Number.isNaN(d.getTime())) return show(v)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function daysLeft(v: unknown): number | null {
+  if (!v) return null
+  const t = new Date(String(v)).getTime()
+  if (Number.isNaN(t)) return null
+  return Math.ceil((t - Date.now()) / 86400000)
 }
 
 export function LazyCatAccountPage({ onGotoSettings }: { onGotoSettings?: () => void }) {
@@ -85,8 +100,34 @@ export function LazyCatAccountPage({ onGotoSettings }: { onGotoSettings?: () => 
     return <Spin size="large" style={{ display: 'block', margin: '120px auto' }} />
   }
 
-  const notConfigured = Boolean(account?.error) || (!account?.user && instances.length === 0)
-  if (notConfigured) {
+  if (account?.error) {
+    return (
+      <Card>
+        <Alert
+          type="warning"
+          showIcon
+          message="懒猫云数据不可用"
+          description={
+            <Space direction="vertical" size={4}>
+              <Text type="secondary">{account.error}</Text>
+              {onGotoSettings && (
+                <Button type="primary" icon={<LoginOutlined />} onClick={onGotoSettings}>
+                  去系统配置重新登录
+                </Button>
+              )}
+            </Space>
+          }
+        />
+      </Card>
+    )
+  }
+
+  const user = account?.user ?? null
+  const balance = account?.balance ?? null
+  const vipCard = account?.vip_card ?? null
+  const checkinInfo = account?.checkin ?? null
+
+  if (!user && instances.length === 0) {
     return (
       <Card>
         <Alert
@@ -111,28 +152,44 @@ export function LazyCatAccountPage({ onGotoSettings }: { onGotoSettings?: () => 
     )
   }
 
-  const user = account?.user ?? null
-  const balance = account?.balance ?? null
-  const vip = account?.vip_card ?? null
-
-  const username = pick(user, ['username', 'name', 'nickname', 'email']) as string | undefined
-  const email = pick(user, ['email']) as string | undefined
-  const uid = pick(user, ['id', 'uid', 'userId'])
-  const money = num(balance, ['balance', 'amount', 'money', 'available', 'total'])
+  const money = Number(balance?.balance ?? 0)
+  const vipLevel = Number(user?.vipLevel ?? balance?.vipLevel ?? 0)
+  const vipProgress = Number(balance?.vipProgress ?? 0)
+  const vipNextThreshold = Number(balance?.vipNextThreshold ?? 0)
+  const checkedIn = Boolean(checkinInfo?.checkedIn)
+  const checkinPoints = Number(checkinInfo?.points ?? 0)
+  const vipCardInfo = vipCard?.card as Record<string, unknown> | null | undefined
 
   const profileItems = [
-    { key: 'username', label: '账号', children: show(username) },
-    { key: 'email', label: '邮箱', children: show(email) },
-    { key: 'uid', label: '用户 ID', children: show(uid) },
+    { key: 'username', label: '账号', children: show(user?.username) },
+    { key: 'email', label: '邮箱', children: show(user?.email) },
+    { key: 'uid', label: '用户 ID', children: show(user?.id) },
+    { key: 'vip', label: '会员等级', children: `VIP ${vipLevel}` },
     {
-      key: 'vip',
-      label: '会员等级',
-      children: show(pick(vip, ['level', 'name', 'vipLevel', 'title'])) ?? '—',
+      key: 'vip_progress',
+      label: '升级进度',
+      children: vipNextThreshold ? `${vipProgress} / ${vipNextThreshold}（距 VIP ${vipLevel + 1}）` : '—',
     },
     {
-      key: 'vip_expire',
-      label: '会员到期',
-      children: show(pick(vip, ['expireAt', 'expired_at', 'expire_time', 'due_date'])),
+      key: 'checkin',
+      label: '今日签到',
+      children: (
+        <Space size={4}>
+          <Tag color={checkedIn ? 'success' : 'default'}>{checkedIn ? '已签到' : '未签到'}</Tag>
+          {checkedIn && <Text type="secondary">+{checkinPoints} 积分</Text>}
+        </Space>
+      ),
+    },
+    { key: 'recharge', label: '累计充值', children: `¥${Number(balance?.totalRecharge ?? 0).toFixed(2)}` },
+    { key: 'consume', label: '本月消费', children: `¥${Number(balance?.thisMonthConsume ?? 0).toFixed(2)}` },
+    {
+      key: 'vipcard',
+      label: 'VIP 权益卡',
+      children: vipCardInfo
+        ? show(vipCardInfo.cardNumber)
+        : vipCard?.enabled
+          ? (vipCard.canClaim ? '可领取' : `需 VIP ${show(vipCard.minVipLevel)} 解锁`)
+          : '未开放',
     },
   ]
 
@@ -140,26 +197,28 @@ export function LazyCatAccountPage({ onGotoSettings }: { onGotoSettings?: () => 
     {
       title: '名称',
       key: 'name',
-      render: (_: unknown, r) => (
-        <Text strong>{show(pick(r as Record<string, unknown>, ['name', 'hostname', 'title']))}</Text>
-      ),
+      render: (_: unknown, r) => <Text strong>{show(r.name)}</Text>,
     },
     {
       title: '区域',
       key: 'region',
-      width: 130,
-      render: (_: unknown, r) => show(pick(r as Record<string, unknown>, ['region', 'area', 'node', 'location'])),
+      width: 170,
+      render: (_: unknown, r) => {
+        const host = r.host?.name
+        const cc = (r.hostCountryCode ?? r.host?.country_code ?? '').toUpperCase()
+        return host ? `${host}${cc ? ` · ${cc}` : ''}` : '—'
+      },
     },
     {
       title: '配置',
       key: 'spec',
-      width: 200,
+      width: 160,
       render: (_: unknown, r) => {
-        const o = r as Record<string, unknown>
+        const cpu = r.cpuCores ?? r.cpu
         const parts = [
-          pick(o, ['cpu', 'vcpu']) ? `${pick(o, ['cpu', 'vcpu'])}C` : null,
-          pick(o, ['memory', 'ram']) ? `${pick(o, ['memory', 'ram'])}M` : null,
-          pick(o, ['disk', 'storage']) ? `${pick(o, ['disk', 'storage'])}G` : null,
+          cpu ? `${cpu}C` : null,
+          r.memory ? `${r.memory}M` : null,
+          r.disk ? fmtDisk(r.disk) : null,
         ].filter(Boolean)
         return parts.length ? parts.join(' / ') : '—'
       },
@@ -167,25 +226,72 @@ export function LazyCatAccountPage({ onGotoSettings }: { onGotoSettings?: () => 
     {
       title: 'IP',
       key: 'ip',
-      width: 150,
-      render: (_: unknown, r) => show(pick(r as Record<string, unknown>, ['ip', 'ipv4', 'main_ip'])),
+      width: 180,
+      render: (_: unknown, r) => (
+        <Space direction="vertical" size={0}>
+          <Text code>{show(r.ipv4)}</Text>
+          {r.natPublicIp && r.natPublicIp !== r.ipv4 && (
+            <Text type="secondary" style={{ fontSize: 11 }}>公网 {r.natPublicIp}</Text>
+          )}
+        </Space>
+      ),
+    },
+    {
+      title: '流量',
+      key: 'traffic',
+      width: 165,
+      render: (_: unknown, r) => {
+        const used = Number(r.monthlyTrafficUsed ?? NaN)
+        const limit = Number(r.monthlyTrafficLimit ?? NaN)
+        if (!Number.isFinite(used) || !Number.isFinite(limit)) return '—'
+        const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0
+        return (
+          <Space direction="vertical" size={0} style={{ width: '100%' }}>
+            <Text style={{ fontSize: 12 }}>{fmtBytes(used)} / {fmtBytes(limit)}</Text>
+            <Progress percent={Number(pct.toFixed(1))} size="small" showInfo={false} strokeColor="#2563eb" />
+          </Space>
+        )
+      },
+    },
+    {
+      title: '月费',
+      key: 'price',
+      width: 90,
+      render: (_: unknown, r) => (r.billingPrice != null ? `¥${Number(r.billingPrice).toFixed(2)}` : '—'),
     },
     {
       title: '状态',
       key: 'status',
-      width: 100,
+      width: 95,
       render: (_: unknown, r) => {
-        const st = String(pick(r as Record<string, unknown>, ['status', 'state']) ?? '')
-        const running = /run|active|正常|on/i.test(st)
-        return <Tag color={running ? 'success' : 'default'}>{st || '—'}</Tag>
+        const st = String(r.status ?? '')
+        const map: Record<string, { color: string; text: string }> = {
+          running: { color: 'success', text: '运行中' },
+          stopped: { color: 'default', text: '已停止' },
+          suspended: { color: 'warning', text: '已暂停' },
+        }
+        const hit = map[st]
+        return <Tag color={hit?.color ?? 'default'}>{hit?.text ?? (st || '—')}</Tag>
       },
     },
     {
       title: '到期时间',
       key: 'expire',
-      width: 180,
-      render: (_: unknown, r) =>
-        show(pick(r as Record<string, unknown>, ['expired_at', 'expire_time', 'due_date', 'expireAt'])),
+      width: 140,
+      render: (_: unknown, r) => {
+        const left = daysLeft(r.expiresAt)
+        const urgent = left !== null && left <= 7
+        return (
+          <Space direction="vertical" size={0}>
+            <Text>{fmtDate(r.expiresAt)}</Text>
+            {left !== null && (
+              <Text type={urgent ? 'danger' : 'secondary'} style={{ fontSize: 11 }}>
+                {left >= 0 ? `剩 ${left} 天` : `已过期 ${-left} 天`}
+              </Text>
+            )}
+          </Space>
+        )
+      },
     },
   ]
 
@@ -199,7 +305,7 @@ export function LazyCatAccountPage({ onGotoSettings }: { onGotoSettings?: () => 
               刷新
             </Button>
             <Button icon={<CheckCircleOutlined />} onClick={checkin} loading={checkingIn}>
-              每日签到
+              {checkedIn ? '今日已签到' : '每日签到'}
             </Button>
           </Space>
         }
@@ -209,7 +315,7 @@ export function LazyCatAccountPage({ onGotoSettings }: { onGotoSettings?: () => 
             <Card size="small" variant="borderless" style={{ background: '#f8fafc' }}>
               <Statistic
                 title={<Space><WalletOutlined /><span>账户余额</span></Space>}
-                value={money ?? 0}
+                value={money}
                 precision={2}
                 prefix="¥"
                 valueStyle={{ color: '#0f172a', fontWeight: 600 }}
@@ -230,35 +336,31 @@ export function LazyCatAccountPage({ onGotoSettings }: { onGotoSettings?: () => 
             <Card size="small" variant="borderless" style={{ background: '#f8fafc' }}>
               <Statistic
                 title={<Space><CrownOutlined /><span>会员等级</span></Space>}
-                value={show(pick(vip, ['level', 'name', 'vipLevel', 'title']))}
-                valueStyle={{ color: '#b45309', fontWeight: 600, fontSize: 20 }}
+                value={vipLevel}
+                prefix="VIP"
+                valueStyle={{ color: '#b45309', fontWeight: 600, fontSize: 22 }}
               />
             </Card>
           </Col>
         </Row>
 
-        <Descriptions
-          bordered
-          size="small"
-          column={{ xs: 1, sm: 2, md: 3 }}
-          items={profileItems}
-        />
+        <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3 }} items={profileItems} />
       </Card>
 
       <Card
-        title={<Space><CloudServerOutlined /><span>我的实例</span></Space>}
+        title={<Space><GlobalOutlined /><span>我的实例</span></Space>}
         extra={<Text type="secondary" style={{ fontSize: 12 }}>共 {instances.length} 台</Text>}
       >
         {instances.length === 0 ? (
           <Empty description="名下暂无实例" />
         ) : (
           <Table<LazyCatInstance>
-            rowKey={(r) => String(pick(r as Record<string, unknown>, ['id', 'uuid', 'instanceId']) ?? Math.random())}
+            rowKey={(r) => String(r.id ?? r.incusId ?? Math.random())}
             size="small"
             columns={columns}
             dataSource={instances}
             pagination={false}
-            scroll={{ x: 900 }}
+            scroll={{ x: 1200 }}
           />
         )}
       </Card>
