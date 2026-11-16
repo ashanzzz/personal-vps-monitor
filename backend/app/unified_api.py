@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -410,7 +410,7 @@ async def get_unified_servers(
         "akile": await _last_success(1),
         "acck": await _last_success(2),
         # 懒猫云每次请求都直连远端，本次请求时刻即最后同步时刻
-        "lazycat": datetime.now().isoformat(timespec="seconds"),
+        "lazycat": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     for srv in servers:
         plat = srv.get("platform", "")

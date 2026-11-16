@@ -8,7 +8,7 @@ import logging
 import re
 import time
 from decimal import Decimal, InvalidOperation
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 import httpx
@@ -692,7 +692,7 @@ async def poll_account(token: str, settings: dict) -> None:
         ok = profile is not None and bool(servers) and not any(
             e.startswith("servers:") for e in errors
         )
-        payload["last_attempt_at"] = datetime.utcnow().isoformat()
+        payload["last_attempt_at"] = datetime.now(timezone.utc).isoformat()
         payload["last_success_at"] = (
             payload["last_attempt_at"] if ok else prev.get("last_success_at")
         )
@@ -774,7 +774,7 @@ async def poll_acck_account(token: str, settings: dict) -> None:
         ok = profile is not None and bool(servers) and not any(
             e.startswith("servers:") for e in errors
         )
-        payload["last_attempt_at"] = datetime.utcnow().isoformat()
+        payload["last_attempt_at"] = datetime.now(timezone.utc).isoformat()
         payload["last_success_at"] = (
             payload["last_attempt_at"] if ok else prev.get("last_success_at")
         )

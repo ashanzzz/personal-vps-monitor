@@ -10,7 +10,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from typing import Any
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -993,8 +993,20 @@ async def get_platforms_health(
     ak_row = await db.scalar(select(AccountCache).where(AccountCache.id == 1))
     ac_row = await db.scalar(select(AccountCache).where(AccountCache.id == 2))
 
+    def _last_success(row) -> str | None:
+        """缓存里记录的最后一次「成功拿到远端数据」时间（带时区）。"""
+        if row is None or not row.data:
+            return None
+        try:
+            v = json.loads(row.data).get("last_success_at")
+        except Exception:
+            v = None
+        if v:
+            return v
+        return (row.updated_at.isoformat() + "+00:00") if row.updated_at else None
+
     payload = {
-        "checked_at": datetime.now().isoformat(timespec="seconds"),
+        "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "cache_ttl_seconds": _HEALTH_TTL_SECONDS,
         "platforms": [
             {
@@ -1014,7 +1026,7 @@ async def get_platforms_health(
                 "configured": bool(ak_tok),
                 "data_source": "cache",
                 "data_source_label": "本地缓存（5 分钟同步）",
-                "cache_updated_at": ak_row.updated_at.isoformat() if ak_row and ak_row.updated_at else None,
+                "cache_updated_at": _last_success(ak_row),
                 **ak_res,
             },
             {
@@ -1024,7 +1036,7 @@ async def get_platforms_health(
                 "configured": bool(ac_tok),
                 "data_source": "cache",
                 "data_source_label": "本地缓存",
-                "cache_updated_at": ac_row.updated_at.isoformat() if ac_row and ac_row.updated_at else None,
+                "cache_updated_at": _last_success(ac_row),
                 **ac_res,
             },
         ],
