@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>个人 vps 监控</Name>
-  <Repository>ghcr.io/ashanzzz/servers-checkin-hub:latest</Repository>
+  <Repository>ghcr.io/ashanzzz/personal-vps-monitor:latest</Repository>
   <Registry>https://ghcr.io</Registry>
   <Network>bridge</Network>
   <MyIP/>

@@ -1,6 +1,6 @@
 services:
   personal-vps-monitor:
-    image: ghcr.io/ashanzzz/akile-monitor:latest
+    image: ghcr.io/ashanzzz/personal-vps-monitor:latest
     build:
       context: .
       dockerfile: Dockerfile

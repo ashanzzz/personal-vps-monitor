@@ -79,12 +79,12 @@ jobs:
           file: Dockerfile
           push: false
           load: true
-          tags: akile-monitor:ci
+          tags: personal-vps-monitor:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Run container
-        run: docker run -d --name akile-ci -p 8080:80 akile-monitor:ci
+        run: docker run -d --name akile-ci -p 8080:80 personal-vps-monitor:ci
 
       - name: Probe /api/version
         run: |
