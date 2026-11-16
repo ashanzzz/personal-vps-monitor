@@ -1,14 +1,14 @@
 #!/bin/bash
-# Unraid 部署脚本 — akile-monitor 单镜像
+# Unraid 部署脚本 — 个人 vps 监控 单镜像
 # 用法：在 Unraid 主机上以 root 权限运行此脚本
 
 set -e
 
-TEMPLATE_URL="https://raw.githubusercontent.com/ashanzzz/akile-monitor/master/my-akile-monitor.xml"
+TEMPLATE_URL="https://raw.githubusercontent.com/ashanzzz/servers-checkin-hub/master/my-akile-monitor.xml"
 TEMPLATE_DIR="/boot/config/plugins/dockerMan/templates-user"
 TEMPLATE_FILE="$TEMPLATE_DIR/my-akile-monitor.xml"
 
-echo "=== Akile Monitor Unraid 部署 ==="
+echo "=== 个人 vps 监控 Unraid 部署 ==="
 echo ""
 
 # 1. 下载模板

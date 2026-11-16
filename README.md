@@ -47,7 +47,7 @@ docker compose up -d --build
 
 1. SSH 到 Unraid 或使用 Web Terminal，运行：
    ```bash
-   wget https://raw.githubusercontent.com/ashanzzz/akile-monitor/master/my-akile-monitor.xml \
+   wget https://raw.githubusercontent.com/ashanzzz/servers-checkin-hub/master/my-akile-monitor.xml \
      -O /boot/config/plugins/dockerMan/templates-user/my-akile-monitor.xml
    ```
 
@@ -70,7 +70,7 @@ docker compose up -d --build
 在 Unraid 主机上以 root 运行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ashanzzz/akile-monitor/master/unraid-deploy.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ashanzzz/servers-checkin-hub/master/unraid-deploy.sh | bash
 ```
 
 然后按脚本提示在 WebGUI 中完成容器创建。
@@ -81,7 +81,7 @@ curl -fsSL https://raw.githubusercontent.com/ashanzzz/akile-monitor/master/unrai
 
 进入仓库 → **Actions** → **Build and Push Docker Image** → **Run workflow**，填入 tag（默认 `latest`）点击运行。
 
-构建完成后镜像推送到 `ghcr.io/ashanzzz/akile-monitor:latest`。
+构建完成后镜像推送到 `ghcr.io/ashanzzz/personal-vps-monitor:latest`。
 
 首次使用需要在 GitHub 仓库 Settings → Packages 中将镜像设为私有（默认继承仓库可见性）。
 
