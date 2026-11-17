@@ -18,7 +18,7 @@
 
 | 位置 | 归属 |
 |------|------|
-| 入口 167.104.96.167:45433 | 香港 HostHatch，AS43969 Prinode AB，hosting=true |
+| 当前入口 167.104.167.151:45433 | 日本 Global-JP-Entrance（历史曾为香港 HostHatch 167.104.96.167） |
 | 实际出口 | 美国 Illinois Champaign，Pavlov Media 住宅宽带，hosting=false proxy=false |
 
 即「香港中转 + 美国家宽出口」。出口是真实住宅 IP（非机房、非已知代理段），
@@ -38,10 +38,10 @@ RTT 122ms（天津 → 香港入口）。
 `tcp_available_congestion_control = reno cubic bbr`。LXC 共享宿主机内核，
 宿主机已加载 tcp_bbr。另外 HY2 走 QUIC 自带 BBR 系拥塞控制，本来也不依赖内核参数。
 
-## 分享链接
+## 分享链接 (当前日本入口)
 
 ```
-vless://bbe1e489-a372-47f1-8f65-41aa93118bd5@167.104.96.167:45433?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.apple.com&fp=chrome&pbk=fSA2tLImc06SvOdAubf2tI2q_w9J9F9cuatYzkMXhUg&sid=c653e997&type=tcp#懒猫云-HK-Reality
+vless://bbe1e489-a372-47f1-8f65-41aa93118bd5@167.104.167.151:45433?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.apple.com&fp=chrome&pbk=fSA2tLImc06SvOdAubf2tI2q_w9J9F9cuatYzkMXhUg&sid=c653e997&type=tcp#懒猫云-JP-Reality
 ```
 
 ## mihomo / Clash Meta 片段
@@ -112,7 +112,7 @@ Reality 在个别网络会被 QoE 限速或识别，加一条 Shadowsocks 2022 �
 分享链接：
 
 ```
-ss://2022-blake3-aes-128-gcm:4iHVwPPj/ENy6UvVulkOHA==@167.104.96.167:55966#懒猫云-HK-SS2022
+ss://2022-blake3-aes-128-gcm:4iHVwPPj/ENy6UvVulkOHA==@167.104.167.151:55966#懒猫云-JP-SS2022
 ```
 
 配置变更前已备份：`/etc/sing-box/config.json.bak.<timestamp>`。

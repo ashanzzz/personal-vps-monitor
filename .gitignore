@@ -26,3 +26,5 @@ frontend/dist/
 # Secrets / local artifacts (never commit real tokens)
 akile_token.txt
 *.token
+forum_auth.json
+seen_posts.json
