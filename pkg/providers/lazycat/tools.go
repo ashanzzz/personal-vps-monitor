@@ -1,0 +1,99 @@
+package lazycat
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+)
+
+func registerTools(s *server.MCPServer, p *LazyCatProvider) error {
+	// 1. lazycat_list_ports
+	s.AddTool(mcp.NewTool("lazycat_list_ports",
+		mcp.WithDescription("获取懒猫云当前小鸡所有已映射的公网 NAT 端口列表与配额"),
+		mcp.WithString("instance_id", mcp.Description("可选实例ID，留空使用默认实例")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := request.GetArguments()
+		instID := ""
+		if v, ok := args["instance_id"].(string); ok {
+			instID = v
+		}
+		ports, err := p.ListPortMappings(ctx, instID)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(ports, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	})
+
+	// 2. lazycat_add_port
+	s.AddTool(mcp.NewTool("lazycat_add_port",
+		mcp.WithDescription("为懒猫云实例添加一条新的公网 NAT 端口映射"),
+		mcp.WithNumber("private_port", mcp.Required(), mcp.Description("容器内部私有监听端口，例如 10001")),
+		mcp.WithString("protocol", mcp.Description("协议类型: tcp 或 udp，默认 tcp")),
+		mcp.WithString("remark", mcp.Description("端口备注说明")),
+		mcp.WithString("instance_id", mcp.Description("可选实例ID")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := request.GetArguments()
+		privPort := 0
+		if v, ok := args["private_port"].(float64); ok {
+			privPort = int(v)
+		}
+		proto := "tcp"
+		if v, ok := args["protocol"].(string); ok && v != "" {
+			proto = v
+		}
+		remark := ""
+		if v, ok := args["remark"].(string); ok {
+			remark = v
+		}
+		instID := ""
+		if v, ok := args["instance_id"].(string); ok {
+			instID = v
+		}
+
+		res, err := p.AddPortMapping(ctx, instID, privPort, proto, remark)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("端口映射成功: 私有 %d -> 公网 %d (%s)", res.PrivatePort, res.PublicPort, res.Remark)), nil
+	})
+
+	// 3. lazycat_delete_port
+	s.AddTool(mcp.NewTool("lazycat_delete_port",
+		mcp.WithDescription("删除懒猫云实例的一条公网 NAT 端口映射"),
+		mcp.WithNumber("mapping_id", mcp.Required(), mcp.Description("要删除的映射记录 ID")),
+		mcp.WithString("instance_id", mcp.Description("可选实例ID")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := request.GetArguments()
+		mapID := 0
+		if v, ok := args["mapping_id"].(float64); ok {
+			mapID = int(v)
+		}
+		instID := ""
+		if v, ok := args["instance_id"].(string); ok {
+			instID = v
+		}
+
+		err := p.DeletePortMapping(ctx, instID, mapID)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("已成功删除端口映射记录 ID %d", mapID)), nil
+	})
+
+	// 4. lazycat_sync_egress
+	s.AddTool(mcp.NewTool("lazycat_sync_egress",
+		mcp.WithDescription("触发懒猫云 12 国家宽原生出口凭据自动轮询与 sing-box 聚合配置热重载"),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		err := p.SyncEgress(ctx)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText("成功触发 12 家宽出口凭据轮询与热重载"), nil
+	})
+
+	return nil
+}
