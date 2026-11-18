@@ -33,5 +33,28 @@ func registerTools(s *server.MCPServer, p *AkileProvider) error {
 		return mcp.NewToolResultText(string(data)), nil
 	})
 
+	// 3. akile_market_listings
+	s.AddTool(mcp.NewTool("akile_market_listings",
+		mcp.WithDescription("获取 Akile Cloud 二手集市 (PushShop) 最新挂牌机器列表"),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		items, err := p.ListMarketItems(ctx)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(items, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	})
+
+	// 4. akile_refresh_token
+	s.AddTool(mcp.NewTool("akile_refresh_token",
+		mcp.WithDescription("自动续期保活 Akile JWT 认证 Token (延长24小时有效期)"),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		tok, err := p.RefreshToken(ctx)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("Akile Token 自动续期成功 (新 Token 长度: %d 字符)", len(tok))), nil
+	})
+
 	return nil
 }

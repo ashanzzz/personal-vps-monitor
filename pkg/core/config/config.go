@@ -16,6 +16,9 @@ type Config struct {
 	// Akile 凭证
 	AkileToken string
 
+	// ACCK 凭证
+	ACCKToken string
+
 	// 通知凭证
 	TelegramBotToken string
 	TelegramChatID   string
@@ -46,6 +49,7 @@ func Load() *Config {
 		LazyCatToken:     getEnv("LAZYCAT_TOKEN", ""),
 		LazyCatInstance:  getEnv("LAZY_INSTANCE", "11433"),
 		AkileToken:       getEnv("AKILE_TOKEN", ""),
+		ACCKToken:        getEnv("ACCK_TOKEN", ""),
 		TelegramBotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
 		TelegramChatID:   getEnv("TELEGRAM_CHAT_ID", ""),
 		HTTPPort:         getEnv("VPS_HUB_HTTP_PORT", "3338"),

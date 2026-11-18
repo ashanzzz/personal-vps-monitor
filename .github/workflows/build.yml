@@ -11,7 +11,7 @@ on:
         default: 'latest'
 
 concurrency:
-  group: akile-build-${{ github.ref }}
+  group: vps-hub-build-${{ github.ref }}
   cancel-in-progress: true
 
 env:

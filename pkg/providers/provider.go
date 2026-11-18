@@ -39,6 +39,18 @@ type CheckinResult struct {
 	Reward  string `json:"reward,omitempty"`
 }
 
+// MarketItem 统一二手集市流转商品数据结构
+type MarketItem struct {
+	ProviderID string  `json:"provider_id"`
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	Price      float64 `json:"price"`
+	Location   string  `json:"location"`
+	Bandwidth  string  `json:"bandwidth,omitempty"`
+	ConfigDesc string  `json:"config_desc,omitempty"`
+	CreatedAt  string  `json:"created_at,omitempty"`
+}
+
 // Provider 核心驱动接口
 type Provider interface {
 	ID() string
@@ -62,6 +74,11 @@ type PortMapper interface {
 // AutoCheckin 定时签到能力特化接口
 type AutoCheckin interface {
 	DoCheckin(ctx context.Context) (*CheckinResult, error)
+}
+
+// MarketLister 二手集市商品浏览特化接口
+type MarketLister interface {
+	ListMarketItems(ctx context.Context) ([]MarketItem, error)
 }
 
 // EgressSyncer 家宽出口轮询与同步能力特化接口

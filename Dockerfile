@@ -1,54 +1,29 @@
 # ============================================================
-# Stage 1: Build frontend
+# Stage 1: Build Go static binary
 # ============================================================
-FROM node:22-alpine AS frontend-builder
+FROM golang:1.24-alpine AS builder
 
-WORKDIR /app/frontend
-COPY frontend/package*.json ./
-RUN npm ci
-COPY frontend/ ./
-RUN npm run build
+WORKDIR /src
+RUN apk add --no-cache git ca-certificates tzdata
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /src/bin/vps-hub ./cmd/vps-hub
 
 # ============================================================
-# Stage 2: Backend dependencies
+# Stage 2: Minimal runtime image (< 20MB)
 # ============================================================
-FROM python:3.12-slim AS backend-builder
+FROM alpine:3.20
 
+RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
-COPY backend/requirements.txt ./
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
-# ============================================================
-# Stage 3: Final image — nginx + supervisord + uvicorn
-# ============================================================
-FROM python:3.12-slim
+COPY --from=builder /src/bin/vps-hub /usr/local/bin/vps-hub
 
-# Install nginx + supervisor
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    nginx \
-    supervisor \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy Python packages
-COPY --from=backend-builder /install /usr/local
-
-# Copy backend source
-WORKDIR /app
-COPY backend/ ./backend/
-
-# Copy frontend build
-COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
-
-# nginx config
-COPY deploy/nginx.conf /etc/nginx/sites-available/default
-
-# supervisord config
-COPY deploy/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-
-# Data volume for SQLite
-RUN mkdir -p /app/data
+EXPOSE 3338 3337
 VOLUME ["/app/data"]
 
-EXPOSE 80
-
-CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+ENTRYPOINT ["/usr/local/bin/vps-hub"]
+CMD ["daemon"]

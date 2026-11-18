@@ -83,6 +83,40 @@ func (p *AkileProvider) DoCheckin(ctx context.Context) (*providers.CheckinResult
 	}, nil
 }
 
+// ListMarketItems 二手集市 (PushShop)
+func (p *AkileProvider) ListMarketItems(ctx context.Context) ([]providers.MarketItem, error) {
+	if p.client == nil {
+		return nil, fmt.Errorf("akile client not initialized")
+	}
+
+	items, err := p.client.GetSecondhandList(ctx, 1, 30)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]providers.MarketItem, 0, len(items))
+	for _, item := range items {
+		out = append(out, providers.MarketItem{
+			ProviderID: p.ID(),
+			ID:         strconv.Itoa(item.ID),
+			Name:       item.Name,
+			Price:      item.Price,
+			Location:   item.AreaName,
+			Bandwidth:  item.Bandwidth,
+			ConfigDesc: item.Configuration,
+			CreatedAt:  item.CreateTime,
+		})
+	}
+	return out, nil
+}
+
+func (p *AkileProvider) RefreshToken(ctx context.Context) (string, error) {
+	if p.client == nil {
+		return "", fmt.Errorf("akile client not initialized")
+	}
+	return p.client.RefreshToken(ctx)
+}
+
 func (p *AkileProvider) RegisterMCPTools(s *server.MCPServer) error {
 	return registerTools(s, p)
 }

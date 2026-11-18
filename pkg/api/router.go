@@ -35,6 +35,9 @@ func NewRouter() http.Handler {
 		// 聚合查询全网实例
 		r.Get("/instances", handleUnifiedInstances)
 
+		// 聚合查询二手集市转让商品
+		r.Get("/market", handleUnifiedMarket)
+
 		// 批量触发每日签到
 		r.Post("/checkin", handleUnifiedCheckin)
 	})
@@ -72,6 +75,26 @@ func handleUnifiedInstances(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"total":     len(results),
 		"instances": results,
+	})
+}
+
+func handleUnifiedMarket(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	all := providers.GetAll()
+	var results []providers.MarketItem
+
+	for _, p := range all {
+		if ml, ok := p.(providers.MarketLister); ok {
+			items, err := ml.ListMarketItems(ctx)
+			if err == nil {
+				results = append(results, items...)
+			}
+		}
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"total": len(results),
+		"items": results,
 	})
 }
 
