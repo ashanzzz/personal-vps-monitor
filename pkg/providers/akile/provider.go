@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/config"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
@@ -70,7 +71,7 @@ func (p *AkileProvider) DoCheckin(ctx context.Context) (*providers.CheckinResult
 		return nil, err
 	}
 
-	success := (res.StatusCode == 0 || res.StatusCode == 200)
+	success := (res.StatusCode == 0 || res.StatusCode == 200 || strings.Contains(res.StatusMsg, "已签到"))
 	reward := ""
 	if res.Data.AkCoinEarned > 0 {
 		reward = fmt.Sprintf("+%.1f AK币", res.Data.AkCoinEarned)
