@@ -97,6 +97,24 @@ type CheckinResponse struct {
 	Data string `json:"data"`
 }
 
+type UserInfoResponse struct {
+	ID       int    `json:"id"`
+	Username string `json:"username"`
+	Email    string `json:"email"`
+}
+
+func (c *Client) GetUserInfo(ctx context.Context) (*UserInfoResponse, error) {
+	data, err := c.doRequest(ctx, "GET", "/auth/user/info", nil)
+	if err != nil {
+		return nil, err
+	}
+	var res UserInfoResponse
+	if err := json.Unmarshal(data, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
 func (c *Client) Checkin(ctx context.Context) (*CheckinResponse, error) {
 	data, err := c.doRequest(ctx, "POST", "/auth/user/ac-shop/checkin", map[string]interface{}{})
 	if err != nil {

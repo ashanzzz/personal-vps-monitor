@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/config"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
@@ -63,16 +64,32 @@ func (p *ACCKProvider) DoCheckin(ctx context.Context) (*providers.CheckinResult,
 		return nil, fmt.Errorf("acck client not initialized")
 	}
 
+	accountStr := "ashan"
+	if u, err := p.client.GetUserInfo(ctx); err == nil && u.Username != "" {
+		if u.Email != "" {
+			accountStr = fmt.Sprintf("%s (%s)", u.Username, u.Email)
+		} else {
+			accountStr = u.Username
+		}
+	}
+
 	res, err := p.client.Checkin(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	success := (res.Code == 200 || res.Code == 0)
+	msg := res.Msg
+	if strings.Contains(msg, "今日已签到") {
+		msg = "今日已签到 (请勿重复打卡)"
+	}
+
 	return &providers.CheckinResult{
 		Success: success,
-		Message: res.Msg,
+		Message: msg,
 		Reward:  res.Data,
+		Website: "https://acck.io",
+		Account: accountStr,
 	}, nil
 }
 

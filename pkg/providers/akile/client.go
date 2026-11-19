@@ -188,3 +188,23 @@ func (c *Client) RefreshToken(ctx context.Context) (string, error) {
 	c.token = raw.Data.Token
 	return raw.Data.Token, nil
 }
+
+type UserInfoResponse struct {
+	StatusCode int `json:"status_code"`
+	Data       struct {
+		Username string `json:"username"`
+		Email    string `json:"email"`
+	} `json:"data"`
+}
+
+func (c *Client) GetUserInfo(ctx context.Context) (*UserInfoResponse, error) {
+	data, err := c.doRequest(ctx, "GET", c.baseAI, "/v1/user/info", nil)
+	if err != nil {
+		return nil, err
+	}
+	var res UserInfoResponse
+	if err := json.Unmarshal(data, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}

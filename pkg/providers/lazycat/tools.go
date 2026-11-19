@@ -112,5 +112,21 @@ func registerTools(s *server.MCPServer, p *LazyCatProvider) error {
 		return mcp.NewToolResultText(msg), nil
 	})
 
+	// 5. lazycat_checkin
+	s.AddTool(mcp.NewTool("lazycat_checkin",
+		mcp.WithDescription("执行懒猫云每日签到打卡并领取积分 (支持重复打卡自动识别)"),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		start := time.Now()
+		res, err := p.DoCheckin(ctx)
+		dur := time.Since(start).Milliseconds()
+		if err != nil {
+			audit.Record("ai_mcp", "lazycat.checkin", "lazycat", nil, "FAILED", err.Error(), dur)
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		msg := fmt.Sprintf("[%s 签到结果] 账号: %s | 结果: %s (奖励: %s) | 网站: %s", p.Name(), res.Account, res.Message, res.Reward, res.Website)
+		audit.Record("ai_mcp", "lazycat.checkin", "lazycat", map[string]interface{}{"account": res.Account, "reward": res.Reward}, "SUCCESS", msg, dur)
+		return mcp.NewToolResultText(msg), nil
+	})
+
 	return nil
 }

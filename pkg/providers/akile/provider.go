@@ -66,6 +66,15 @@ func (p *AkileProvider) DoCheckin(ctx context.Context) (*providers.CheckinResult
 		return nil, fmt.Errorf("akile client not initialized")
 	}
 
+	accountStr := "ashan"
+	if u, err := p.client.GetUserInfo(ctx); err == nil && u.Data.Username != "" {
+		if u.Data.Email != "" {
+			accountStr = fmt.Sprintf("%s (%s)", u.Data.Username, u.Data.Email)
+		} else {
+			accountStr = u.Data.Username
+		}
+	}
+
 	res, err := p.client.Checkin(ctx)
 	if err != nil {
 		return nil, err
@@ -77,10 +86,17 @@ func (p *AkileProvider) DoCheckin(ctx context.Context) (*providers.CheckinResult
 		reward = fmt.Sprintf("+%.1f AK币", res.Data.AkCoinEarned)
 	}
 
+	msg := res.StatusMsg
+	if strings.Contains(msg, "今日已签到") {
+		msg = "今日已签到 (请勿重复打卡)"
+	}
+
 	return &providers.CheckinResult{
 		Success: success,
-		Message: res.StatusMsg,
+		Message: msg,
 		Reward:  reward,
+		Website: "https://akile.ai",
+		Account: accountStr,
 	}, nil
 }
 

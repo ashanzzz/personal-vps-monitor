@@ -37,8 +37,8 @@ var acckCheckinCmd = &cobra.Command{
 			audit.Record("cli", "acck.checkin", "acck", nil, "FAILED", err.Error(), dur)
 			return err
 		}
-		audit.Record("cli", "acck.checkin", "acck", map[string]interface{}{"reward": res.Reward}, "SUCCESS", res.Message, dur)
-		fmt.Printf("ACCK 签到结果: %s (奖励: %s)\n", res.Message, res.Reward)
+		audit.Record("cli", "acck.checkin", "acck", map[string]interface{}{"account": res.Account, "reward": res.Reward}, "SUCCESS", res.Message, dur)
+		fmt.Printf("ACCK 签到结果: %s (奖励: %s)\n所属网站: %s | 所属账号: %s\n", res.Message, res.Reward, res.Website, res.Account)
 		return nil
 	},
 }

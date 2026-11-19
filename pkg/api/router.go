@@ -60,6 +60,7 @@ func NewRouter() http.Handler {
 			r.Get("/instances", handleLazyCatInstances)
 			r.Get("/ports", handleLazyCatPorts)
 			r.Post("/sync", handleLazyCatSync)
+			r.Post("/checkin", handleLazyCatCheckin)
 		})
 	})
 
@@ -139,7 +140,7 @@ func handleUnifiedCheckin(w http.ResponseWriter, r *http.Request) {
 				audit.Record("rest_api", "checkin", id, nil, "FAILED", err.Error(), dur)
 			} else {
 				results[id] = res
-				audit.Record("rest_api", "checkin", id, map[string]interface{}{"reward": res.Reward}, "SUCCESS", res.Message, dur)
+				audit.Record("rest_api", "checkin", id, map[string]interface{}{"account": res.Account, "reward": res.Reward, "website": res.Website}, "SUCCESS", res.Message, dur)
 			}
 		}
 	}
@@ -259,6 +260,29 @@ func handleLazyCatSync(w http.ResponseWriter, r *http.Request) {
 	dur := time.Since(start).Milliseconds()
 	audit.Record("rest_api", "lazycat.egress_sync", "lazycat", nil, "SUCCESS", "12家宽出口轮询与sing-box热重载完成", dur)
 	respondJSON(w, http.StatusOK, map[string]string{"status": "success", "message": "12家宽出口轮询与sing-box热重载完成"})
+}
+
+func handleLazyCatCheckin(w http.ResponseWriter, r *http.Request) {
+	p, ok := providers.Get("lazycat")
+	if !ok {
+		respondJSON(w, http.StatusNotFound, map[string]string{"error": "lazycat provider not found"})
+		return
+	}
+	ac, ok := p.(providers.AutoCheckin)
+	if !ok {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "provider does not support checkin"})
+		return
+	}
+	start := time.Now()
+	res, err := ac.DoCheckin(r.Context())
+	dur := time.Since(start).Milliseconds()
+	if err != nil {
+		audit.Record("rest_api", "lazycat.checkin", "lazycat", nil, "FAILED", err.Error(), dur)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	audit.Record("rest_api", "lazycat.checkin", "lazycat", map[string]interface{}{"account": res.Account, "reward": res.Reward, "website": res.Website}, "SUCCESS", res.Message, dur)
+	respondJSON(w, http.StatusOK, res)
 }
 
 func respondJSON(w http.ResponseWriter, code int, payload interface{}) {

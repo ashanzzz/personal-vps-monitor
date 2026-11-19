@@ -37,8 +37,8 @@ var akileCheckinCmd = &cobra.Command{
 			audit.Record("cli", "akile.checkin", "akile", nil, "FAILED", err.Error(), dur)
 			return err
 		}
-		audit.Record("cli", "akile.checkin", "akile", map[string]interface{}{"reward": res.Reward}, "SUCCESS", res.Message, dur)
-		fmt.Printf("Akile 签到成功: %s, 奖励: %s\n", res.Message, res.Reward)
+		audit.Record("cli", "akile.checkin", "akile", map[string]interface{}{"account": res.Account, "reward": res.Reward}, "SUCCESS", res.Message, dur)
+		fmt.Printf("Akile 签到结果: %s (奖励: %s)\n所属网站: %s | 所属账号: %s\n", res.Message, res.Reward, res.Website, res.Account)
 		return nil
 	},
 }

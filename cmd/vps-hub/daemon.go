@@ -58,8 +58,11 @@ var daemonCmd = &cobra.Command{
 								log.Printf("[Daemon] Checkin for %s failed: %v", id, err)
 								audit.Record("daemon", "checkin", id, nil, "FAILED", err.Error(), dur)
 							} else {
-								audit.Record("daemon", "checkin", id, map[string]interface{}{"reward": res.Reward}, "SUCCESS", res.Message, dur)
-								msg := fmt.Sprintf("✅ *[%s 自动签到]*\n结果: %s", p.Name(), res.Message)
+								audit.Record("daemon", "checkin", id, map[string]interface{}{"account": res.Account, "reward": res.Reward, "website": res.Website}, "SUCCESS", res.Message, dur)
+								msg := fmt.Sprintf("*[系统通知: %s 自动签到]*\n所属网站: %s\n所属账号: %s\n签到结果: %s", p.Name(), res.Website, res.Account, res.Message)
+								if res.Reward != "" {
+									msg += fmt.Sprintf(" (奖励: %s)", res.Reward)
+								}
 								_ = notify.SendTelegram(msg)
 							}
 						}

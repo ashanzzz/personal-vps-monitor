@@ -40,6 +40,8 @@ type CheckinResult struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Reward  string `json:"reward,omitempty"`
+	Website string `json:"website,omitempty"` // 所属网站/平台
+	Account string `json:"account,omitempty"` // 所属账号/用户标识
 }
 
 // MarketItem 统一二手集市流转商品数据结构

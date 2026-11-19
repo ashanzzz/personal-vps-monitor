@@ -167,6 +167,45 @@ func (p *LazyCatProvider) SyncEgress(ctx context.Context) error {
 	return nil
 }
 
+// DoCheckin 执行懒猫云每日签到打卡并获取积分
+func (p *LazyCatProvider) DoCheckin(ctx context.Context) (*providers.CheckinResult, error) {
+	if p.client == nil {
+		return nil, fmt.Errorf("lazycat client not initialized")
+	}
+
+	accountStr := "ashanzzz"
+	if u, err := p.client.GetUserInfo(ctx); err == nil && u.User.Username != "" {
+		if u.User.Email != "" {
+			accountStr = fmt.Sprintf("%s (%s)", u.User.Username, u.User.Email)
+		} else {
+			accountStr = u.User.Username
+		}
+	}
+
+	res, err := p.client.Checkin(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	reward := ""
+	if res.Points > 0 {
+		reward = fmt.Sprintf("+%d 积分", res.Points)
+	}
+
+	msg := res.Message
+	if res.Outcome == "duplicate" || strings.Contains(msg, "已签到") {
+		msg = "当天已签到 (请勿重复打卡)"
+	}
+
+	return &providers.CheckinResult{
+		Success: res.Success,
+		Message: msg,
+		Reward:  reward,
+		Website: "https://dash.lazycat.wiki",
+		Account: accountStr,
+	}, nil
+}
+
 func (p *LazyCatProvider) RegisterMCPTools(s *server.MCPServer) error {
 	return registerTools(s, p)
 }

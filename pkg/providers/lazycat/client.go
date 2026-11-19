@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -187,4 +188,65 @@ func (c *Client) DeletePortMapping(ctx context.Context, instanceID string, mappi
 	path := fmt.Sprintf("/instances/%s/port-mappings/%d", instanceID, mappingID)
 	_, err := c.doRequest(ctx, "DELETE", path, nil)
 	return err
+}
+
+type UserInfoResponse struct {
+	User struct {
+		ID       int    `json:"id"`
+		Username string `json:"username"`
+		Email    string `json:"email"`
+		VIPLevel int    `json:"vipLevel"`
+	} `json:"user"`
+}
+
+func (c *Client) GetUserInfo(ctx context.Context) (*UserInfoResponse, error) {
+	data, err := c.doRequest(ctx, "GET", "/auth/me", nil)
+	if err != nil {
+		return nil, err
+	}
+	var res UserInfoResponse
+	if err := json.Unmarshal(data, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+type CheckinResponse struct {
+	Success bool   `json:"success"`
+	Points  int    `json:"points"`
+	Message string `json:"message"`
+	Error   string `json:"error"`
+	Outcome string `json:"outcome"`
+}
+
+func (c *Client) Checkin(ctx context.Context) (*CheckinResponse, error) {
+	data, err := c.doRequest(ctx, "POST", "/points-center/checkin/", map[string]interface{}{})
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "409") || strings.Contains(errStr, "已签到") || strings.Contains(errStr, "duplicate") {
+			idx := strings.Index(errStr, "{")
+			if idx != -1 {
+				var dup CheckinResponse
+				if json.Unmarshal([]byte(errStr[idx:]), &dup) == nil {
+					dup.Success = true
+					if dup.Message == "" {
+						dup.Message = dup.Error
+					}
+					return &dup, nil
+				}
+			}
+			return &CheckinResponse{
+				Success: true,
+				Message: "当天已签到",
+				Outcome: "duplicate",
+			}, nil
+		}
+		return nil, err
+	}
+
+	var res CheckinResponse
+	if err := json.Unmarshal(data, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
 }

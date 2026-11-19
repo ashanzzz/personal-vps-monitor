@@ -146,10 +146,37 @@ var lazycatSyncCmd = &cobra.Command{
 	},
 }
 
+var lazycatCheckinCmd = &cobra.Command{
+	Use:   "checkin",
+	Short: "执行懒猫云每日签到打卡并领取积分",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		p, ok := providers.Get("lazycat")
+		if !ok {
+			return fmt.Errorf("lazycat provider not registered")
+		}
+		ac, ok := p.(providers.AutoCheckin)
+		if !ok {
+			return fmt.Errorf("lazycat does not implement AutoCheckin")
+		}
+
+		start := time.Now()
+		res, err := ac.DoCheckin(context.Background())
+		dur := time.Since(start).Milliseconds()
+		if err != nil {
+			audit.Record("cli", "lazycat.checkin", "lazycat", nil, "FAILED", err.Error(), dur)
+			return err
+		}
+		audit.Record("cli", "lazycat.checkin", "lazycat", map[string]interface{}{"account": res.Account, "reward": res.Reward}, "SUCCESS", res.Message, dur)
+		fmt.Printf("懒猫云签到结果: %s (奖励: %s)\n所属网站: %s | 所属账号: %s\n", res.Message, res.Reward, res.Website, res.Account)
+		return nil
+	},
+}
+
 func init() {
 	lazycatPortsCmd.Flags().BoolVarP(&probePorts, "probe", "p", true, "探测端口真实 TCP 连通性与响应延迟")
 	lazycatCmd.AddCommand(lazycatPortsCmd)
 	lazycatCmd.AddCommand(lazycatInstancesCmd)
 	lazycatCmd.AddCommand(lazycatSyncCmd)
+	lazycatCmd.AddCommand(lazycatCheckinCmd)
 	rootCmd.AddCommand(lazycatCmd)
 }
