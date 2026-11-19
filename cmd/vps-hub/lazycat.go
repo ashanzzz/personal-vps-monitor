@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"text/tabwriter"
+	"time"
 
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
 	"github.com/spf13/cobra"
@@ -15,9 +17,11 @@ var lazycatCmd = &cobra.Command{
 	Short: "懒猫云相关运维指令",
 }
 
+var probePorts bool
+
 var lazycatPortsCmd = &cobra.Command{
-	Use:   "ports",
-	Short: "查看当前懒猫云公网 NAT 端口映射列表",
+	Use:   "ports [instance_id]",
+	Short: "动态查看懒猫云公网 NAT 端口映射列表及在线连通性",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		p, ok := providers.Get("lazycat")
 		if !ok {
@@ -28,15 +32,87 @@ var lazycatPortsCmd = &cobra.Command{
 			return fmt.Errorf("lazycat does not implement PortMapper")
 		}
 
-		ports, err := pm.ListPortMappings(context.Background(), "")
+		instID := ""
+		if len(args) > 0 {
+			instID = args[0]
+		}
+
+		ports, err := pm.ListPortMappings(context.Background(), instID)
+		if err != nil {
+			return err
+		}
+
+		// 获取公网 IP 用于探测
+		publicIP := "167.104.167.151"
+		if im, ok := p.(providers.InstanceManager); ok {
+			if insts, err := im.ListInstances(context.Background()); err == nil {
+				for _, inst := range insts {
+					if instID == "" || inst.ID == instID {
+						if inst.IP != "" {
+							publicIP = inst.IP
+						}
+						break
+					}
+				}
+			}
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		if probePorts {
+			fmt.Fprintln(w, "ID	PROTOCOL	PRIVATE_PORT	PUBLIC_PORT	STATUS	LATENCY	REMARK")
+			for _, m := range ports {
+				status := "CLOSED"
+				latencyStr := "-"
+				if m.Protocol == "tcp" && publicIP != "" {
+					addr := fmt.Sprintf("%s:%d", publicIP, m.PublicPort)
+					start := time.Now()
+					conn, err := net.DialTimeout("tcp", addr, 1500*time.Millisecond)
+					if err == nil {
+						_ = conn.Close()
+						status = "ONLINE"
+						latencyStr = fmt.Sprintf("%dms", time.Since(start).Milliseconds())
+					}
+				}
+				fmt.Fprintf(w, "%d	%s	%d	%d	%s	%s	%s\n", m.ID, m.Protocol, m.PrivatePort, m.PublicPort, status, latencyStr, m.Remark)
+			}
+		} else {
+			fmt.Fprintln(w, "ID	PROTOCOL	PRIVATE_PORT	PUBLIC_PORT	REMARK")
+			for _, m := range ports {
+				fmt.Fprintf(w, "%d	%s	%d	%d	%s\n", m.ID, m.Protocol, m.PrivatePort, m.PublicPort, m.Remark)
+			}
+		}
+		_ = w.Flush()
+		fmt.Printf("\n当前映射端口数: %d\n", len(ports))
+		return nil
+	},
+}
+
+var lazycatInstancesCmd = &cobra.Command{
+	Use:   "instances",
+	Short: "动态查看懒猫云名下所有实例、系列类别（全球家宽 vs 固定出口）、端口配额与状态",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		p, ok := providers.Get("lazycat")
+		if !ok {
+			return fmt.Errorf("lazycat provider not registered")
+		}
+		im, ok := p.(providers.InstanceManager)
+		if !ok {
+			return fmt.Errorf("lazycat does not implement InstanceManager")
+		}
+
+		insts, err := im.ListInstances(context.Background())
 		if err != nil {
 			return err
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tPROTOCOL\tPRIVATE_PORT\tPUBLIC_PORT\tREMARK")
-		for _, m := range ports {
-			fmt.Fprintf(w, "%d\t%s\t%d\t%d\t%s\n", m.ID, m.Protocol, m.PrivatePort, m.PublicPort, m.Remark)
+		fmt.Fprintln(w, "ID	NAME	SERIES	STATUS	PUBLIC_IP	PORT_LIMIT	EGRESS_TYPE")
+		for _, i := range insts {
+			egressType := "固定出口 (Fixed Node)"
+			if i.Category == "全球家宽" {
+				egressType = "12国家宽轮询出口 (Multi-Egress)"
+			}
+			fmt.Fprintf(w, "%s	%s	%s	%s	%s	%d	%s\n", i.ID, i.Name, i.Category, i.Status, i.IP, i.PortLimit, egressType)
 		}
 		return w.Flush()
 	},
@@ -65,7 +141,9 @@ var lazycatSyncCmd = &cobra.Command{
 }
 
 func init() {
+	lazycatPortsCmd.Flags().BoolVarP(&probePorts, "probe", "p", true, "探测端口真实 TCP 连通性与响应延迟")
 	lazycatCmd.AddCommand(lazycatPortsCmd)
+	lazycatCmd.AddCommand(lazycatInstancesCmd)
 	lazycatCmd.AddCommand(lazycatSyncCmd)
 	rootCmd.AddCommand(lazycatCmd)
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strconv"
+	"strings"
 
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/config"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
@@ -34,10 +35,41 @@ func (p *LazyCatProvider) Init(ctx context.Context, cfg *config.Config) error {
 	return nil
 }
 
-// ListInstances 实例查询
+// ListInstances 实例查询（动态发现名下所有懒猫云实例）
 func (p *LazyCatProvider) ListInstances(ctx context.Context) ([]providers.Instance, error) {
-	if p.client == nil || p.defaultInst == "" {
-		return nil, fmt.Errorf("lazycat client not initialized or token missing")
+	if p.client == nil {
+		return nil, fmt.Errorf("lazycat client not initialized")
+	}
+
+	rawList, err := p.client.GetInstances(ctx)
+	if err == nil && len(rawList) > 0 {
+		out := make([]providers.Instance, 0, len(rawList))
+		for _, item := range rawList {
+			ip := item.HostPublicIP
+			if ip == "" {
+				ip = item.NatPublicIP
+			}
+			category := "固定出口"
+			if isResidential(item.PackageName, item.PlanName, item.Name) {
+				category = "全球家宽"
+			}
+			out = append(out, providers.Instance{
+				ProviderID: p.ID(),
+				ID:         strconv.Itoa(item.ID),
+				Name:       item.Name,
+				IP:         ip,
+				Status:     item.Status,
+				Region:     "Tokyo",
+				Category:   category,
+				PortLimit:  item.PortLimit,
+				ExpireDate: item.ExpiresAt,
+			})
+		}
+		return out, nil
+	}
+
+	if p.defaultInst == "" {
+		return nil, fmt.Errorf("lazycat token missing or no instances found")
 	}
 
 	detail, err := p.client.GetInstanceDetail(ctx, p.defaultInst)
@@ -50,6 +82,11 @@ func (p *LazyCatProvider) ListInstances(ctx context.Context) ([]providers.Instan
 		ip = detail.NatPublicIP
 	}
 
+	category := "固定出口"
+	if isResidential(detail.PackageName, detail.PlanName, detail.Name) {
+		category = "全球家宽"
+	}
+
 	return []providers.Instance{
 		{
 			ProviderID: p.ID(),
@@ -58,8 +95,17 @@ func (p *LazyCatProvider) ListInstances(ctx context.Context) ([]providers.Instan
 			IP:         ip,
 			Status:     detail.Status,
 			Region:     "Tokyo",
+			Category:   category,
+			PortLimit:  detail.PortLimit,
+			PortCount:  len(detail.PortMappings),
+			ExpireDate: detail.ExpiresAt,
 		},
 	}, nil
+}
+
+func isResidential(pkg, plan, name string) bool {
+	combined := strings.ToLower(pkg + " " + plan + " " + name)
+	return strings.Contains(combined, "residential") || strings.Contains(combined, "家宽") || strings.Contains(combined, "global")
 }
 
 // ListPortMappings 端口映射查询

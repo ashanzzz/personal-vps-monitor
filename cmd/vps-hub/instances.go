@@ -18,7 +18,7 @@ var instancesCmd = &cobra.Command{
 		all := providers.GetAll()
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "PROVIDER\tID\tNAME\tIP\tSTATUS\tREGION\tEXPIRE_DATE")
+		fmt.Fprintln(w, "PROVIDER	ID	NAME	SERIES	IP	STATUS	REGION	EXPIRE_DATE")
 
 		total := 0
 		for _, p := range all {
@@ -27,7 +27,11 @@ var instancesCmd = &cobra.Command{
 				if err == nil {
 					for _, i := range insts {
 						total++
-						fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", i.ProviderID, i.ID, i.Name, i.IP, i.Status, i.Region, i.ExpireDate)
+						category := i.Category
+						if category == "" {
+							category = "标准VPS"
+						}
+						fmt.Fprintf(w, "%s	%s	%s	%s	%s	%s	%s	%s\n", i.ProviderID, i.ID, i.Name, category, i.IP, i.Status, i.Region, i.ExpireDate)
 					}
 				}
 			}

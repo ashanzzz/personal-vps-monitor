@@ -20,6 +20,9 @@ type Instance struct {
 	IP         string `json:"ip"`
 	Status     string `json:"status"`
 	Region     string `json:"region"`
+	Category   string `json:"category,omitempty"` // 例如: "全球家宽" / "固定出口"
+	PortCount  int    `json:"port_count,omitempty"`
+	PortLimit  int    `json:"port_limit,omitempty"`
 	ExpireDate string `json:"expire_date,omitempty"`
 }
 

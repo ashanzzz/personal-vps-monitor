@@ -72,14 +72,49 @@ type PortMappingItem struct {
 	Remark      string `json:"remark"`
 }
 
+type InstanceListItem struct {
+	ID           int    `json:"id"`
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	PackageName  string `json:"packageName"`
+	PlanName     string `json:"planName"`
+	PortLimit    int    `json:"portLimit"`
+	HostPublicIP string `json:"hostPublicIp"`
+	NatPublicIP  string `json:"natPublicIp"`
+	ExpiresAt    string `json:"expiresAt"`
+}
+
+func (c *Client) GetInstances(ctx context.Context) ([]InstanceListItem, error) {
+	data, err := c.doRequest(ctx, "GET", "/instances", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var res struct {
+		Instances []InstanceListItem `json:"instances"`
+		Data      []InstanceListItem `json:"data"`
+	}
+	if err := json.Unmarshal(data, &res); err != nil {
+		return nil, fmt.Errorf("json unmarshal failed: %w", err)
+	}
+
+	if len(res.Instances) > 0 {
+		return res.Instances, nil
+	}
+	return res.Data, nil
+}
+
 type InstanceDetailResponse struct {
 	ID           int               `json:"id"`
 	Name         string            `json:"name"`
 	Status       string            `json:"status"`
+	PackageName  string            `json:"packageName"`
+	PlanName     string            `json:"planName"`
 	HostPublicIP string            `json:"host_public_ip"`
 	NatPublicIP  string            `json:"nat_public_ip"`
 	PortLimit    int               `json:"port_limit"`
 	PortMappings []PortMappingItem `json:"port_mappings"`
+	ExpiresAt    string            `json:"expires_at"`
 
 	// 兼容某些返回包装在 instance 内部的情况
 	Instance *struct {
