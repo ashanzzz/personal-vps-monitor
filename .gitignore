@@ -28,6 +28,9 @@ akile_token.txt
 *.token
 forum_auth.json
 seen_posts.json
+bin/
+logs/
+*.log
 
 # Go build artifacts
 bin/

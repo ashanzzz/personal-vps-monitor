@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ashanzzz/personal-vps-monitor/pkg/api"
+	"github.com/ashanzzz/personal-vps-monitor/pkg/core/audit"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/config"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/notify"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
@@ -23,9 +24,21 @@ var daemonCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		handler := api.NewRouter()
 
-		// 启动后台定时任务 (例如每 4 小时触发一次各厂商自动签到)
+		// 启动后台定时任务 (例如每 4 小时触发一次各厂商自动签到，每 24 小时清理过期日志)
 		ticker := time.NewTicker(4 * time.Hour)
 		defer ticker.Stop()
+
+		pruneTicker := time.NewTicker(24 * time.Hour)
+		defer pruneTicker.Stop()
+
+		// 启动时先执行一次日志轮转清理与启动记录
+		go func() {
+			del, _ := audit.PruneLogs()
+			if del > 0 {
+				audit.Record("daemon", "system.log_prune", "system", nil, "SUCCESS", fmt.Sprintf("已清理 %d 个过期日志文件", del), 0)
+			}
+			audit.Record("daemon", "system.startup", "system", nil, "SUCCESS", "VPS-Hub daemon 启动成功", 0)
+		}()
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -38,14 +51,24 @@ var daemonCmd = &cobra.Command{
 					all := providers.GetAll()
 					for id, p := range all {
 						if ac, ok := p.(providers.AutoCheckin); ok {
+							start := time.Now()
 							res, err := ac.DoCheckin(ctx)
+							dur := time.Since(start).Milliseconds()
 							if err != nil {
 								log.Printf("[Daemon] Checkin for %s failed: %v", id, err)
+								audit.Record("daemon", "checkin", id, nil, "FAILED", err.Error(), dur)
 							} else {
+								audit.Record("daemon", "checkin", id, map[string]interface{}{"reward": res.Reward}, "SUCCESS", res.Message, dur)
 								msg := fmt.Sprintf("✅ *[%s 自动签到]*\n结果: %s", p.Name(), res.Message)
 								_ = notify.SendTelegram(msg)
 							}
 						}
+					}
+				case <-pruneTicker.C:
+					log.Println("[Daemon] Running scheduled log prune...")
+					deleted, err := audit.PruneLogs()
+					if err == nil && deleted > 0 {
+						audit.Record("daemon", "system.log_prune", "system", nil, "SUCCESS", fmt.Sprintf("定时清理 %d 个过期日志文件", deleted), 0)
 					}
 				case <-ctx.Done():
 					return

@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/ashanzzz/personal-vps-monitor/pkg/core/audit"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
 	"github.com/spf13/cobra"
 )
@@ -132,9 +133,14 @@ var lazycatSyncCmd = &cobra.Command{
 		}
 
 		fmt.Println("正在触发懒猫云 12 家宽出口轮询与 sing-box 热重载...")
+		start := time.Now()
 		if err := es.SyncEgress(context.Background()); err != nil {
+			dur := time.Since(start).Milliseconds()
+			audit.Record("cli", "lazycat.egress_sync", "lazycat", nil, "FAILED", err.Error(), dur)
 			return err
 		}
+		dur := time.Since(start).Milliseconds()
+		audit.Record("cli", "lazycat.egress_sync", "lazycat", nil, "SUCCESS", "12家宽出口轮询与sing-box热重载完成", dur)
 		fmt.Println("同步与重载成功完成。")
 		return nil
 	},

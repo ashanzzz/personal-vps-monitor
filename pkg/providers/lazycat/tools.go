@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
+	"github.com/ashanzzz/personal-vps-monitor/pkg/core/audit"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -54,11 +56,16 @@ func registerTools(s *server.MCPServer, p *LazyCatProvider) error {
 			instID = v
 		}
 
+		start := time.Now()
 		res, err := p.AddPortMapping(ctx, instID, privPort, proto, remark)
+		dur := time.Since(start).Milliseconds()
 		if err != nil {
+			audit.Record("ai_mcp", "lazycat.port_add", "lazycat", map[string]interface{}{"private_port": privPort, "protocol": proto, "remark": remark}, "FAILED", err.Error(), dur)
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("端口映射成功: 私有 %d -> 公网 %d (%s)", res.PrivatePort, res.PublicPort, res.Remark)), nil
+		msg := fmt.Sprintf("端口映射成功: 私有 %d -> 公网 %d (%s)", res.PrivatePort, res.PublicPort, res.Remark)
+		audit.Record("ai_mcp", "lazycat.port_add", "lazycat", map[string]interface{}{"private_port": privPort, "public_port": res.PublicPort, "protocol": proto, "remark": remark}, "SUCCESS", msg, dur)
+		return mcp.NewToolResultText(msg), nil
 	})
 
 	// 3. lazycat_delete_port
@@ -77,22 +84,32 @@ func registerTools(s *server.MCPServer, p *LazyCatProvider) error {
 			instID = v
 		}
 
+		start := time.Now()
 		err := p.DeletePortMapping(ctx, instID, mapID)
+		dur := time.Since(start).Milliseconds()
 		if err != nil {
+			audit.Record("ai_mcp", "lazycat.port_delete", "lazycat", map[string]interface{}{"mapping_id": mapID}, "FAILED", err.Error(), dur)
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("已成功删除端口映射记录 ID %d", mapID)), nil
+		msg := fmt.Sprintf("已成功删除端口映射记录 ID %d", mapID)
+		audit.Record("ai_mcp", "lazycat.port_delete", "lazycat", map[string]interface{}{"mapping_id": mapID}, "SUCCESS", msg, dur)
+		return mcp.NewToolResultText(msg), nil
 	})
 
 	// 4. lazycat_sync_egress
 	s.AddTool(mcp.NewTool("lazycat_sync_egress",
 		mcp.WithDescription("触发懒猫云 12 国家宽原生出口凭据自动轮询与 sing-box 聚合配置热重载"),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		start := time.Now()
 		err := p.SyncEgress(ctx)
+		dur := time.Since(start).Milliseconds()
 		if err != nil {
+			audit.Record("ai_mcp", "lazycat.egress_sync", "lazycat", nil, "FAILED", err.Error(), dur)
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		return mcp.NewToolResultText("成功触发 12 家宽出口凭据轮询与热重载"), nil
+		msg := "成功触发 12 家宽出口凭据轮询与热重载"
+		audit.Record("ai_mcp", "lazycat.egress_sync", "lazycat", nil, "SUCCESS", msg, dur)
+		return mcp.NewToolResultText(msg), nil
 	})
 
 	return nil

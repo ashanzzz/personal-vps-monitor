@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"text/tabwriter"
+	"time"
 
+	"github.com/ashanzzz/personal-vps-monitor/pkg/core/audit"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
 	"github.com/spf13/cobra"
 )
@@ -28,10 +30,14 @@ var akileCheckinCmd = &cobra.Command{
 			return fmt.Errorf("akile does not implement AutoCheckin")
 		}
 
+		start := time.Now()
 		res, err := ac.DoCheckin(context.Background())
+		dur := time.Since(start).Milliseconds()
 		if err != nil {
+			audit.Record("cli", "akile.checkin", "akile", nil, "FAILED", err.Error(), dur)
 			return err
 		}
+		audit.Record("cli", "akile.checkin", "akile", map[string]interface{}{"reward": res.Reward}, "SUCCESS", res.Message, dur)
 		fmt.Printf("Akile 签到成功: %s, 奖励: %s\n", res.Message, res.Reward)
 		return nil
 	},

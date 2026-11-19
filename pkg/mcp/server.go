@@ -1,11 +1,15 @@
 package mcp
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 
+	"github.com/ashanzzz/personal-vps-monitor/pkg/core/audit"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
 
@@ -16,7 +20,7 @@ type Server struct {
 func New() (*Server, error) {
 	s := server.NewMCPServer(
 		"personal-vps-monitor",
-		"1.0.0",
+		"2.0.0",
 		server.WithToolCapabilities(true),
 	)
 
@@ -24,6 +28,51 @@ func New() (*Server, error) {
 	if err := providers.RegisterAllMCPTools(s); err != nil {
 		return nil, fmt.Errorf("failed to register provider mcp tools: %w", err)
 	}
+
+	// 注册全局审计日志查询工具 (AI 行为回溯与审计)
+	s.AddTool(mcp.NewTool("vps_hub_get_audit_logs",
+		mcp.WithDescription("查询过去 30 天内 AI 与系统自动化在 VPS Hub 中执行的操作历史记录（按时间倒序）"),
+		mcp.WithNumber("days", mcp.Description("查询过去几天 (默认 7, 最大 30)")),
+		mcp.WithNumber("limit", mcp.Description("返回最大条数 (默认 30)")),
+		mcp.WithString("source", mcp.Description("调用来源过滤: ai_mcp, daemon, cli, rest_api")),
+		mcp.WithString("provider", mcp.Description("厂商过滤: lazycat, akile, acck, system")),
+		mcp.WithString("status", mcp.Description("状态过滤: SUCCESS, FAILED")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := request.GetArguments()
+		days := 7
+		if v, ok := args["days"].(float64); ok && v > 0 {
+			days = int(v)
+		}
+		limit := 30
+		if v, ok := args["limit"].(float64); ok && v > 0 {
+			limit = int(v)
+		}
+		source := ""
+		if v, ok := args["source"].(string); ok {
+			source = v
+		}
+		provider := ""
+		if v, ok := args["provider"].(string); ok {
+			provider = v
+		}
+		status := ""
+		if v, ok := args["status"].(string); ok {
+			status = v
+		}
+
+		entries, err := audit.Query(audit.QueryOptions{
+			Days:     days,
+			Limit:    limit,
+			Source:   source,
+			Provider: provider,
+			Status:   status,
+		})
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(entries, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	})
 
 	return &Server{mcpServer: s}, nil
 }

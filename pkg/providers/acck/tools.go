@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
+	"github.com/ashanzzz/personal-vps-monitor/pkg/core/audit"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -26,11 +28,16 @@ func registerTools(s *server.MCPServer, p *ACCKProvider) error {
 	s.AddTool(mcp.NewTool("acck_checkin",
 		mcp.WithDescription("执行 ACCKCloud 每日自动打卡签到获取积分"),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		start := time.Now()
 		res, err := p.DoCheckin(ctx)
+		dur := time.Since(start).Milliseconds()
 		if err != nil {
+			audit.Record("ai_mcp", "acck.checkin", "acck", nil, "FAILED", err.Error(), dur)
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("ACCK 签到结果: %s (奖励: %s)", res.Message, res.Reward)), nil
+		msg := fmt.Sprintf("ACCK 签到结果: %s (奖励: %s)", res.Message, res.Reward)
+		audit.Record("ai_mcp", "acck.checkin", "acck", map[string]interface{}{"reward": res.Reward}, "SUCCESS", msg, dur)
+		return mcp.NewToolResultText(msg), nil
 	})
 
 	// 3. acck_market_listings
