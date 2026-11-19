@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -18,13 +19,23 @@ type Client struct {
 	httpClient *http.Client
 }
 
-func NewClient(token string) *Client {
+func NewClient(token, proxyURL string) *Client {
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+	}
+	if proxyURL != "" {
+		if u, err := url.Parse(proxyURL); err == nil {
+			transport.Proxy = http.ProxyURL(u)
+		}
+	}
+
 	return &Client{
 		baseAI:    "https://api.akile.ai/api",
 		baseCloud: "https://api.akile.ai/api",
 		token:     strings.Trim(strings.TrimSpace(token), "\""),
 		httpClient: &http.Client{
-			Timeout: 15 * time.Second,
+			Transport: transport,
+			Timeout:   15 * time.Second,
 		},
 	}
 }

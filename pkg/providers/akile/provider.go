@@ -27,7 +27,7 @@ func (p *AkileProvider) Name() string {
 }
 
 func (p *AkileProvider) Init(ctx context.Context, cfg *config.Config) error {
-	p.client = NewClient(cfg.AkileToken)
+	p.client = NewClient(cfg.AkileToken, cfg.ProxyURL)
 	return nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -16,12 +17,22 @@ type Client struct {
 	httpClient *http.Client
 }
 
-func NewClient(token string) *Client {
+func NewClient(token, proxyURL string) *Client {
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+	}
+	if proxyURL != "" {
+		if u, err := url.Parse(proxyURL); err == nil {
+			transport.Proxy = http.ProxyURL(u)
+		}
+	}
+
 	return &Client{
 		baseURL: "https://dash.lazycat.wiki/api",
 		token:   token,
 		httpClient: &http.Client{
-			Timeout: 15 * time.Second,
+			Transport: transport,
+			Timeout:   15 * time.Second,
 		},
 	}
 }

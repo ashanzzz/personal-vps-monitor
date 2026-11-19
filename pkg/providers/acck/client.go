@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -17,12 +18,22 @@ type Client struct {
 	httpClient *http.Client
 }
 
-func NewClient(token string) *Client {
+func NewClient(token, proxyURL string) *Client {
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+	}
+	if proxyURL != "" {
+		if u, err := url.Parse(proxyURL); err == nil {
+			transport.Proxy = http.ProxyURL(u)
+		}
+	}
+
 	return &Client{
 		baseURL: "https://acck.io/api",
 		token:   cleanToken(token),
 		httpClient: &http.Client{
-			Timeout: 15 * time.Second,
+			Transport: transport,
+			Timeout:   15 * time.Second,
 		},
 	}
 }
@@ -89,6 +100,12 @@ type CheckinResponse struct {
 func (c *Client) Checkin(ctx context.Context) (*CheckinResponse, error) {
 	data, err := c.doRequest(ctx, "POST", "/auth/user/ac-shop/checkin", map[string]interface{}{})
 	if err != nil {
+		if strings.Contains(err.Error(), "今日已签到") {
+			return &CheckinResponse{
+				Code: 0,
+				Msg:  "今日已签到",
+			}, nil
+		}
 		return nil, err
 	}
 

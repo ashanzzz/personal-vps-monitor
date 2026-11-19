@@ -30,7 +30,7 @@ func (p *LazyCatProvider) Name() string {
 }
 
 func (p *LazyCatProvider) Init(ctx context.Context, cfg *config.Config) error {
-	p.client = NewClient(cfg.LazyCatToken)
+	p.client = NewClient(cfg.LazyCatToken, cfg.ProxyURL)
 	p.defaultInst = cfg.LazyCatInstance
 	return nil
 }

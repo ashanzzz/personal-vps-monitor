@@ -27,7 +27,7 @@ func (p *ACCKProvider) Name() string {
 }
 
 func (p *ACCKProvider) Init(ctx context.Context, cfg *config.Config) error {
-	p.client = NewClient(cfg.ACCKToken)
+	p.client = NewClient(cfg.ACCKToken, cfg.ProxyURL)
 	return nil
 }
 

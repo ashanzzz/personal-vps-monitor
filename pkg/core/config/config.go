@@ -19,6 +19,9 @@ type Config struct {
 	// ACCK 凭证
 	ACCKToken string
 
+	// 网络代理配置 (避免境内直连 Cloudflare 403)
+	ProxyURL string
+
 	// 通知凭证
 	TelegramBotToken string
 	TelegramChatID   string
@@ -31,7 +34,6 @@ type Config struct {
 var Global = &Config{}
 
 func Load() *Config {
-	// 尝试优先读取 /opt/data/.env 或当前目录 .env
 	candidates := []string{
 		"/app/data/.env",
 		"/mnt/user/appdata/akile-monitor/.env",
@@ -41,8 +43,13 @@ func Load() *Config {
 	}
 
 	for _, p := range candidates {
-		if _, err := os.Stat(p); err == nil {
-			_ = godotenv.Load(p)
+		if envMap, err := godotenv.Read(p); err == nil {
+			for k, v := range envMap {
+				val := strings.Trim(strings.TrimSpace(v), "\"'")
+				if val != "" {
+					_ = os.Setenv(k, val)
+				}
+			}
 		}
 	}
 
@@ -51,10 +58,22 @@ func Load() *Config {
 		LazyCatInstance:  getEnv("LAZY_INSTANCE", "11433"),
 		AkileToken:       getEnv("AKILE_TOKEN", ""),
 		ACCKToken:        getEnv("ACCK_TOKEN", ""),
+		ProxyURL:         getEnv("PROXY_URL", getEnv("HTTPS_PROXY", getEnv("HTTP_PROXY", "http://192.168.8.11:7890"))),
 		TelegramBotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
 		TelegramChatID:   getEnv("TELEGRAM_CHAT_ID", ""),
 		HTTPPort:         getEnv("VPS_HUB_HTTP_PORT", "3338"),
 		MCPPort:          getEnv("VPS_HUB_MCP_PORT", "3337"),
+	}
+
+	if Global.LazyCatToken == "" {
+		for _, tf := range []string{"/app/data/lazycat_token.txt", "/mnt/user/appdata/akile-monitor/lazycat_token.txt"} {
+			if b, err := os.ReadFile(tf); err == nil {
+				Global.LazyCatToken = strings.Trim(strings.TrimSpace(string(b)), "\"'")
+				if Global.LazyCatToken != "" {
+					break
+				}
+			}
+		}
 	}
 
 	return Global
