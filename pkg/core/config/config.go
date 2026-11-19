@@ -33,6 +33,8 @@ var Global = &Config{}
 func Load() *Config {
 	// 尝试优先读取 /opt/data/.env 或当前目录 .env
 	candidates := []string{
+		"/app/data/.env",
+		"/mnt/user/appdata/akile-monitor/.env",
 		"/opt/data/.env",
 		".env",
 		filepath.Join(os.Getenv("HOME"), ".env"),
@@ -41,7 +43,6 @@ func Load() *Config {
 	for _, p := range candidates {
 		if _, err := os.Stat(p); err == nil {
 			_ = godotenv.Load(p)
-			break
 		}
 	}
 

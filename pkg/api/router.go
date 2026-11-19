@@ -28,6 +28,14 @@ func NewRouter() http.Handler {
 		})
 	})
 
+	r.Get("/version", func(w http.ResponseWriter, r *http.Request) {
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"service": "personal-vps-monitor",
+			"version": "v2.0.0-modular",
+			"arch":    "go-static-headless",
+		})
+	})
+
 	r.Route("/api", func(r chi.Router) {
 		// 查询已激活驱动列表
 		r.Get("/providers", handleListProviders)
@@ -40,6 +48,13 @@ func NewRouter() http.Handler {
 
 		// 批量触发每日签到
 		r.Post("/checkin", handleUnifiedCheckin)
+
+		// 懒猫云特化端点
+		r.Route("/lazycat", func(r chi.Router) {
+			r.Get("/instances", handleLazyCatInstances)
+			r.Get("/ports", handleLazyCatPorts)
+			r.Post("/sync", handleLazyCatSync)
+		})
 	})
 
 	return r
@@ -120,6 +135,69 @@ func handleUnifiedCheckin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, results)
+}
+
+func handleLazyCatInstances(w http.ResponseWriter, r *http.Request) {
+	p, ok := providers.Get("lazycat")
+	if !ok {
+		respondJSON(w, http.StatusNotFound, map[string]string{"error": "lazycat provider not found"})
+		return
+	}
+	im, ok := p.(providers.InstanceManager)
+	if !ok {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "provider does not support instance listing"})
+		return
+	}
+	insts, err := im.ListInstances(r.Context())
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"total":     len(insts),
+		"instances": insts,
+	})
+}
+
+func handleLazyCatPorts(w http.ResponseWriter, r *http.Request) {
+	p, ok := providers.Get("lazycat")
+	if !ok {
+		respondJSON(w, http.StatusNotFound, map[string]string{"error": "lazycat provider not found"})
+		return
+	}
+	pm, ok := p.(providers.PortMapper)
+	if !ok {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "provider does not support port mapping"})
+		return
+	}
+	instID := r.URL.Query().Get("instance_id")
+	ports, err := pm.ListPortMappings(r.Context(), instID)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"total": len(ports),
+		"ports": ports,
+	})
+}
+
+func handleLazyCatSync(w http.ResponseWriter, r *http.Request) {
+	p, ok := providers.Get("lazycat")
+	if !ok {
+		respondJSON(w, http.StatusNotFound, map[string]string{"error": "lazycat provider not found"})
+		return
+	}
+	es, ok := p.(providers.EgressSyncer)
+	if !ok {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "provider does not support egress syncing"})
+		return
+	}
+	if err := es.SyncEgress(r.Context()); err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "success", "message": "12家宽出口轮询与sing-box热重载完成"})
 }
 
 func respondJSON(w http.ResponseWriter, code int, payload interface{}) {

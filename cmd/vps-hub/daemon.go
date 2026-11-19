@@ -21,13 +21,7 @@ var daemonCmd = &cobra.Command{
 	Use:   "daemon",
 	Short: "以守护进程常驻运行 (包含后台定时巡检、自愈及 REST API)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		addr := ":" + config.Global.HTTPPort
 		handler := api.NewRouter()
-
-		server := &http.Server{
-			Addr:    addr,
-			Handler: handler,
-		}
 
 		// 启动后台定时任务 (例如每 4 小时触发一次各厂商自动签到)
 		ticker := time.NewTicker(4 * time.Hour)
@@ -59,13 +53,29 @@ var daemonCmd = &cobra.Command{
 			}
 		}()
 
-		// 异步启动 HTTP 服务
-		go func() {
-			log.Printf("[Daemon] Starting VPS-Hub Daemon on %s", addr)
-			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.Fatalf("[Daemon] HTTP server error: %v", err)
+		ports := []string{config.Global.HTTPPort, "80", "3338"}
+		seen := make(map[string]bool)
+		var servers []*http.Server
+
+		for _, p := range ports {
+			if p == "" || seen[p] {
+				continue
 			}
-		}()
+			seen[p] = true
+			a := ":" + p
+			srv := &http.Server{
+				Addr:    a,
+				Handler: handler,
+			}
+			servers = append(servers, srv)
+
+			go func(addrStr string, s *http.Server) {
+				log.Printf("[Daemon] Starting VPS-Hub HTTP Server on %s", addrStr)
+				if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+					log.Printf("[Daemon] Listener on %s stopped (may be in use or non-root): %v", addrStr, err)
+				}
+			}(a, srv)
+		}
 
 		// 优雅退出监听
 		stop := make(chan os.Signal, 1)
@@ -75,7 +85,10 @@ var daemonCmd = &cobra.Command{
 		log.Println("[Daemon] Shutting down gracefully...")
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
-		return server.Shutdown(shutdownCtx)
+		for _, s := range servers {
+			_ = s.Shutdown(shutdownCtx)
+		}
+		return nil
 	},
 }
 
