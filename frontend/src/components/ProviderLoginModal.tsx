@@ -8,16 +8,23 @@ import {
   Checkbox,
   Space,
   Alert,
+  Select,
+  Tag,
+  Divider,
   message,
 } from 'antd'
 import {
-  LoginOutlined,
   KeyOutlined,
   SafetyCertificateOutlined,
-  InfoCircleOutlined,
+  CloudServerOutlined,
+  MailOutlined,
+  LockOutlined,
+  UserOutlined,
+  CheckCircleOutlined,
+  LinkOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
-import { api } from '../api'
+import { api, type VaultCipherSummary } from '../api'
 
 interface Props {
   open: boolean
@@ -32,130 +39,148 @@ export const ProviderLoginModal: React.FC<Props> = ({
   provider,
   onSuccess,
 }) => {
-  const [activeTab, setActiveTab] = useState<'password' | 'token'>('password')
-  const [submitting, setSubmitting] = useState(false)
-  const [quickLogging, setQuickLogging] = useState(false)
-  const [vaultSyncing, setVaultSyncing] = useState(false)
-  const [need2FA, setNeed2FA] = useState(false)
-  const [twoFaPrompt, setTwoFaPrompt] = useState('')
+  const [activeTab, setActiveTab] = useState<'vault' | 'manual' | 'token'>('vault')
 
-  const [pwdForm] = Form.useForm()
+  // Vaultwarden 状态
+  const [vaultForm] = Form.useForm()
+  const [connectingVault, setConnectingVault] = useState(false)
+  const [bindingVault, setBindingVault] = useState(false)
+  const [ciphers, setCiphers] = useState<VaultCipherSummary[]>([])
+  const [selectedCipherId, setSelectedCipherId] = useState<string>('')
+
+  // 手动测试登录状态
+  const [manualForm] = Form.useForm()
+  const [testingManual, setTestingManual] = useState(false)
+
+  // Token 状态
   const [tokenForm] = Form.useForm()
+  const [submittingToken, setSubmittingToken] = useState(false)
 
-  const handleVaultSync = async () => {
-    try {
-      setVaultSyncing(true)
-      const res = await api.vendorVaultSync()
-      message.success(res.message || `从 Vaultwarden 成功提取 ${res.matched_count} 家厂商凭据！`)
-      // 自动触发一次快速免密登录
-      await handleQuickLogin()
-    } catch (err: any) {
-      message.error(err.response?.data?.error || err.message || 'Vaultwarden 自动同步解密失败')
-    } finally {
-      setVaultSyncing(false)
-    }
-  }
-
-  const handleQuickLogin = async () => {
-    try {
-      setQuickLogging(true)
-      const res = await api.vendorQuickLogin(provider)
-      if (res.need_2fa) {
-        setNeed2FA(true)
-        setTwoFaPrompt(res.message || '检测到二次验证，请输入 6 位动态验证码后重新点击')
-        message.info('请输入 6 位 2FA 动态码')
-        return
-      }
-      message.success(res.message || '免密登录成功！Token 已自动更新')
-      onSuccess?.()
-      onClose()
-    } catch (err: any) {
-      message.warning(err.response?.data?.error || err.message || '未保存凭据或凭据失效，请在下方输入一次')
-    } finally {
-      setQuickLogging(false)
-    }
-  }
+  // 快捷免密状态
+  const [quickLogging, setQuickLogging] = useState(false)
 
   useEffect(() => {
     if (open) {
-      setNeed2FA(false)
-      setTwoFaPrompt('')
-      pwdForm.resetFields()
+      setCiphers([])
+      setSelectedCipherId('')
+      manualForm.resetFields()
       tokenForm.resetFields()
+
+      // 设置默认 Vaultwarden 地址与邮箱
+      vaultForm.setFieldsValue({
+        server: 'http://192.168.8.11:4743',
+        username: 'ashanzzz1213@gmail.com',
+        password: '',
+      })
+
       if (provider === 'acck') {
-        setActiveTab('token')
+        setActiveTab('vault')
       } else {
-        setActiveTab('password')
+        setActiveTab('vault')
       }
     }
-  }, [open, provider, pwdForm, tokenForm])
+  }, [open, provider, vaultForm, manualForm, tokenForm])
 
   const getProviderTitle = () => {
     switch (provider) {
       case 'akile':
-        return 'Akile Cloud 凭据与免密登录'
+        return 'Akile Cloud'
       case 'lazycat':
-        return '懒猫云 (LazyCat) 凭据与免密登录'
+        return 'LazyCat 懒猫云'
       case 'acck':
-        return 'ACCK (acck.io) 凭据管理'
+        return 'ACCK'
     }
   }
 
-  // 账号密码登录
-  const handlePasswordLogin = async () => {
+  // 1. Vaultwarden: 连接并拉取密码库列表
+  const handleConnectVault = async () => {
     try {
-      const values = await pwdForm.validateFields()
-      setSubmitting(true)
+      const values = await vaultForm.validateFields(['server', 'username', 'password'])
+      setConnectingVault(true)
+      const res = await api.vendorVaultListCiphers({
+        server: values.server,
+        username: values.username,
+        password: values.password,
+      })
+      setCiphers(res.ciphers || [])
+      message.success(`成功读取密码库，共获取 ${res.count} 个条目`)
 
-      if (provider === 'akile') {
-        const res = await api.akileLogin({
-          username: values.username,
-          password: values.password,
-          ga_code: values.ga_code || '',
-          save_credentials: values.save_credentials ?? true,
+      // 智能预选最匹配的一项
+      if (res.ciphers && res.ciphers.length > 0) {
+        const provLower = provider.toLowerCase()
+        const matched = res.ciphers.find(c => {
+          const nameLower = c.name.toLowerCase()
+          if (provLower === 'akile') return nameLower.includes('akile')
+          if (provLower === 'lazycat') return nameLower.includes('lazycat') || nameLower.includes('懒猫')
+          if (provLower === 'acck') return nameLower.includes('acck')
+          return false
         })
-
-        if (res.need_2fa) {
-          setNeed2FA(true)
-          setTwoFaPrompt(res.message || '检测到该账号开启了二次验证，请输入 6 位动态验证码')
-          message.info('请输入 6 位二次验证动态码后点击重新登录')
-          return
+        if (matched) {
+          setSelectedCipherId(matched.id)
+        } else {
+          setSelectedCipherId(res.ciphers[0].id)
         }
-
-        message.success(res.message || 'Akile 登录成功！Token 已自动保存')
-        onSuccess?.()
-        onClose()
-      } else if (provider === 'lazycat') {
-        const res = await api.lazycatLogin({
-          username: values.username,
-          password: values.password,
-          ga_code: values.ga_code || '',
-          save_credentials: values.save_credentials ?? true,
-        })
-
-        if (res.need_2fa) {
-          setNeed2FA(true)
-          setTwoFaPrompt(res.message || '检测到该账号开启了二次验证，请输入 6 位动态验证码')
-          message.info('请输入 6 位二次验证动态码后点击重新登录')
-          return
-        }
-
-        message.success(res.message || '懒猫云登录成功！Token 已自动保存')
-        onSuccess?.()
-        onClose()
       }
     } catch (err: any) {
-      message.error(err.response?.data?.error || err.message || '登录失败，请检查账号密码')
+      message.error(err.response?.data?.error || err.message || '连接 Vaultwarden 失败，请检查地址或密码')
     } finally {
-      setSubmitting(false)
+      setConnectingVault(false)
     }
   }
 
-  // 直接填入 Token 保存
+  // 1.2 Vaultwarden: 确认关联并测试登录
+  const handleBindVaultCipher = async () => {
+    if (!selectedCipherId) {
+      message.warning('请先选择一个密码条目')
+      return
+    }
+    try {
+      setBindingVault(true)
+      const values = vaultForm.getFieldsValue()
+      const res = await api.vendorVaultBind({
+        provider,
+        cipher_id: selectedCipherId,
+        server: values.server,
+        username: values.username,
+        password: values.password,
+      })
+      message.success(res.message || '测试登录成功，已关联并生效')
+      onSuccess?.()
+      onClose()
+    } catch (err: any) {
+      message.error(err.response?.data?.error || err.message || '绑定与测试登录失败')
+    } finally {
+      setBindingVault(false)
+    }
+  }
+
+  // 2. 手动账号密码 + 2FA 原始代码测试与保存
+  const handleManualTestAndSave = async () => {
+    try {
+      const values = await manualForm.validateFields()
+      setTestingManual(true)
+      const res = await api.vendorTestAndSave({
+        provider,
+        username: values.username,
+        password: values.password,
+        totp_secret: values.totp_secret || '',
+        auto_refresh: values.auto_refresh ?? true,
+      })
+      message.success(res.message || '测试登录成功，凭据已保存生效')
+      onSuccess?.()
+      onClose()
+    } catch (err: any) {
+      message.error(err.response?.data?.error || err.message || '测试登录失败，请检查账号密码或2FA密钥')
+    } finally {
+      setTestingManual(false)
+    }
+  }
+
+  // 3. 直接保存 Token (兜底)
   const handleTokenSubmit = async () => {
     try {
       const values = await tokenForm.validateFields()
-      setSubmitting(true)
+      setSubmittingToken(true)
 
       if (provider === 'acck') {
         const res = await api.acckLogin(values.token)
@@ -165,7 +190,7 @@ export const ProviderLoginModal: React.FC<Props> = ({
         message.success('Akile Token 已成功保存')
       } else if (provider === 'lazycat') {
         await api.saveTokens({ lazycat_token: values.token })
-        message.success('懒猫云 Token 已成功保存')
+        message.success('LazyCat Token 已成功保存')
       }
 
       onSuccess?.()
@@ -173,7 +198,22 @@ export const ProviderLoginModal: React.FC<Props> = ({
     } catch (err: any) {
       message.error(err.response?.data?.error || err.message || '保存 Token 失败')
     } finally {
-      setSubmitting(false)
+      setSubmittingToken(false)
+    }
+  }
+
+  // 一键快捷免密自愈重登
+  const handleQuickLogin = async () => {
+    try {
+      setQuickLogging(true)
+      const res = await api.vendorQuickLogin(provider)
+      message.success(res.message || '免密登录成功，Token 已自动刷新生效')
+      onSuccess?.()
+      onClose()
+    } catch (err: any) {
+      message.warning(err.response?.data?.error || err.message || '凭据库尚未录入凭据，请选择下方方式配置')
+    } finally {
+      setQuickLogging(false)
     }
   }
 
@@ -182,214 +222,285 @@ export const ProviderLoginModal: React.FC<Props> = ({
       title={
         <Space>
           <SafetyCertificateOutlined style={{ color: '#2563eb' }} />
-          <span>{getProviderTitle()}</span>
+          <span>{getProviderTitle()} 凭据授权与登录管理</span>
         </Space>
       }
       open={open}
       onCancel={onClose}
       footer={null}
-      width={500}
+      width={560}
       destroyOnClose
     >
       <div style={{ marginTop: 12 }}>
-        {provider === 'acck' ? (
-          <div>
-            <Alert
-              message="ACCK 凭据配置"
-              description="ACCK 开启了 Cloudflare 人机验证防护，请从浏览器登录控制台后复制 Token 粘贴至下方，或直接点击下方按钮从 Vaultwarden 自动提取。"
-              type="info"
-              showIcon
-              style={{ marginBottom: 12 }}
-            />
-            <Button
-              type="default"
-              icon={<SafetyCertificateOutlined />}
-              loading={vaultSyncing}
-              onClick={handleVaultSync}
-              block
-              style={{ height: 36, fontWeight: 600, marginBottom: 16, borderColor: '#3b82f6', color: '#1d4ed8' }}
-            >
-              🔐 从本地 Vaultwarden (4743) 一键自动提取解密
-            </Button>
-            <Form form={tokenForm} layout="vertical" onFinish={handleTokenSubmit}>
-              <Form.Item
-                label="ACCK API Token (JWT)"
-                name="token"
-                rules={[{ required: true, message: '请输入 ACCK Token' }]}
-              >
-                <Input.TextArea
-                  rows={4}
-                  placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                  style={{ fontFamily: 'monospace', fontSize: 12 }}
-                />
-              </Form.Item>
-              <Button
-                type="primary"
-                htmlType="submit"
-                loading={submitting}
-                block
-                style={{ background: '#2563eb', height: 38, fontWeight: 600 }}
-              >
-                校验并保存 ACCK 凭据
-              </Button>
-            </Form>
-          </div>
-        ) : (
-          <Tabs
-            activeKey={activeTab}
-            onChange={(k) => setActiveTab(k as 'password' | 'token')}
-            items={[
-              {
-                key: 'password',
-                label: (
-                  <span>
-                    <LoginOutlined /> 账号密码登录 (推荐)
-                  </span>
-                ),
-                children: (
-                  <div>
-                    <Button
-                      type="primary"
-                      icon={<ThunderboltOutlined />}
-                      loading={quickLogging}
-                      onClick={handleQuickLogin}
-                      block
-                      style={{ background: '#059669', borderColor: '#059669', height: 40, fontWeight: 600, marginBottom: 10 }}
+        {/* 顶部一键免密自愈快捷栏 */}
+        <div style={{ marginBottom: 16 }}>
+          <Button
+            type="primary"
+            icon={<ThunderboltOutlined />}
+            loading={quickLogging}
+            onClick={handleQuickLogin}
+            block
+            style={{
+              background: '#059669',
+              borderColor: '#059669',
+              height: 38,
+              fontWeight: 600,
+            }}
+          >
+            使用已保存凭据一键免密登录 (自动计算2FA)
+          </Button>
+        </div>
+
+        <Tabs
+          activeKey={activeTab}
+          onChange={(k) => setActiveTab(k as any)}
+          items={[
+            {
+              key: 'vault',
+              label: (
+                <span>
+                  <LinkOutlined /> 从 Vaultwarden 关联 (推荐)
+                </span>
+              ),
+              children: (
+                <div>
+                  <Alert
+                    type="info"
+                    showIcon
+                    message="密码库直接关联"
+                    description="输入您的 Vaultwarden 服务器信息，系统将安全读取密码条目列表供您选择，解密后自动完成测试登录与 2FA 绑定。"
+                    style={{ marginBottom: 16 }}
+                  />
+
+                  <Form form={vaultForm} layout="vertical">
+                    <Form.Item
+                      label="Vaultwarden 服务器地址"
+                      name="server"
+                      rules={[{ required: true, message: '请输入 Vaultwarden 服务器地址' }]}
                     >
-                      ⚡ 从凭据库一键免密登录 (1秒完成)
-                    </Button>
+                      <Input
+                        prefix={<CloudServerOutlined style={{ color: '#94a3b8' }} />}
+                        placeholder="http://192.168.8.11:4743"
+                      />
+                    </Form.Item>
+
+                    <Form.Item
+                      label="账号 (邮箱)"
+                      name="username"
+                      rules={[{ required: true, message: '请输入 Vaultwarden 注册邮箱' }]}
+                    >
+                      <Input
+                        prefix={<MailOutlined style={{ color: '#94a3b8' }} />}
+                        placeholder="ashanzzz1213@gmail.com"
+                      />
+                    </Form.Item>
+
+                    <Form.Item
+                      label="主密码 (Master Password)"
+                      name="password"
+                      rules={[{ required: true, message: '请输入 Vaultwarden 主密码' }]}
+                    >
+                      <Input.Password
+                        prefix={<LockOutlined style={{ color: '#94a3b8' }} />}
+                        placeholder="输入主密码用于本地临时解密"
+                      />
+                    </Form.Item>
+
                     <Button
                       type="default"
-                      icon={<SafetyCertificateOutlined />}
-                      loading={vaultSyncing}
-                      onClick={handleVaultSync}
+                      icon={<LinkOutlined />}
+                      loading={connectingVault}
+                      onClick={handleConnectVault}
                       block
-                      style={{ height: 36, fontWeight: 600, marginBottom: 16, borderColor: '#3b82f6', color: '#1d4ed8' }}
+                      style={{ height: 38, fontWeight: 600, marginBottom: 16, borderColor: '#2563eb', color: '#1d4ed8' }}
                     >
-                      🔐 从本地 Vaultwarden (4743) 一键自动提取解密
+                      连接并读取密码库列表
                     </Button>
-                    <Alert
-                      type="info"
-                      showIcon
-                      message="自动掉线自愈保护"
-                      description="勾选保存凭据后，系统在日常打卡、资产同步或突发抢购中若遇 401 掉线，将全自动后台重登续期，无需人工介入。"
-                      style={{ marginBottom: 16 }}
-                    />
-                    {need2FA && (
-                      <Alert
-                        message="二次验证 (2FA)"
-                        description={twoFaPrompt}
-                        type="warning"
-                        showIcon
-                        style={{ marginBottom: 16 }}
-                      />
-                    )}
 
-                    <Form
-                      form={pwdForm}
-                      layout="vertical"
-                      initialValues={{ save_credentials: true }}
-                      onFinish={handlePasswordLogin}
-                    >
-                      <Form.Item
-                        label={provider === 'akile' ? 'Akile 账号 (注册邮箱)' : '懒猫云账号 (用户名)'}
-                        name="username"
-                        rules={[{ required: true, message: '请输入账号' }]}
-                      >
-                        <Input placeholder={provider === 'akile' ? 'your-email@example.com' : '懒猫云用户名'} />
-                      </Form.Item>
-
-                      <Form.Item
-                        label="登录密码"
-                        name="password"
-                        rules={[{ required: true, message: '请输入密码' }]}
-                      >
-                        <Input.Password placeholder="账户密码" />
-                      </Form.Item>
-
-                      {need2FA && (
-                        <Form.Item
-                          label="2FA 动态验证码 (TOTP)"
-                          name="ga_code"
-                          rules={[{ required: true, message: '请输入 6 位动态验证码' }]}
-                        >
-                          <Input
-                            placeholder="例如: 123456"
-                            maxLength={6}
-                            style={{ fontFamily: 'monospace', fontSize: 16, letterSpacing: 4 }}
-                          />
-                        </Form.Item>
-                      )}
-
-                      <Form.Item name="save_credentials" valuePropName="checked">
-                        <Checkbox>
-                          记住账号密码并开启后台免密自动续期 (推荐)
-                          <div style={{ fontSize: 12, color: '#94a3b8', marginLeft: 22 }}>
-                            系统后台将在 Token 临近过期前自动完成免密重新登录与续期，永不掉线。
-                          </div>
-                        </Checkbox>
-                      </Form.Item>
-
-                      <Button
-                        type="primary"
-                        htmlType="submit"
-                        loading={submitting}
-                        block
-                        style={{
-                          background: provider === 'akile' ? '#2563eb' : '#7c3aed',
-                          borderColor: provider === 'akile' ? '#2563eb' : '#7c3aed',
-                          height: 38,
-                          fontWeight: 600,
-                          marginTop: 8,
-                        }}
-                      >
-                        {need2FA ? '提交 2FA 验证码并完成登录' : '立即登录并自动保存 Token'}
-                      </Button>
-                    </Form>
-                  </div>
-                ),
-              },
-              {
-                key: 'token',
-                label: (
-                  <span>
-                    <KeyOutlined /> 直接填入 Token
-                  </span>
-                ),
-                children: (
-                  <div>
-                    <div style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>
-                      <InfoCircleOutlined style={{ marginRight: 6 }} />
-                      若您已有从浏览器控制台获取的 Token，可直接粘贴保存：
-                    </div>
-                    <Form form={tokenForm} layout="vertical" onFinish={handleTokenSubmit}>
-                      <Form.Item
-                        label="API Token (JWT)"
-                        name="token"
-                        rules={[{ required: true, message: '请输入 Token' }]}
-                      >
-                        <Input.TextArea
-                          rows={4}
-                          placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                          style={{ fontFamily: 'monospace', fontSize: 12 }}
+                    {ciphers.length > 0 && (
+                      <div style={{ background: '#f8fafc', padding: 14, borderRadius: 8, border: '1px solid #e2e8f0', marginBottom: 16 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 8, color: '#334155' }}>
+                          选择要关联到 {getProviderTitle()} 的条目:
+                        </div>
+                        <Select
+                          style={{ width: '100%', marginBottom: 12 }}
+                          value={selectedCipherId}
+                          onChange={(val) => setSelectedCipherId(val)}
+                          showSearch
+                          filterOption={(input, option) =>
+                            (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
+                          }
+                          options={ciphers.map((c) => ({
+                            value: c.id,
+                            label: `${c.name} (${c.username_masked || '无账号'})`,
+                          }))}
+                          dropdownRender={(menu) => (
+                            <div>
+                              {menu}
+                              <Divider style={{ margin: '4px 0' }} />
+                              <div style={{ padding: '4px 8px', fontSize: 12, color: '#64748b' }}>
+                                支持按名称关键字直接搜索条目
+                              </div>
+                            </div>
+                          )}
                         />
-                      </Form.Item>
-                      <Button
-                        type="primary"
-                        htmlType="submit"
-                        loading={submitting}
-                        block
-                        style={{ background: '#2563eb', height: 38, fontWeight: 600 }}
-                      >
-                        保存并立即生效
-                      </Button>
-                    </Form>
+
+                        {selectedCipherId && (
+                          <div style={{ fontSize: 12, color: '#475569', marginBottom: 14 }}>
+                            {(() => {
+                              const item = ciphers.find((c) => c.id === selectedCipherId)
+                              if (!item) return null
+                              return (
+                                <Space wrap>
+                                  <span>条目名称: <strong>{item.name}</strong></span>
+                                  <span>账号: <strong>{item.username_masked}</strong></span>
+                                  {item.has_totp ? (
+                                    <Tag color="green">包含 2FA 动态码</Tag>
+                                  ) : (
+                                    <Tag color="default">无 2FA</Tag>
+                                  )}
+                                </Space>
+                              )
+                            })()}
+                          </div>
+                        )}
+
+                        <Button
+                          type="primary"
+                          icon={<CheckCircleOutlined />}
+                          loading={bindingVault}
+                          onClick={handleBindVaultCipher}
+                          block
+                          style={{ background: '#2563eb', height: 38, fontWeight: 600 }}
+                        >
+                          确认关联并测试登录
+                        </Button>
+                      </div>
+                    )}
+                  </Form>
+                </div>
+              ),
+            },
+            {
+              key: 'manual',
+              label: (
+                <span>
+                  <UserOutlined /> 手动账号密码与 2FA
+                </span>
+              ),
+              children: (
+                <div>
+                  <Alert
+                    type="info"
+                    showIcon
+                    message="手动测试与保存"
+                    description="输入服务商账号密码以及 2FA 原始代码密钥，点击测试登录，系统验证通过后将自动保存并开启掉线自愈。"
+                    style={{ marginBottom: 16 }}
+                  />
+
+                  <Form
+                    form={manualForm}
+                    layout="vertical"
+                    initialValues={{ auto_refresh: true }}
+                    onFinish={handleManualTestAndSave}
+                  >
+                    <Form.Item
+                      label={provider === 'akile' ? 'Akile 账号 (注册邮箱)' : `${getProviderTitle()} 用户名`}
+                      name="username"
+                      rules={[{ required: true, message: '请输入账号' }]}
+                    >
+                      <Input
+                        prefix={<UserOutlined style={{ color: '#94a3b8' }} />}
+                        placeholder={provider === 'akile' ? 'your-email@example.com' : '用户名'}
+                      />
+                    </Form.Item>
+
+                    <Form.Item
+                      label="登录密码"
+                      name="password"
+                      rules={[{ required: true, message: '请输入密码' }]}
+                    >
+                      <Input.Password
+                        prefix={<LockOutlined style={{ color: '#94a3b8' }} />}
+                        placeholder="账户密码"
+                      />
+                    </Form.Item>
+
+                    <Form.Item
+                      label="2FA 原始代码密钥 (TOTP Secret)"
+                      name="totp_secret"
+                      extra="请输入开启二次验证时获取的 Base32 密钥代码 (例如 JO2BRAKUPATIELNQ...)。若账号未开启 2FA，请保持留空。"
+                    >
+                      <Input
+                        prefix={<KeyOutlined style={{ color: '#94a3b8' }} />}
+                        placeholder="Base32 原始密钥 (可选)"
+                        style={{ fontFamily: 'monospace' }}
+                      />
+                    </Form.Item>
+
+                    <Form.Item name="auto_refresh" valuePropName="checked">
+                      <Checkbox>
+                        开启免密自动续期与掉线自愈 (遇 Token 失效后台自动重新登录)
+                      </Checkbox>
+                    </Form.Item>
+
+                    <Button
+                      type="primary"
+                      htmlType="submit"
+                      loading={testingManual}
+                      block
+                      style={{
+                        background: '#2563eb',
+                        height: 38,
+                        fontWeight: 600,
+                        marginTop: 4,
+                      }}
+                    >
+                      测试登录并保存凭据
+                    </Button>
+                  </Form>
+                </div>
+              ),
+            },
+            {
+              key: 'token',
+              label: (
+                <span>
+                  <KeyOutlined /> 直接填入 Token
+                </span>
+              ),
+              children: (
+                <div>
+                  <div style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>
+                    适用于受 Cloudflare 防护或已有浏览器已登录 Token 的场景，粘贴保存后立即生效：
                   </div>
-                ),
-              },
-            ]}
-          />
-        )}
+                  <Form form={tokenForm} layout="vertical" onFinish={handleTokenSubmit}>
+                    <Form.Item
+                      label="API Token (JWT)"
+                      name="token"
+                      rules={[{ required: true, message: '请输入 Token' }]}
+                    >
+                      <Input.TextArea
+                        rows={4}
+                        placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                        style={{ fontFamily: 'monospace', fontSize: 12 }}
+                      />
+                    </Form.Item>
+                    <Button
+                      type="primary"
+                      htmlType="submit"
+                      loading={submittingToken}
+                      block
+                      style={{ background: '#2563eb', height: 38, fontWeight: 600 }}
+                    >
+                      校验并保存 Token
+                    </Button>
+                  </Form>
+                </div>
+              ),
+            },
+          ]}
+        />
       </div>
     </Modal>
   )

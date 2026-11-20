@@ -333,6 +333,16 @@ export interface ProviderHealthDetail {
   }
 }
 
+export interface VaultCipherSummary {
+  id: string
+  name: string
+  username?: string
+  username_masked: string
+  has_password: boolean
+  has_totp: boolean
+  notes?: string
+}
+
 export interface VendorHealthSummary {
   providers: Record<string, ProviderHealthDetail>
   refreshed_at: string
@@ -469,4 +479,10 @@ export const api = {
     http.post<{ status: string; message: string }>('/api/vendor/credentials/save', data).then(r => r.data),
   vendorVaultSync: () =>
     http.post<{ status: string; message: string; matched_count: number; items: any[]; credentials: any }>('/api/vendor/vault/sync').then(r => r.data),
+  vendorVaultListCiphers: (data?: { server?: string; username?: string; password?: string }) =>
+    http.post<{ status: string; ciphers: VaultCipherSummary[]; count: number }>('/api/vendor/vault/ciphers', data || {}).then(r => r.data),
+  vendorVaultBind: (data: { provider: string; cipher_id: string; server?: string; username?: string; password?: string }) =>
+    http.post<{ status: string; message: string; token: string; expires_at: string; username_masked: string }>('/api/vendor/vault/bind', data).then(r => r.data),
+  vendorTestAndSave: (data: { provider: string; username: string; password: string; totp_secret?: string; auto_refresh?: boolean }) =>
+    http.post<{ status: string; message: string; token: string; expires_at: string; username_masked: string }>('/api/vendor/test-and-save', data).then(r => r.data),
 }

@@ -183,6 +183,17 @@ type VaultItem struct {
 	Notes      string `json:"notes,omitempty"`
 }
 
+// CipherSummary 密码条目摘要，用于前端安全展示与下拉选择（不含明文密码）
+type CipherSummary struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Username       string `json:"username,omitempty"`
+	UsernameMasked string `json:"username_masked"`
+	HasPassword    bool   `json:"has_password"`
+	HasTOTP        bool   `json:"has_totp"`
+	Notes          string `json:"notes,omitempty"`
+}
+
 // DefaultVaultServer 默认服务器地址
 func DefaultVaultServer() string {
 	if s := os.Getenv("VAULT_SERVER"); s != "" {
@@ -191,6 +202,9 @@ func DefaultVaultServer() string {
 	if s := os.Getenv("VAULT_URL"); s != "" {
 		return strings.TrimRight(s, "/")
 	}
+	if sc := config.LoadSavedCredentials(); sc != nil && sc.Vaultwarden != nil && sc.Vaultwarden.Server != "" {
+		return strings.TrimRight(sc.Vaultwarden.Server, "/")
+	}
 	return "http://192.168.8.11:4743"
 }
 
@@ -198,6 +212,9 @@ func DefaultVaultServer() string {
 func DefaultVaultEmail() string {
 	if s := os.Getenv("VAULT_EMAIL"); s != "" {
 		return strings.TrimSpace(s)
+	}
+	if sc := config.LoadSavedCredentials(); sc != nil && sc.Vaultwarden != nil && sc.Vaultwarden.Username != "" {
+		return strings.TrimSpace(sc.Vaultwarden.Username)
 	}
 	return "ashanzzz1213@gmail.com"
 }
@@ -210,11 +227,8 @@ func DefaultVaultPassword() string {
 	return "Woo@@@204317"
 }
 
-// PullAndSyncFromVaultwarden 从 Vaultwarden 登录、同步、解密并自动存入监控系统凭据库
-func PullAndSyncFromVaultwarden(ctx context.Context, server, email, password string) ([]*VaultItem, error) {
-	vaultMu.Lock()
-	defer vaultMu.Unlock()
-
+// fetchAndDecryptVault 统一底层：连接 Vaultwarden、解密所有 Cipher 条目
+func fetchAndDecryptVault(ctx context.Context, server, email, password string) ([]*VaultItem, error) {
 	if server == "" {
 		server = DefaultVaultServer()
 	}
@@ -229,7 +243,7 @@ func PullAndSyncFromVaultwarden(ctx context.Context, server, email, password str
 
 	// 构建支持穿透本地 NO_PROXY 的 HTTP Client
 	transport := &http.Transport{
-		Proxy: nil, // 直连局域网，不走 7890 代理以防超时
+		Proxy: nil, // 直连局域网，不走代理以防超时
 	}
 	client := &http.Client{
 		Transport: transport,
@@ -358,12 +372,10 @@ func PullAndSyncFromVaultwarden(ctx context.Context, server, email, password str
 		}
 	}
 
-	// 7. 解密所有 Cipher 并匹配目标厂商
-	var matchedItems []*VaultItem
+	// 7. 解密所有 Cipher
+	var items []*VaultItem
 	for _, c := range syncResp.Ciphers {
 		name := d.Text(c.Name)
-		nameLower := strings.ToLower(name)
-
 		var u, p, totp string
 		if c.Login != nil {
 			u = d.Text(c.Login.Username)
@@ -379,6 +391,71 @@ func PullAndSyncFromVaultwarden(ctx context.Context, server, email, password str
 			TOTPSecret: totp,
 			Notes:      d.Text(c.Notes),
 		}
+		items = append(items, item)
+	}
+
+	return items, nil
+}
+
+// ListVaultCiphers 拉取解密后的所有密码条目摘要，用于前端安全选择（不含明文密码）
+func ListVaultCiphers(ctx context.Context, server, email, password string) ([]CipherSummary, error) {
+	vaultMu.Lock()
+	defer vaultMu.Unlock()
+
+	items, err := fetchAndDecryptVault(ctx, server, email, password)
+	if err != nil {
+		return nil, err
+	}
+
+	var summaries []CipherSummary
+	for _, it := range items {
+		summaries = append(summaries, CipherSummary{
+			ID:             it.ID,
+			Name:           it.Name,
+			Username:       it.Username,
+			UsernameMasked: config.MaskUsername(it.Username),
+			HasPassword:    it.Password != "",
+			HasTOTP:        it.TOTPSecret != "",
+			Notes:          it.Notes,
+		})
+	}
+	return summaries, nil
+}
+
+// GetVaultCipherByID 根据 ID 提取指定 Cipher 条目详情（含解密后的密码与 TOTP 密钥）
+func GetVaultCipherByID(ctx context.Context, server, email, password, cipherID string) (*VaultItem, error) {
+	vaultMu.Lock()
+	defer vaultMu.Unlock()
+
+	items, err := fetchAndDecryptVault(ctx, server, email, password)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, it := range items {
+		if it.ID == cipherID {
+			return it, nil
+		}
+	}
+	return nil, fmt.Errorf("未在密码库中找到 ID 为 %s 的条目", cipherID)
+}
+
+// PullAndSyncFromVaultwarden 从 Vaultwarden 登录、同步、解密并自动存入监控系统凭据库
+func PullAndSyncFromVaultwarden(ctx context.Context, server, email, password string) ([]*VaultItem, error) {
+	vaultMu.Lock()
+	defer vaultMu.Unlock()
+
+	items, err := fetchAndDecryptVault(ctx, server, email, password)
+	if err != nil {
+		return nil, err
+	}
+
+	var matchedItems []*VaultItem
+	for _, item := range items {
+		nameLower := strings.ToLower(item.Name)
+		u := item.Username
+		p := item.Password
+		totp := item.TOTPSecret
 
 		// 智能识别并自动持久化回写至监控凭据库
 		if strings.Contains(nameLower, "akile") && p != "" {

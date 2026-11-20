@@ -360,7 +360,7 @@ export default function App() {
               )}
             </Space>
             <div style={{ marginTop: 8, fontSize: 13, color: '#475569', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontWeight: 600, color: '#334155' }}>🕒 本服务独立同步时间:</span>
+              <span style={{ fontWeight: 600, color: '#334155' }}>独立同步时间:</span>
               <Tag color={syncTime ? 'geekblue' : 'default'} style={{ fontFamily: 'monospace', fontSize: 13, padding: '2px 8px' }}>
                 {syncTime ? formatFullTime(syncTime) : '尚未单独同步 (点击右侧立即获取)'}
               </Tag>
@@ -380,7 +380,7 @@ export default function App() {
                   loading={isLogging}
                   onClick={() => handleQuickLogin(providerKey)}
                 >
-                  ⚡ 一键免密登录
+                  一键免密登录
                 </Button>
               )}
               <Button
@@ -399,7 +399,7 @@ export default function App() {
                 loading={vaultSyncing}
                 onClick={handleGlobalVaultSync}
               >
-                🔐 从 Vaultwarden 提取
+                从 Vaultwarden 提取
               </Button>
               <Button
                 size="small"
@@ -1064,7 +1064,7 @@ export default function App() {
               <Col span={12}>
                 <Text type="secondary">自动重置流量状态:</Text>
                 <div style={{ marginTop: 4 }}>
-                  {selectedVps.auto_reset ? <Tag color="green">✅ 已开启自动重置</Tag> : <Tag color="default">按需手动重置</Tag>}
+                  {selectedVps.auto_reset ? <Tag color="green">已开启自动重置</Tag> : <Tag color="default">按需手动重置</Tag>}
                 </div>
               </Col>
               <Col span={12}>
@@ -1107,7 +1107,7 @@ export default function App() {
   // 页面标题映射
   const pageTitleMap: Record<string, string> = {
     overview: '全网资产看板',
-    plans: '🎯 智能抢购中心 (1分钟轮询)',
+    plans: '智能抢购中心 (1分钟轮询)',
     akile: 'Akile Cloud 专区',
     acck: 'ACCK 专区',
     lazycat: '懒猫云专区',
@@ -1336,7 +1336,7 @@ export default function App() {
                                 setLoginTargetProvider(r.provider_id)
                                 setLoginModalOpen(true)
                               }}>
-                                ⚠️ 缓存
+                                缓存
                               </Tag>
                             </Tooltip>
                           )}
@@ -1544,7 +1544,7 @@ export default function App() {
                       <div style={{ fontSize: 12 }}>
                         {it.seller_username ? (
                           <div>
-                            <span style={{ color: '#0f172a', fontWeight: 500 }}>👤 {it.seller_username}</span>
+                            <span style={{ color: '#0f172a', fontWeight: 500 }}>{it.seller_username}</span>
                             {it.seller_user_id ? <div style={{ fontSize: 11, color: '#94a3b8' }}>UID: {it.seller_user_id}</div> : null}
                           </div>
                         ) : <span style={{ color: '#94a3b8' }}>官方直营</span>}
@@ -1672,9 +1672,9 @@ export default function App() {
                         <div>
                           <div style={{ marginBottom: 2 }}>
                             {isNormal ? (
-                              <Tag color="green" style={{ fontWeight: 600 }}>🟢 IP正常</Tag>
+                              <Tag color="green" style={{ fontWeight: 600 }}>IP正常</Tag>
                             ) : isBlocked ? (
-                              <Tag color="red" style={{ fontWeight: 600 }}>🔴 IP被墙</Tag>
+                              <Tag color="red" style={{ fontWeight: 600 }}>IP异常</Tag>
                             ) : (
                               <Tag color="default">{it.detail || '未检测'}</Tag>
                             )}
@@ -1874,14 +1874,14 @@ export default function App() {
                     <div style={{ fontSize: 12 }}>
                       {it.provider === 'lazycat' && (
                         <div>
-                          {it.seller_username && <div>👤 {it.seller_username}</div>}
+                          {it.seller_username && <div>{it.seller_username}</div>}
                           {it.port_limit ? <Tag color="purple" style={{ fontSize: 10 }}>{it.port_limit} 端口</Tag> : null}
                         </div>
                       )}
                       {it.provider === 'akile' && (
                         <div>
-                          {it.detail?.includes('正常') ? <Tag color="green" style={{ fontSize: 10 }}>🟢 IP正常</Tag> : null}
-                          {it.detail?.includes('被墙') ? <Tag color="red" style={{ fontSize: 10 }}>🔴 IP被墙</Tag> : null}
+                          {it.detail?.includes('正常') ? <Tag color="green" style={{ fontSize: 10 }}>IP正常</Tag> : null}
+                          {it.detail?.includes('被墙') ? <Tag color="red" style={{ fontSize: 10 }}>IP异常</Tag> : null}
                         </div>
                       )}
                       {it.provider === 'acck' && (
@@ -1954,7 +1954,7 @@ export default function App() {
                       <FireOutlined style={{ color: '#ef4444' }} />
                       <Text strong style={{ fontSize: 13 }}>
                         符合【{record.name}】筛选条件候选 ({record.matched_items?.length || 0} 台) - 
-                        {record.auto_buy ? ' 🔴 实盘秒杀中 (自动下单)' : ' 🟢 模拟筛选预览 (安全不扣款)'}
+                        {record.auto_buy ? ' 实盘秒杀中 (自动下单)' : ' 模拟筛选预览 (安全不扣款)'}
                       </Text>
                     </Space>
                     <Text type="secondary" style={{ fontSize: 12 }}>
@@ -2026,14 +2026,14 @@ export default function App() {
                   <div>
                     {r.auto_buy ? (
                       <>
-                        <Tag color="red" icon={<ThunderboltOutlined />}>🔴 实盘秒杀</Tag>
+                        <Tag color="red" icon={<ThunderboltOutlined />}>实盘秒杀</Tag>
                         <div style={{ fontSize: 11, color: '#ef4444', marginTop: 2 }}>
                           限额 {r.max_buy_count || 1} · 已购 {r.current_bought_count || 0}
                         </div>
                       </>
                     ) : (
                       <>
-                        <Tag color="green" icon={<EyeOutlined />}>🟢 模拟筛选</Tag>
+                        <Tag color="green" icon={<EyeOutlined />}>模拟筛选</Tag>
                         <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
                           仅匹配展示，不扣款
                         </div>
@@ -2050,7 +2050,7 @@ export default function App() {
                   <Switch checked={true} size="small" onChange={() => handleToggleAutoBuy(r)} checkedChildren="实盘" unCheckedChildren="模拟" />
                 ) : (
                   <Popconfirm
-                    title="⚠️ 确认开启【实盘秒杀】？"
+                    title="确认开启【实盘秒杀】？"
                     description="每1分钟轮询命中符合条件的挂单后，将自动调用平台 API 扣除余额直接购买！"
                     onConfirm={() => handleToggleAutoBuy(r)}
                     okText="开启实盘"
@@ -2199,7 +2199,7 @@ export default function App() {
                 <Space size={12}>
                   <AimOutlined style={{ color: '#2563eb', fontSize: 20 }} />
                   <div>
-                    <Text strong style={{ fontSize: 16, color: '#0f172a' }}>🎯 智能抢购中心 (1分钟智能轮询一手/二手集市)</Text>
+                    <Text strong style={{ fontSize: 16, color: '#0f172a' }}>智能抢购中心 (1分钟智能轮询一手/二手集市)</Text>
                     <div style={{ fontSize: 12, color: '#64748b' }}>
                       全网运行中: <b>{activeCount}</b> 条 · 懒猫云: <b>{lazycatPlans.length}</b> 条 · Akile: <b>{akilePlans.length}</b> 条 · ACCK: <b>{acckPlans.length}</b> 条
                     </div>
@@ -2227,7 +2227,7 @@ export default function App() {
                 items={[
                   {
                     key: 'all',
-                    label: `🌐 全网汇总总览 (${plans.length})`,
+                    label: `全网汇总总览 (${plans.length})`,
                     children: (
                       <Space direction="vertical" size={16} style={{ width: '100%', marginTop: 8 }}>
                         {renderPlansTable(plans, 'all')}
@@ -2237,7 +2237,7 @@ export default function App() {
                           title={
                             <Space>
                               <FireOutlined style={{ color: '#ef4444' }} />
-                              <Text strong>🔥 全网实时已命中挂单候选流动池 ({allMatched.length} 台待选)</Text>
+                              <Text strong>全网实时已命中挂单候选流动池 ({allMatched.length} 台待选)</Text>
                             </Space>
                           }
                           bordered={false}
@@ -2250,7 +2250,7 @@ export default function App() {
                   },
                   {
                     key: 'lazycat',
-                    label: `🐱 懒猫云专属抢购 (${lazycatPlans.length})`,
+                    label: `懒猫云专属抢购 (${lazycatPlans.length})`,
                     children: (
                       <Space direction="vertical" size={16} style={{ width: '100%', marginTop: 8 }}>
                         <Alert
@@ -2263,14 +2263,14 @@ export default function App() {
                                   onClick={() => handleOpenCreatePlan('lazycat', { name: '懒猫云3折特惠捡漏', max_price: 50, min_discount_percent: 30 })}
                                   style={{ background: '#fef3c7', borderColor: '#f59e0b', color: '#b45309' }}
                                 >
-                                  🏷️ 3折超值捡漏 (≤¥50)
+                                  3折超值捡漏 (≤¥50)
                                 </Button>
                                 <Button
                                   size="small"
                                   onClick={() => handleOpenCreatePlan('lazycat', { name: '懒猫云20端口配额捡漏', max_price: 60, min_port_count: 20 })}
                                   style={{ background: '#ede9fe', borderColor: '#8b5cf6', color: '#6d28d9' }}
                                 >
-                                  🔌 20端口特惠机
+                                  20端口特惠机
                                 </Button>
                                 <Button
                                   size="small"
@@ -2296,7 +2296,7 @@ export default function App() {
                           title={
                             <Space>
                               <FireOutlined style={{ color: '#7c3aed' }} />
-                              <Text strong>🐱 懒猫云当前匹配候选库存池 ({lazycatMatched.length} 台)</Text>
+                              <Text strong>懒猫云当前匹配候选库存池 ({lazycatMatched.length} 台)</Text>
                             </Space>
                           }
                           bordered={false}
@@ -2309,7 +2309,7 @@ export default function App() {
                   },
                   {
                     key: 'akile',
-                    label: `⚡ Akile 专属抢购 (${akilePlans.length})`,
+                    label: `Akile 专属抢购 (${akilePlans.length})`,
                     children: (
                       <Space direction="vertical" size={16} style={{ width: '100%', marginTop: 8 }}>
                         <Alert
@@ -2322,14 +2322,14 @@ export default function App() {
                                   onClick={() => handleOpenCreatePlan('akile', { name: 'Akile IP正常平价机', max_price: 25, keyword_filter: '正常' })}
                                   style={{ background: '#dcfce7', borderColor: '#22c55e', color: '#15803d' }}
                                 >
-                                  🟢 IP正常平价机 (≤¥25)
+                                  IP正常平价机 (≤¥25)
                                 </Button>
                                 <Button
                                   size="small"
                                   onClick={() => handleOpenCreatePlan('akile', { name: 'Akile 优质大带宽节点', max_price: 35, min_bandwidth: 500, keyword_filter: '正常' })}
                                   style={{ background: '#e0f2fe', borderColor: '#0284c7', color: '#0369a1' }}
                                 >
-                                  🚀 优质大带宽 (≥500M)
+                                  优质大带宽 (≥500M)
                                 </Button>
                                 <Button
                                   size="small"
@@ -2355,7 +2355,7 @@ export default function App() {
                           title={
                             <Space>
                               <FireOutlined style={{ color: '#2563eb' }} />
-                              <Text strong>⚡ Akile 当前匹配候选库存池 ({akileMatched.length} 台)</Text>
+                              <Text strong>Akile 当前匹配候选库存池 ({akileMatched.length} 台)</Text>
                             </Space>
                           }
                           bordered={false}
@@ -2368,7 +2368,7 @@ export default function App() {
                   },
                   {
                     key: 'acck',
-                    label: `🚀 ACCK 专属抢购 (${acckPlans.length})`,
+                    label: `ACCK 专属抢购 (${acckPlans.length})`,
                     children: (
                       <Space direction="vertical" size={16} style={{ width: '100%', marginTop: 8 }}>
                         <Alert
@@ -2381,14 +2381,14 @@ export default function App() {
                                   onClick={() => handleOpenCreatePlan('acck', { name: 'ACCK 三网4837转让捡漏', max_price: 15, keyword_filter: '4837' })}
                                   style={{ background: '#fee2e2', borderColor: '#ef4444', color: '#b91c1c' }}
                                 >
-                                  ⚡ 三网4837转让 (≤¥15)
+                                  三网4837转让 (≤¥15)
                                 </Button>
                                 <Button
                                   size="small"
                                   onClick={() => handleOpenCreatePlan('acck', { name: 'ACCK 9929原生IP捡漏', max_price: 20, keyword_filter: '9929' })}
                                   style={{ background: '#ffedd5', borderColor: '#f97316', color: '#c2410c' }}
                                 >
-                                  🏷️ 9929原生IP (≤¥20)
+                                  9929原生IP (≤¥20)
                                 </Button>
                                 <Button
                                   size="small"
@@ -2414,7 +2414,7 @@ export default function App() {
                           title={
                             <Space>
                               <FireOutlined style={{ color: '#0891b2' }} />
-                              <Text strong>🚀 ACCK 当前匹配候选库存池 ({acckMatched.length} 台)</Text>
+                              <Text strong>ACCK 当前匹配候选库存池 ({acckMatched.length} 台)</Text>
                             </Space>
                           }
                           bordered={false}
@@ -2601,7 +2601,7 @@ export default function App() {
                                             setLoginTargetProvider('akile')
                                             setLoginModalOpen(true)
                                           }}>
-                                            ⚠️ 缓存
+                                            缓存
                                           </Tag>
                                         </Tooltip>
                                       )}
@@ -2930,7 +2930,7 @@ export default function App() {
                               width: 110,
                               render: () => (
                                 <Tag bordered={false} style={{ background: '#f1f5f9', color: '#64748b', fontSize: 11, margin: 0, padding: '1px 6px' }}>
-                                  🔒 官方匿名
+                                  官方匿名
                                 </Tag>
                               )
                             },
@@ -2945,9 +2945,9 @@ export default function App() {
                                   <div>
                                     <div style={{ marginBottom: 2 }}>
                                       {isNormal ? (
-                                        <Tag color="green" style={{ fontWeight: 600, fontSize: 10, margin: 0 }}>🟢 IP正常</Tag>
+                                        <Tag color="green" style={{ fontWeight: 600, fontSize: 10, margin: 0 }}>IP正常</Tag>
                                       ) : isBlocked ? (
-                                        <Tag color="red" style={{ fontWeight: 600, fontSize: 10, margin: 0 }}>🔴 IP被墙</Tag>
+                                        <Tag color="red" style={{ fontWeight: 600, fontSize: 10, margin: 0 }}>IP异常</Tag>
                                       ) : (
                                         <Tag color="default" style={{ fontSize: 10, margin: 0 }}>{r.detail || '未检测'}</Tag>
                                       )}
@@ -3170,7 +3170,7 @@ export default function App() {
                                             setLoginTargetProvider('acck')
                                             setLoginModalOpen(true)
                                           }}>
-                                            ⚠️ 缓存
+                                            缓存
                                           </Tag>
                                         </Tooltip>
                                       )}
@@ -3512,7 +3512,7 @@ export default function App() {
                               sorter: (a, b) => (a.seller_user_id || 0) - (b.seller_user_id || 0),
                               render: (_, r) => r.seller_user_id ? (
                                 <Tag bordered={false} color="blue" style={{ fontSize: 11, margin: 0, padding: '1px 6px' }}>
-                                  👤 UID: {r.seller_user_id}
+                                  UID: {r.seller_user_id}
                                 </Tag>
                               ) : (
                                 <span style={{ fontSize: 11, color: '#94a3b8' }}>平台实名托管</span>
@@ -3732,7 +3732,7 @@ export default function App() {
                                             setLoginTargetProvider('lazycat')
                                             setLoginModalOpen(true)
                                           }}>
-                                            ⚠️ 缓存
+                                            缓存
                                           </Tag>
                                         </Tooltip>
                                       )}
@@ -4100,7 +4100,7 @@ export default function App() {
                                 <div style={{ fontSize: 11 }}>
                                   {r.seller_username ? (
                                     <div>
-                                      <span style={{ color: '#0f172a', fontWeight: 600 }}>👤 {r.seller_username}</span>
+                                      <span style={{ color: '#0f172a', fontWeight: 600 }}>{r.seller_username}</span>
                                       {r.seller_user_id ? <div style={{ fontSize: 10, color: '#94a3b8' }}>UID: {r.seller_user_id}</div> : null}
                                     </div>
                                   ) : (
@@ -4500,7 +4500,7 @@ export default function App() {
             style={{ borderRight: 0, marginTop: 8 }}
             items={[
               { key: 'overview', icon: <DashboardOutlined />, label: '全网资产看板' },
-              { key: 'plans', icon: <AimOutlined />, label: '🎯 智能抢购中心' },
+              { key: 'plans', icon: <AimOutlined />, label: '智能抢购中心' },
               { key: 'akile', icon: <ThunderboltOutlined />, label: 'Akile 专区' },
               { key: 'acck', icon: <RocketOutlined />, label: 'ACCK 专区' },
               { key: 'lazycat', icon: <CloudServerOutlined />, label: '懒猫云专区' },

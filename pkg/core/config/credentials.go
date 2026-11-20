@@ -15,10 +15,16 @@ type ProviderCredential struct {
 	AutoRefresh bool   `json:"auto_refresh"`
 }
 
+type VaultwardenConfig struct {
+	Server   string `json:"server,omitempty"`
+	Username string `json:"username,omitempty"`
+}
+
 type SavedCredentials struct {
-	Akile   *ProviderCredential `json:"akile,omitempty"`
-	LazyCat *ProviderCredential `json:"lazycat,omitempty"`
-	ACCK    *ProviderCredential `json:"acck,omitempty"`
+	Vaultwarden *VaultwardenConfig  `json:"vaultwarden,omitempty"`
+	Akile       *ProviderCredential `json:"akile,omitempty"`
+	LazyCat     *ProviderCredential `json:"lazycat,omitempty"`
+	ACCK        *ProviderCredential `json:"acck,omitempty"`
 }
 
 var (
@@ -114,6 +120,32 @@ func SaveProviderCredentialWithTOTP(provider, username, password, totpSecret str
 		sc.LazyCat = cred
 	case "acck":
 		sc.ACCK = cred
+	}
+
+	data, err := json.MarshalIndent(sc, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	p := getCredentialsPath()
+	_ = os.MkdirAll(filepath.Dir(p), 0755)
+	return os.WriteFile(p, data, 0600)
+}
+
+// SaveVaultwardenConfig 保存默认 Vaultwarden 地址与账号
+func SaveVaultwardenConfig(server, username string) error {
+	credMu.Lock()
+	defer credMu.Unlock()
+
+	sc := loadSavedCredentialsLocked()
+	if sc.Vaultwarden == nil {
+		sc.Vaultwarden = &VaultwardenConfig{}
+	}
+	if server != "" {
+		sc.Vaultwarden.Server = strings.TrimRight(server, "/")
+	}
+	if username != "" {
+		sc.Vaultwarden.Username = strings.TrimSpace(username)
 	}
 
 	data, err := json.MarshalIndent(sc, "", "  ")

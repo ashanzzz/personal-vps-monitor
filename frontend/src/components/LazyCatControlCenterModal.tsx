@@ -197,7 +197,7 @@ export const LazyCatControlCenterModal: React.FC<Props> = ({
                 loading={singboxSyncing}
                 onClick={handleSyncEgress}
               >
-                ⚡ 快捷自愈 / 重载
+                 快捷自愈 / 重载
               </Button>
             )}
 

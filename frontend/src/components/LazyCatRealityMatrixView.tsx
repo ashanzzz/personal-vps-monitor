@@ -66,7 +66,7 @@ export const LazyCatRealityMatrixView: React.FC<Props> = ({ instanceId }) => {
 
         let vlessUrl = ''
         if (publicP > 0 && hostIp) {
-          const nodeTitle = `${node.flag_emoji || '🌐'} ${node.name}`
+          const nodeTitle = `${node.flag_emoji || ''} ${node.name}`
           vlessUrl = `vless://lazycat@${hostIp}:${publicP}?encryption=none&flow=${node.flow || 'xtls-rprx-vision'}&security=reality&sni=${node.sni || 'www.apple.com'}&fp=chrome&type=tcp#${encodeURIComponent(nodeTitle)}`
         }
 
@@ -164,7 +164,7 @@ export const LazyCatRealityMatrixView: React.FC<Props> = ({ instanceId }) => {
                 icon={<ReloadOutlined spin={loading} />}
                 onClick={() => fetchData(true)}
               >
-                🔄 重新探测 Reality 映射
+                 重新探测 Reality 映射
               </Button>
               <Button
                 size="small"
@@ -184,7 +184,7 @@ export const LazyCatRealityMatrixView: React.FC<Props> = ({ instanceId }) => {
                 loading={syncing}
                 onClick={handleSyncEgress}
               >
-                ⚡ 凭据自愈 / 重载 sing-box
+                 凭据自愈 / 重载 sing-box
               </Button>
             </Space>
           </div>
@@ -237,7 +237,7 @@ export const LazyCatRealityMatrixView: React.FC<Props> = ({ instanceId }) => {
               width: 110,
               render: (_, record) => (
                 <Space>
-                  <span style={{ fontSize: 16 }}>{record.flag_emoji || '🌐'}</span>
+                  <span style={{ fontSize: 16 }}>{record.flag_emoji || ''}</span>
                   <Tag color="purple" style={{ fontFamily: 'monospace', fontWeight: 600 }}>
                     {record.outbound_tag || `out-${record.id}`}
                   </Tag>

@@ -160,7 +160,7 @@ export const LazyCatFleetProbeView: React.FC<Props> = () => {
           onClick={() => fetchProbe(true)}
           style={{ background: '#7c3aed', borderColor: '#7c3aed' }}
         >
-          🔄 立即刷新遥测
+           立即刷新遥测
         </Button>
       </div>
 
@@ -213,7 +213,7 @@ export const LazyCatFleetProbeView: React.FC<Props> = () => {
             key: 'region',
             width: 120,
             render: (reg) => (
-              <span style={{ fontSize: 14 }}>{reg || '🌐'}</span>
+              <span style={{ fontSize: 14 }}>{reg || ''}</span>
             ),
           },
           {

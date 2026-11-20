@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -677,4 +678,255 @@ func handleSaveProviderCredentials(w http.ResponseWriter, r *http.Request) {
 		"status":  "success",
 		"message": fmt.Sprintf("服务商 %s 账号凭据已安全保存至凭据库，已启用免密登录与掉线自愈！", prov),
 	})
+}
+
+// POST /api/vendor/vault/ciphers 获取 Vaultwarden 中解密后的所有密码条目摘要
+func handleVaultListCiphers(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Server   string `json:"server"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	server := strings.TrimSpace(req.Server)
+	username := strings.TrimSpace(req.Username)
+	password := req.Password
+
+	// 如果传入了 server 或 username，静默记住为默认值
+	if server != "" || username != "" {
+		_ = config.SaveVaultwardenConfig(server, username)
+	}
+
+	ciphers, err := vault.ListVaultCiphers(r.Context(), server, username, password)
+	if err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("连接 Vaultwarden 失败: %v", err),
+		})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "success",
+		"ciphers": ciphers,
+		"count":   len(ciphers),
+	})
+}
+
+// POST /api/vendor/vault/bind 从密码库中选中具体一条 Cipher，测试登录并绑定至指定厂商
+func handleVaultBindCipher(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider string `json:"provider"`
+		CipherID string `json:"cipher_id"`
+		Server   string `json:"server"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.CipherID == "" || req.Provider == "" {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "请提供有效的 provider 和 cipher_id",
+		})
+		return
+	}
+
+	prov := strings.ToLower(strings.TrimSpace(req.Provider))
+	p, ok := providers.Get(prov)
+	if !ok {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "不支持的服务商: " + prov,
+		})
+		return
+	}
+
+	item, err := vault.GetVaultCipherByID(r.Context(), req.Server, req.Username, req.Password, req.CipherID)
+	if err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("提取条目详情失败: %v", err),
+		})
+		return
+	}
+
+	// 执行真实测试登录与绑定
+	token, expStr, err := executeProviderLoginTest(r.Context(), prov, p, item.Username, item.Password, item.TOTPSecret)
+	if err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("测试登录失败: %v", err),
+		})
+		return
+	}
+
+	// 登录测试成功，持久化保存凭据
+	_ = config.SaveProviderCredentialWithTOTP(prov, item.Username, item.Password, item.TOTPSecret, true)
+	if req.Server != "" || req.Username != "" {
+		_ = config.SaveVaultwardenConfig(req.Server, req.Username)
+	}
+
+	audit.Record("security", "vendor.vault_bind", prov, map[string]interface{}{
+		"cipher_id": req.CipherID,
+		"name":      item.Name,
+		"username":  config.MaskUsername(item.Username),
+		"has_totp":  item.TOTPSecret != "",
+	}, "SUCCESS", fmt.Sprintf("成功从 Vaultwarden 绑定条目 [%s] 至服务商 %s 并完成测试登录", item.Name, prov), 0)
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"status":          "success",
+		"message":         fmt.Sprintf("成功关联条目 [%s]！测试登录通过，已开启免密自愈。", item.Name),
+		"token":           token,
+		"expires_at":      expStr,
+		"username_masked": config.MaskUsername(item.Username),
+	})
+}
+
+// POST /api/vendor/test-and-save 手动账号密码 + 2FA 原始代码 (TOTP Secret) 测试并保存
+func handleVendorTestAndSave(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider    string `json:"provider"`
+		Username    string `json:"username"`
+		Password    string `json:"password"`
+		TOTPSecret  string `json:"totp_secret"`
+		AutoRefresh *bool  `json:"auto_refresh"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "无效的请求体"})
+		return
+	}
+
+	prov := strings.ToLower(strings.TrimSpace(req.Provider))
+	p, ok := providers.Get(prov)
+	if !ok {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "不支持的服务商: " + prov})
+		return
+	}
+
+	username := strings.TrimSpace(req.Username)
+	password := req.Password
+	totpSecret := strings.TrimSpace(req.TOTPSecret)
+	autoRefresh := true
+	if req.AutoRefresh != nil {
+		autoRefresh = *req.AutoRefresh
+	}
+
+	if username == "" || password == "" {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "用户名和密码不能为空"})
+		return
+	}
+
+	// 执行真实测试登录
+	token, expStr, err := executeProviderLoginTest(r.Context(), prov, p, username, password, totpSecret)
+	if err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("测试登录失败: %v", err),
+		})
+		return
+	}
+
+	// 测试登录成功，保存至凭据库
+	_ = config.SaveProviderCredentialWithTOTP(prov, username, password, totpSecret, autoRefresh)
+
+	audit.Record("security", "vendor.test_and_save", prov, map[string]interface{}{
+		"username": config.MaskUsername(username),
+		"has_totp": totpSecret != "",
+	}, "SUCCESS", fmt.Sprintf("服务商 %s 手动测试登录成功并已安全存入凭据库", prov), 0)
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"status":          "success",
+		"message":         fmt.Sprintf("测试登录成功！Token 已自动更新生效，有效期至 %s", expStr),
+		"token":           token,
+		"expires_at":      expStr,
+		"username_masked": config.MaskUsername(username),
+	})
+}
+
+// executeProviderLoginTest 统一核心：向服务商发起真实测试登录验证
+func executeProviderLoginTest(ctx context.Context, provider string, p providers.Provider, username, password, totpSecret string) (token string, expStr string, err error) {
+	switch provider {
+	case "akile":
+		ak, ok := p.(*akile.AkileProvider)
+		if !ok {
+			return "", "", errors.New("Akile 驱动异常")
+		}
+		gaCode := ""
+		if totpSecret != "" {
+			code, err := vault.GenerateTOTP(totpSecret)
+			if err != nil {
+				return "", "", fmt.Errorf("2FA 原始代码计算动态码失败: %w", err)
+			}
+			gaCode = code
+		}
+		tok, need2FA, msg, err := ak.Login(ctx, username, password, gaCode)
+		if need2FA {
+			return "", "", errors.New("该账号已开启两步验证，请在 2FA 原始代码框中填入密钥 (TOTP Secret) 进行绑定")
+		}
+		if err != nil {
+			return "", "", fmt.Errorf("Akile 登录失败: %w", err)
+		}
+		if tok == "" {
+			return "", "", fmt.Errorf("登录未返回有效 Token: %s", msg)
+		}
+
+		_ = config.SaveTokens(tok, "", "", "")
+		config.Global.AkileToken = tok
+		ak.SetToken(tok)
+
+		_, expTime, ok := ParseJWTExp(tok)
+		if ok && !expTime.IsZero() {
+			expStr = expTime.Format("2006-01-02 15:04:05")
+		}
+		return tok, expStr, nil
+
+	case "lazycat":
+		lz, ok := p.(*lazycat.LazyCatProvider)
+		if !ok {
+			return "", "", errors.New("懒猫云驱动异常")
+		}
+		gaCode := ""
+		if totpSecret != "" {
+			if code, err := vault.GenerateTOTP(totpSecret); err == nil {
+				gaCode = code
+			}
+		}
+		tok, need2FA, msg, err := lz.Login(ctx, username, password, gaCode)
+		if need2FA {
+			return "", "", errors.New("该账号已开启两步验证，请输入 2FA 原始代码密钥 (TOTP Secret)")
+		}
+		if err != nil {
+			return "", "", fmt.Errorf("懒猫云登录失败: %w", err)
+		}
+		if tok == "" {
+			return "", "", fmt.Errorf("登录未返回有效 Token: %s", msg)
+		}
+
+		_ = config.SaveTokens("", "", tok, "")
+		config.Global.LazyCatToken = tok
+		lz.SetToken(tok)
+
+		_, expTime, ok := ParseJWTExp(tok)
+		if ok && !expTime.IsZero() {
+			expStr = expTime.Format("2006-01-02 15:04:05")
+		}
+		return tok, expStr, nil
+
+	case "acck":
+		acckP, ok := p.(*acck.ACCKProvider)
+		if !ok {
+			return "", "", errors.New("ACCK 驱动异常")
+		}
+		tok := password
+		if strings.HasPrefix(password, "ey") || len(password) > 30 {
+			acckP.SetToken(tok)
+			if err := acckP.VerifyToken(ctx); err != nil {
+				return "", "", fmt.Errorf("ACCK Token 校验失败: %w", err)
+			}
+			_ = config.SaveTokens("", tok, "", "")
+			config.Global.ACCKToken = tok
+			_, expTime, ok := ParseJWTExp(tok)
+			if ok && !expTime.IsZero() {
+				expStr = expTime.Format("2006-01-02 15:04:05")
+			}
+			return tok, expStr, nil
+		}
+		return "", "", errors.New("ACCK 控制台受到 Cloudflare 人机防护，请在密码库条目的密码字段中填入 JWT Token，或直接在 Token 选项卡中填入")
+	}
+
+	return "", "", fmt.Errorf("未知服务商: %s", provider)
 }
