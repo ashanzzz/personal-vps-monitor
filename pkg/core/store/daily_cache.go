@@ -13,6 +13,7 @@ import (
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/audit"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/config"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
+	"github.com/ashanzzz/personal-vps-monitor/pkg/providers/acck"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers/akile"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers/lazycat"
 )
@@ -115,7 +116,7 @@ func SyncAllInstancesDaily(ctx context.Context, force bool) (*DailyInstancesCach
 		if err != nil {
 			log.Printf("[DailySync] 服务商 %s 抓取失败: %v, 尝试自动续期/重登...", id, err)
 			// 尝试自动重登
-			recovered := tryAutoRecoverProvider(ctx, id)
+			recovered := TryAutoRecoverProvider(ctx, id)
 			if recovered {
 				insts, err = im.ListInstances(ctx)
 			}
@@ -166,31 +167,62 @@ func SyncAllInstancesDaily(ctx context.Context, force bool) (*DailyInstancesCach
 	return newCache, nil
 }
 
-// tryAutoRecoverProvider 尝试为失效的 Provider 自动续期或免密重登
-func tryAutoRecoverProvider(ctx context.Context, providerID string) bool {
+// TryAutoRecoverProvider 尝试为失效的 Provider 自动续期或免密重登 (全流程自动自愈)
+func TryAutoRecoverProvider(ctx context.Context, providerID string) bool {
 	p, ok := providers.Get(providerID)
 	if !ok {
 		return false
 	}
 
+	creds := config.LoadSavedCredentials()
+
 	switch providerID {
 	case "akile":
 		if ak, isAk := p.(*akile.AkileProvider); isAk {
+			// 1. 优先尝试 Token 快速续期
 			if newTok, err := ak.RefreshToken(ctx); err == nil && newTok != "" {
 				_ = config.SaveTokens(newTok, "", "", "")
 				config.Global.AkileToken = newTok
 				ak.SetToken(newTok)
+				audit.Record("security", "akile.auto_refresh", "akile", nil, "SUCCESS", "自动续期 Akile Token 成功", 0)
+				log.Printf("[AutoRecover] Akile Token 快速续期成功")
 				return true
+			}
+			// 2. 续期失败 (如 401 完全过期)，尝试使用凭据库账号密码重新登录
+			if creds.Akile != nil && creds.Akile.Username != "" && creds.Akile.Password != "" {
+				if newTok, need2FA, _, err := ak.Login(ctx, creds.Akile.Username, creds.Akile.Password, ""); err == nil && newTok != "" && !need2FA {
+					_ = config.SaveTokens(newTok, "", "", "")
+					config.Global.AkileToken = newTok
+					ak.SetToken(newTok)
+					audit.Record("security", "akile.auto_relogin", "akile", map[string]interface{}{"username": creds.Akile.Username}, "SUCCESS", "检测到 Akile Token 掉线，已自动依据凭据库免密重新登录并恢复！", 0)
+					log.Printf("[AutoRecover] Akile 自动免密重新登录成功，Token 已更新")
+					return true
+				}
 			}
 		}
 	case "lazycat":
-		creds := config.LoadSavedCredentials()
-		if creds.LazyCat != nil && creds.LazyCat.Password != "" {
-			if lz, isLz := p.(*lazycat.LazyCatProvider); isLz {
-				if tok, _, _, err := lz.Login(ctx, creds.LazyCat.Username, creds.LazyCat.Password, ""); err == nil && tok != "" {
+		if lz, isLz := p.(*lazycat.LazyCatProvider); isLz {
+			if creds.LazyCat != nil && creds.LazyCat.Username != "" && creds.LazyCat.Password != "" {
+				if tok, need2FA, _, err := lz.Login(ctx, creds.LazyCat.Username, creds.LazyCat.Password, ""); err == nil && tok != "" && !need2FA {
 					_ = config.SaveTokens("", "", tok, "")
 					config.Global.LazyCatToken = tok
 					lz.SetToken(tok)
+					audit.Record("security", "lazycat.auto_relogin", "lazycat", map[string]interface{}{"username": creds.LazyCat.Username}, "SUCCESS", "检测到懒猫云 Token 掉线，已自动依据凭据库免密重新登录并恢复！", 0)
+					log.Printf("[AutoRecover] 懒猫云自动免密重新登录成功，Token 已更新")
+					return true
+				}
+			}
+		}
+	case "acck":
+		// 如果 ACCK 凭据库配置了备用 Token
+		if acckP, isAcck := p.(*acck.ACCKProvider); isAcck {
+			if creds.ACCK != nil && creds.ACCK.Password != "" {
+				acckP.SetToken(creds.ACCK.Password)
+				if err := acckP.VerifyToken(ctx); err == nil {
+					_ = config.SaveTokens("", creds.ACCK.Password, "", "")
+					config.Global.ACCKToken = creds.ACCK.Password
+					audit.Record("security", "acck.auto_relogin", "acck", nil, "SUCCESS", "检测到 ACCK 凭据掉线，已自动从凭据库恢复并校验通过", 0)
+					log.Printf("[AutoRecover] ACCK 凭据自动校验并恢复成功")
 					return true
 				}
 			}

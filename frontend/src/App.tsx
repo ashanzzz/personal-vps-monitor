@@ -20,7 +20,8 @@ import {
 import { api, setToken, getToken, clearToken, setUnauthorizedHandler } from './api'
 import type {
   Instance, PortMapping, MarketItem, AuditEntry, UnraidStatusReport,
-  TokensConfig, PurchasePlan, SchedulerStatus, MarketStats, StoreProductItem, MatchedItemPreview
+  TokensConfig, PurchasePlan, SchedulerStatus, MarketStats, StoreProductItem, MatchedItemPreview,
+  VendorHealthSummary
 } from './api'
 import { LazyCatControlCenterModal } from './components/LazyCatControlCenterModal'
 import { ProviderLoginModal } from './components/ProviderLoginModal'
@@ -36,6 +37,22 @@ function formatTime(isoStr?: string): string {
     const d = new Date(isoStr)
     if (isNaN(d.getTime())) return isoStr
     return d.toLocaleTimeString('zh-CN', { hour12: false })
+  } catch {
+    return isoStr
+  }
+}
+
+// 格式化完整时间 YYYY-MM-DD HH:mm:ss
+function formatFullTime(isoStr?: string): string {
+  if (!isoStr) return '未单独同步'
+  try {
+    const d = new Date(isoStr)
+    if (isNaN(d.getTime())) return isoStr
+    const year = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    const time = d.toLocaleTimeString('zh-CN', { hour12: false })
+    return `${year}-${month}-${day} ${time}`
   } catch {
     return isoStr
   }
@@ -222,6 +239,161 @@ export default function App() {
   const [savingTokens, setSavingTokens] = useState(false)
   const [providerErrors, setProviderErrors] = useState<Record<string, string>>({})
 
+  // 极速秒级鉴权健康与单服务独立同步状态
+  const [vendorHealth, setVendorHealth] = useState<VendorHealthSummary | null>(null)
+  const [singleSyncing, setSingleSyncing] = useState<string | null>(null)
+  const [quickLogging, setQuickLogging] = useState<string | null>(null)
+
+  const loadVendorHealth = useCallback(async () => {
+    try {
+      const res = await api.getVendorHealthSummary()
+      setVendorHealth(res)
+    } catch {
+      // 容错不阻断
+    }
+  }, [])
+
+  const handleSingleSync = async (provider: string) => {
+    try {
+      setSingleSyncing(provider)
+      const res = await api.vendorSingleSync(provider)
+      message.success(`${provider.toUpperCase()} 服务同步完成 (获取 ${res.count} 台)`)
+      loadVendorHealth()
+      loadData()
+    } catch (err: any) {
+      message.error(err.response?.data?.error || err.message || `同步 ${provider} 失败`)
+    } finally {
+      setSingleSyncing(null)
+    }
+  }
+
+  const handleQuickLogin = async (provider: string) => {
+    try {
+      setQuickLogging(provider)
+      const res = await api.vendorQuickLogin(provider)
+      if (res.need_2fa) {
+        setLoginTargetProvider(provider as any)
+        setLoginModalOpen(true)
+        message.info('检测到二次验证，请输入 6 位 2FA 动态码')
+        return
+      }
+      message.success(res.message || `${provider} 免密登录成功！Token 已自动更新生效`)
+      loadVendorHealth()
+      loadData()
+    } catch (err: any) {
+      setLoginTargetProvider(provider as any)
+      setLoginModalOpen(true)
+    } finally {
+      setQuickLogging(null)
+    }
+  }
+
+  // 渲染服务专属独立同步状态栏
+  const renderProviderHeader = (providerKey: 'akile' | 'lazycat' | 'acck', providerTitle: string) => {
+    const health = vendorHealth?.providers?.[providerKey]
+    const syncTime = health?.last_synced_at || refreshTimes?.[providerKey]
+    const isSyncing = singleSyncing === providerKey
+    const isLogging = quickLogging === providerKey
+
+    const isValid = health?.token_valid && !health?.is_expired
+    const checkin = health?.today_checkin
+    const checkinSuccess = checkin?.status === 'success'
+    const checkinRetrying = checkin?.status === 'retrying' || (checkin?.next_retry_at && checkin?.next_retry_at !== '0001-01-01 00:00:00' && checkin?.next_retry_at !== '')
+    const checkinNextRetry = checkin?.next_retry_at
+    const checkinErr = checkin?.message
+    const checkinTime = checkin?.success_at || checkin?.last_attempt_at
+
+    return (
+      <Card
+        size="small"
+        bordered={false}
+        style={{
+          background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
+          borderRadius: 10,
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.02)'
+        }}
+      >
+        <Row gutter={[16, 12]} align="middle" justify="space-between">
+          <Col xs={24} md={15}>
+            <Space size={10} wrap align="center">
+              <span style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>
+                {providerTitle}
+              </span>
+              <Tag color={isValid ? 'green' : 'error'} style={{ margin: 0, padding: '2px 8px' }}>
+                {isValid ? '● 鉴权有效 (秒级就绪)' : '● 鉴权失效 (自动重登自愈)'}
+              </Tag>
+              {health?.has_credentials && (
+                <Tag color="cyan" style={{ margin: 0 }}>
+                  凭据库已存 ({health.username_masked || '免密'})
+                </Tag>
+              )}
+              {checkinSuccess ? (
+                <Tag color="success" icon={<CheckCircleOutlined />} style={{ margin: 0 }}>
+                  今日已打卡 {checkinTime ? `(${formatTime(checkinTime)})` : ''}
+                </Tag>
+              ) : checkinRetrying ? (
+                <Tooltip title={checkinErr ? `重试原因: ${checkinErr}` : '30分钟后自动重试'}>
+                  <Tag color="processing" icon={<ClockCircleOutlined />} style={{ margin: 0 }}>
+                    打卡重试中 (下次: {checkinNextRetry ? formatTime(checkinNextRetry) : '稍后'})
+                  </Tag>
+                </Tooltip>
+              ) : (
+                <Tag color="default" style={{ margin: 0 }}>
+                  打卡: 每日 08:00
+                </Tag>
+              )}
+            </Space>
+            <div style={{ marginTop: 8, fontSize: 13, color: '#475569', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 600, color: '#334155' }}>🕒 本服务独立同步时间:</span>
+              <Tag color={syncTime ? 'geekblue' : 'default'} style={{ fontFamily: 'monospace', fontSize: 13, padding: '2px 8px' }}>
+                {syncTime ? formatFullTime(syncTime) : '尚未单独同步 (点击右侧立即获取)'}
+              </Tag>
+              <span style={{ color: '#94a3b8', fontSize: 12 }}>
+                (按需实时自官方抓取，不阻塞其它服务)
+              </span>
+            </div>
+          </Col>
+          <Col xs={24} md={9} style={{ textAlign: 'right' }}>
+            <Space size={8} wrap>
+              {health?.has_credentials && (
+                <Button
+                  size="small"
+                  type="primary"
+                  ghost
+                  icon={<ThunderboltOutlined />}
+                  loading={isLogging}
+                  onClick={() => handleQuickLogin(providerKey)}
+                >
+                  ⚡ 一键免密登录
+                </Button>
+              )}
+              <Button
+                size="small"
+                type="primary"
+                icon={<SyncOutlined spin={isSyncing} />}
+                loading={isSyncing}
+                onClick={() => handleSingleSync(providerKey)}
+              >
+                从官网获取最新
+              </Button>
+              <Button
+                size="small"
+                icon={<SettingOutlined />}
+                onClick={() => {
+                  setLoginTargetProvider(providerKey)
+                  setLoginModalOpen(true)
+                }}
+              >
+                凭据管理
+              </Button>
+            </Space>
+          </Col>
+        </Row>
+      </Card>
+    )
+  }
+
   // 厂商快捷登录与凭证录入 Modal
   const [loginModalOpen, setLoginModalOpen] = useState(false)
   const [loginTargetProvider, setLoginTargetProvider] = useState<'akile' | 'lazycat' | 'acck'>('akile')
@@ -274,7 +446,8 @@ export default function App() {
     try {
       const [
         instRes, marketRes, storeRes, auditRes, unraidRes,
-        tokensRes, plansRes, schedRes, statsRes, timesRes
+        tokensRes, plansRes, schedRes, statsRes, timesRes,
+        vendorHealthRes
       ] = await Promise.all([
         api.getInstances().catch(() => ({ total: 0, instances: [], provider_refresh_times: {}, provider_errors: {}, last_synced_at: undefined, next_scheduled_sync: undefined })),
         api.getMarket().catch(() => ({ total: 0, items: [], provider_refresh_times: {}, provider_errors: {} })),
@@ -286,7 +459,10 @@ export default function App() {
         api.getSchedulerStatus().catch(() => null),
         api.getMarketStats().catch(() => null),
         api.getRefreshTimes().catch(() => ({})),
+        api.getVendorHealthSummary().catch(() => null),
       ])
+
+      if (vendorHealthRes) setVendorHealth(vendorHealthRes)
 
       setInstances(instRes.instances || [])
       setMarketItems(marketRes.items || [])
@@ -582,10 +758,13 @@ export default function App() {
   useEffect(() => {
     if (authed) {
       loadData()
-      const timer = setInterval(loadScheduler, 10000)
+      const timer = setInterval(() => {
+        loadScheduler()
+        loadVendorHealth()
+      }, 10000)
       return () => clearInterval(timer)
     }
-  }, [authed, loadData, loadScheduler])
+  }, [authed, loadData, loadScheduler, loadVendorHealth])
 
   if (!authed) {
     return (
@@ -2236,6 +2415,7 @@ export default function App() {
 
         return (
           <Space direction="vertical" size={20} style={{ width: '100%' }}>
+            {renderProviderHeader('akile', 'Akile Cloud')}
             <Card bordered={false} className="vps-card">
               <Tabs
                 defaultActiveKey="1"
@@ -2823,6 +3003,7 @@ export default function App() {
 
         return (
           <Space direction="vertical" size={20} style={{ width: '100%' }}>
+            {renderProviderHeader('acck', 'ACCK 专区')}
             <Card bordered={false} className="vps-card">
               <Tabs
                 defaultActiveKey="3"
@@ -3375,6 +3556,7 @@ export default function App() {
 
         return (
           <Space direction="vertical" size={20} style={{ width: '100%' }}>
+            {renderProviderHeader('lazycat', 'LazyCat 懒猫云')}
             <Card bordered={false} className="vps-card">
               <Tabs
                 defaultActiveKey="1"

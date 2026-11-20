@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -24,25 +25,63 @@ var (
 )
 
 func getCredentialsPath() string {
+	paths := []string{"/app/data/credentials.json", "./data/credentials.json"}
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	if _, err := os.Stat("/app/data"); err == nil {
+		return "/app/data/credentials.json"
+	}
 	_ = os.MkdirAll("./data", 0755)
 	return "./data/credentials.json"
 }
 
-// LoadSavedCredentials 读取持久化保存的账号密码凭据
+// MaskUsername 脱敏用户名展示 (例如 ashanzzz -> ash***)
+func MaskUsername(u string) string {
+	u = strings.TrimSpace(u)
+	if len(u) <= 3 {
+		return "***"
+	}
+	return u[:3] + "***"
+}
+
+// LoadSavedCredentials 读取持久化保存的账号密码凭据 (支持 credentials.json 与环境变量回退)
 func LoadSavedCredentials() *SavedCredentials {
 	credMu.RLock()
 	defer credMu.RUnlock()
 
 	p := getCredentialsPath()
 	b, err := os.ReadFile(p)
-	if err != nil || len(b) == 0 {
-		return &SavedCredentials{}
+	var sc SavedCredentials
+	if err == nil && len(b) > 0 {
+		_ = json.Unmarshal(b, &sc)
 	}
 
-	var sc SavedCredentials
-	if err := json.Unmarshal(b, &sc); err != nil {
-		return &SavedCredentials{}
+	// 环境变量回退补充
+	if (sc.Akile == nil || sc.Akile.Password == "") && os.Getenv("AKILE_PASSWORD") != "" {
+		sc.Akile = &ProviderCredential{
+			Username:    os.Getenv("AKILE_USERNAME"),
+			Password:    os.Getenv("AKILE_PASSWORD"),
+			AutoRefresh: true,
+		}
 	}
+	if (sc.LazyCat == nil || sc.LazyCat.Password == "") && os.Getenv("LAZYCAT_PASSWORD") != "" {
+		sc.LazyCat = &ProviderCredential{
+			Username:    os.Getenv("LAZYCAT_USERNAME"),
+			Password:    os.Getenv("LAZYCAT_PASSWORD"),
+			AutoRefresh: true,
+		}
+	}
+	if (sc.ACCK == nil || sc.ACCK.Password == "") && os.Getenv("ACCK_PASSWORD") != "" {
+		sc.ACCK = &ProviderCredential{
+			Username:    os.Getenv("ACCK_USERNAME"),
+			Password:    os.Getenv("ACCK_PASSWORD"),
+			AutoRefresh: true,
+		}
+	}
+
 	return &sc
 }
 

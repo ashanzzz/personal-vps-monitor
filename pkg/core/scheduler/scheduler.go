@@ -52,6 +52,7 @@ func Init() *Scheduler {
 		go GlobalScheduler.startLoop()
 		go StartTokenLifecycleRefresher(context.Background())
 		go store.StartDailyCacheCron(context.Background())
+		go StartCheckinScheduler(context.Background())
 	})
 	return GlobalScheduler
 }

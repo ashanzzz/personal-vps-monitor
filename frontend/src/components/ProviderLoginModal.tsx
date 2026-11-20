@@ -15,6 +15,7 @@ import {
   KeyOutlined,
   SafetyCertificateOutlined,
   InfoCircleOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons'
 import { api } from '../api'
 
@@ -33,11 +34,32 @@ export const ProviderLoginModal: React.FC<Props> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'password' | 'token'>('password')
   const [submitting, setSubmitting] = useState(false)
+  const [quickLogging, setQuickLogging] = useState(false)
   const [need2FA, setNeed2FA] = useState(false)
   const [twoFaPrompt, setTwoFaPrompt] = useState('')
 
   const [pwdForm] = Form.useForm()
   const [tokenForm] = Form.useForm()
+
+  const handleQuickLogin = async () => {
+    try {
+      setQuickLogging(true)
+      const res = await api.vendorQuickLogin(provider)
+      if (res.need_2fa) {
+        setNeed2FA(true)
+        setTwoFaPrompt(res.message || '检测到二次验证，请输入 6 位动态验证码后重新点击')
+        message.info('请输入 6 位 2FA 动态码')
+        return
+      }
+      message.success(res.message || '免密登录成功！Token 已自动更新')
+      onSuccess?.()
+      onClose()
+    } catch (err: any) {
+      message.warning(err.response?.data?.error || err.message || '未保存凭据或凭据失效，请在下方输入一次')
+    } finally {
+      setQuickLogging(false)
+    }
+  }
 
   useEffect(() => {
     if (open) {
@@ -201,6 +223,23 @@ export const ProviderLoginModal: React.FC<Props> = ({
                 ),
                 children: (
                   <div>
+                    <Button
+                      type="primary"
+                      icon={<ThunderboltOutlined />}
+                      loading={quickLogging}
+                      onClick={handleQuickLogin}
+                      block
+                      style={{ background: '#059669', borderColor: '#059669', height: 40, fontWeight: 600, marginBottom: 16 }}
+                    >
+                      ⚡ 从凭据库一键免密登录 (1秒完成)
+                    </Button>
+                    <Alert
+                      type="info"
+                      showIcon
+                      message="自动掉线自愈保护"
+                      description="勾选保存凭据后，系统在日常打卡、资产同步或突发抢购中若遇 401 掉线，将全自动后台重登续期，无需人工介入。"
+                      style={{ marginBottom: 16 }}
+                    />
                     {need2FA && (
                       <Alert
                         message="二次验证 (2FA)"

@@ -38,9 +38,8 @@ func ProbeUnraidContainers(ctx context.Context) AutoDiscoveryReport {
 		Method string
 		Note   string
 	}{
-		{"Bitwarden 凭据保险箱 (bw serve)", "http://192.168.8.11:8087/status", "GET", "用于自动同步 Akile/ACCK/懒猫云凭证"},
-		{"Unraid 本地网关 (Sing-box)", "http://192.168.8.11:9090", "GET", "宿主网络代理核心"},
-		{"Sub-Store 订阅中继", "http://192.168.8.11:3000", "GET", "订阅节点汇聚"},
+		{"Vaultwarden 凭据保险箱", "http://192.168.8.11:4743/alive", "GET", "用户主密码与 VPS 凭据主存储 (容器 7b36826ed52a)"},
+		{"Unraid 本地网关 (Sing-box)", "http://192.168.8.11:9090", "GET", "宿主网络代理核心 (Clash/Mihomo 端口 7890 / API 9090)"},
 	}
 
 	client := &http.Client{Timeout: 1500 * time.Millisecond}
@@ -58,11 +57,15 @@ func ProbeUnraidContainers(ctx context.Context) AutoDiscoveryReport {
 			resp, err := client.Do(req)
 			if err == nil {
 				online = (resp.StatusCode < 500)
-				detail = fmt.Sprintf("在线 (HTTP %d)", resp.StatusCode)
+				if strings.Contains(t.URL, ":4743") {
+					detail = fmt.Sprintf("在线 (HTTP %d - Vaultwarden 正常就绪)", resp.StatusCode)
+				} else {
+					detail = fmt.Sprintf("在线 (HTTP %d)", resp.StatusCode)
+				}
 				_ = resp.Body.Close()
 			} else {
-				if strings.Contains(t.URL, ":8087") {
-					detail = "容器未运行，已自动使用本地 AppData 凭据卷"
+				if strings.Contains(t.URL, ":4743") {
+					detail = "未连接/离线 (请检查 192.168.8.11:4743)"
 				} else {
 					detail = "未连接/离线"
 				}
@@ -81,10 +84,12 @@ func ProbeUnraidContainers(ctx context.Context) AutoDiscoveryReport {
 
 	// 自动扫描本地持久化目录中的凭据
 	tokenFiles := []string{
+		"/app/data/credentials.json",
+		"./data/credentials.json",
 		"/app/data/lazycat_token.txt",
 		"/mnt/user/appdata/akile-monitor/lazycat_token.txt",
 		"/app/data/.env",
-		"/mnt/user/appdata/akile-monitor/.env",
+		"/mnt/user/appdata/personal-vps-monitor/.env",
 		"./data/admin.json",
 	}
 

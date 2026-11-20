@@ -310,6 +310,34 @@ export interface UnraidStatusReport {
   credentials_found: string[]
 }
 
+export interface ProviderHealthDetail {
+  provider_id: 'akile' | 'lazycat' | 'acck'
+  configured: boolean
+  token_valid: boolean
+  is_expired: boolean
+  expires_at?: string
+  seconds_left: number
+  has_credentials: boolean
+  username_masked?: string
+  auto_refresh: boolean
+  last_synced_at?: string
+  today_checkin?: {
+    status: string
+    last_attempt_at?: string
+    success_at?: string
+    retry_count?: number
+    next_retry_at?: string
+    message?: string
+    reward?: string
+    account?: string
+  }
+}
+
+export interface VendorHealthSummary {
+  providers: Record<string, ProviderHealthDetail>
+  refreshed_at: string
+}
+
 export interface TokensConfig {
   akile_configured: boolean
   akile_token_masked: string
@@ -430,4 +458,13 @@ export const api = {
 
   // Unraid 生态探测与自动连接状态
   getUnraidStatus: () => http.get<UnraidStatusReport>('/api/system/unraid-status').then(r => r.data),
+
+  // 极速秒级鉴权健康与各服务独立状态
+  getVendorHealthSummary: () => http.get<VendorHealthSummary>('/api/vendor/health-summary').then(r => r.data),
+  vendorQuickLogin: (provider: string, gaCode?: string) =>
+    http.post<{ status: string; message: string; need_2fa?: boolean; token?: string; expires_at?: string }>(`/api/vendor/quick-login/${provider}`, { ga_code: gaCode }).then(r => r.data),
+  vendorSingleSync: (provider: string) =>
+    http.post<{ status: string; provider_id: string; instances: Instance[]; count: number; last_synced_at: string }>(`/api/vendor/sync/${provider}`).then(r => r.data),
+  saveVendorCredentials: (data: { provider: string; username: string; password: string; auto_refresh: boolean }) =>
+    http.post<{ status: string; message: string }>('/api/vendor/credentials/save', data).then(r => r.data),
 }

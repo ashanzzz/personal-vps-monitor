@@ -134,6 +134,12 @@ func NewRouter() http.Handler {
 			r.Post("/lazycat/login", handleLazyCatLogin)
 			r.Post("/acck/login", handleAcckLogin)
 
+			// 极速鉴权健康摘要、一键免密登录、单服务独立同步与凭据管理
+			r.Get("/vendor/health-summary", handleVendorHealthSummary)
+			r.Post("/vendor/quick-login/{provider}", handleVendorQuickLogin)
+			r.Post("/vendor/sync/{provider}", handleVendorSingleSync)
+			r.Post("/vendor/credentials/save", handleSaveProviderCredentials)
+
 			// 懒猫云特化端点
 			r.Route("/lazycat", func(r chi.Router) {
 				r.Get("/instances", handleLazyCatInstances)
@@ -215,6 +221,14 @@ func handleUnifiedInstances(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func isAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "401") || strings.Contains(s, "token") || strings.Contains(s, "unauthorized") || strings.Contains(s, "token无效")
+}
+
 func handleUnifiedMarket(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	targetProvider := r.URL.Query().Get("provider")
@@ -231,6 +245,16 @@ func handleUnifiedMarket(w http.ResponseWriter, r *http.Request) {
 			pCtx, pCancel := context.WithTimeout(ctx, 15*time.Second)
 			items, err := ml.ListMarketItems(pCtx)
 			pCancel()
+
+			// 遇到 401 / Token 失效时触发自动免密重登自愈
+			if err != nil && isAuthError(err) {
+				log.Printf("[Market] provider %s encountered auth error: %v, triggering auto-relogin...", p.ID(), err)
+				if store.TryAutoRecoverProvider(ctx, p.ID()) {
+					pCtx2, pCancel2 := context.WithTimeout(ctx, 15*time.Second)
+					items, err = ml.ListMarketItems(pCtx2)
+					pCancel2()
+				}
+			}
 
 			if err != nil {
 				log.Printf("[Market] provider %s failed to list live market: %v (falling back to cached store)", p.ID(), err)
@@ -344,6 +368,16 @@ func handleUnifiedStore(w http.ResponseWriter, r *http.Request) {
 			pCtx, pCancel := context.WithTimeout(r.Context(), 8*time.Second)
 			items, err := sl.ListStoreProducts(pCtx)
 			pCancel()
+
+			if err != nil && isAuthError(err) {
+				log.Printf("[Store] provider %s encountered auth error: %v, triggering auto-relogin...", p.ID(), err)
+				if store.TryAutoRecoverProvider(r.Context(), p.ID()) {
+					pCtx2, pCancel2 := context.WithTimeout(r.Context(), 8*time.Second)
+					items, err = sl.ListStoreProducts(pCtx2)
+					pCancel2()
+				}
+			}
+
 			if err == nil {
 				products = append(products, items...)
 				store.RecordRefreshTime("store:" + p.ID())
