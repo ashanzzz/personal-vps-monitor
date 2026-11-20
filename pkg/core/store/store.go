@@ -43,6 +43,7 @@ type PurchasePlan struct {
 	RegionKeyword      string               `json:"region_keyword"`       // 如 "HK", "日本", "tw", "us"
 	MaxPrice           float64              `json:"max_price"`            // 售价最高限价
 	MaxRenewalPrice    float64              `json:"max_renewal_price"`    // 续费价最高限价 (0 表示不限)
+	CycleFilter        string               `json:"cycle_filter,omitempty"` // 周期过滤 ("all", "monthly", "yearly", "other")
 	MinDiscountPercent float64              `json:"min_discount_percent"` // 最低折扣 (如 30 代表 3折)
 	MinPortCount       int                  `json:"min_port_count"`       // 最少端口数 (针对懒猫云)
 	MinBandwidth       int                  `json:"min_bandwidth"`        // 最低带宽 Mbps
@@ -70,6 +71,8 @@ type MarketRecord struct {
 	PlatformFee     float64 `json:"platform_fee,omitempty"`
 	FlowUsed        string  `json:"flow_used,omitempty"`
 	Cycle           int     `json:"cycle,omitempty"`
+	CycleName       string  `json:"cycle_name,omitempty"`
+	MonthlyPrice    float64 `json:"monthly_price,omitempty"`
 	Location        string  `json:"location"`
 	Bandwidth       string  `json:"bandwidth"`
 	ConfigDesc      string  `json:"config_desc"`
@@ -302,6 +305,11 @@ func UpdatePlanMap(id string, update map[string]interface{}) (*PurchasePlan, err
 			existing.MaxRenewalPrice = num
 		}
 	}
+	if v, exists := update["cycle_filter"]; exists {
+		if s, ok := v.(string); ok {
+			existing.CycleFilter = s
+		}
+	}
 	if v, exists := update["min_discount_percent"]; exists {
 		if num, ok := toFloat(v); ok {
 			existing.MinDiscountPercent = num
@@ -398,6 +406,9 @@ func UpdatePlan(id string, update *PurchasePlan) (*PurchasePlan, error) {
 	}
 	if update.MaxRenewalPrice >= 0 {
 		existing.MaxRenewalPrice = update.MaxRenewalPrice
+	}
+	if update.CycleFilter != "" {
+		existing.CycleFilter = update.CycleFilter
 	}
 	existing.MinDiscountPercent = update.MinDiscountPercent
 	existing.MinPortCount = update.MinPortCount
@@ -508,6 +519,8 @@ type UpsertItemInput struct {
 	PlatformFee     float64
 	FlowUsed        string
 	Cycle           int
+	CycleName       string
+	MonthlyPrice    float64
 	Location        string
 	Bandwidth       string
 	ConfigDesc      string
@@ -562,6 +575,12 @@ func UpsertMarketBatch(currentItems []UpsertItemInput) {
 			}
 			if item.Cycle > 0 {
 				rec.Cycle = item.Cycle
+			}
+			if item.CycleName != "" {
+				rec.CycleName = item.CycleName
+			}
+			if item.MonthlyPrice > 0 {
+				rec.MonthlyPrice = item.MonthlyPrice
 			}
 			if item.Location != "" {
 				rec.Location = item.Location
@@ -629,6 +648,8 @@ func UpsertMarketBatch(currentItems []UpsertItemInput) {
 				PlatformFee:     item.PlatformFee,
 				FlowUsed:        item.FlowUsed,
 				Cycle:           item.Cycle,
+				CycleName:       item.CycleName,
+				MonthlyPrice:    item.MonthlyPrice,
 				Location:        item.Location,
 				Bandwidth:       item.Bandwidth,
 				ConfigDesc:      item.ConfigDesc,

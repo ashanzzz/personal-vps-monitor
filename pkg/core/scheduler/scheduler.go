@@ -190,7 +190,19 @@ func (s *Scheduler) pollAndMatch(ctx context.Context) {
 						}
 						renewStr := ""
 						if it.RenewalPrice > 0 {
-							renewStr = fmt.Sprintf("\n• 续费金额: ¥%.2f/月", it.RenewalPrice)
+							cycleLabel := it.CycleName
+							if cycleLabel == "" {
+								if it.Cycle >= 12 {
+									cycleLabel = "年付"
+								} else {
+									cycleLabel = "月付"
+								}
+							}
+							if it.Cycle > 1 && it.MonthlyPrice > 0 {
+								renewStr = fmt.Sprintf("\n• 续费价格: *¥%.2f/%s* (折合 ¥%.2f/月)", it.RenewalPrice, cycleLabel, it.MonthlyPrice)
+							} else {
+								renewStr = fmt.Sprintf("\n• 续费价格: *¥%.2f/月*", it.RenewalPrice)
+							}
 						}
 						modeStr := "🛡️ 【模拟筛选模式】仅供筛选查看，未调用扣费"
 						if !p.SafeMode && p.AutoBuy {
@@ -292,9 +304,37 @@ func matchPlan(p *store.PurchasePlan, it providers.MarketItem) bool {
 		return false
 	}
 
-	// 续费价上限
-	if p.MaxRenewalPrice > 0 && it.RenewalPrice > p.MaxRenewalPrice {
-		return false
+	// 计费周期过滤 ("all", "yearly", "monthly", "other")
+	if p.CycleFilter != "" && p.CycleFilter != "all" {
+		switch strings.ToLower(p.CycleFilter) {
+		case "yearly", "year", "年付":
+			if it.Cycle < 12 {
+				return false
+			}
+		case "monthly", "month", "月付":
+			if it.Cycle > 1 {
+				return false
+			}
+		case "other", "quarterly", "季付/半年付":
+			if it.Cycle <= 1 || it.Cycle >= 12 {
+				return false
+			}
+		}
+	}
+
+	// 续费价上限 (统一按折算后的月付基准比较)
+	if p.MaxRenewalPrice > 0 {
+		effMonthlyRenew := it.MonthlyPrice
+		if effMonthlyRenew <= 0 {
+			if it.Cycle > 1 {
+				effMonthlyRenew = it.RenewalPrice / float64(it.Cycle)
+			} else {
+				effMonthlyRenew = it.RenewalPrice
+			}
+		}
+		if effMonthlyRenew > 0 && effMonthlyRenew > p.MaxRenewalPrice {
+			return false
+		}
 	}
 
 	// 最低折扣 (如 30 代表 3折)

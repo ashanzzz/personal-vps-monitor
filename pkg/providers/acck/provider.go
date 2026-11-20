@@ -206,6 +206,7 @@ func (p *ACCKProvider) ListMarketItems(ctx context.Context) ([]providers.MarketI
 		if l.RenewalPrice > 0 {
 			discount = math.Round((l.Price/l.RenewalPrice)*1000) / 10.0
 		}
+		cycleMonths, cycleName, monthlyPrice := providers.FormatCycle(l.Cycle, l.RenewalPrice)
 		cfgDesc := fmt.Sprintf("%dC / %dM", l.CPU, l.MemoryMB)
 		if l.DiskGB > 0 {
 			cfgDesc = fmt.Sprintf("%s / %dG", cfgDesc, l.DiskGB)
@@ -236,11 +237,13 @@ func (p *ACCKProvider) ListMarketItems(ctx context.Context) ([]providers.MarketI
 			Name:            name,
 			Price:           l.Price,
 			RenewalPrice:    l.RenewalPrice,
+			MonthlyPrice:    monthlyPrice,
+			Cycle:           cycleMonths,
+			CycleName:       cycleName,
 			DiscountPercent: discount,
 			ResetPrice:      l.ResetPrice,
 			PlatformFee:     l.PlatformFee,
 			FlowUsed:        l.FlowUsed,
-			Cycle:           l.Cycle,
 			SellerUserID:    l.SellerUserID,
 			Location:        loc,
 			Bandwidth:       bw,

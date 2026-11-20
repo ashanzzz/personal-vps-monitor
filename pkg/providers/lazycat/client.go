@@ -483,6 +483,7 @@ type LazyMarketSnapshot struct {
 	BandwidthMbps          int     `json:"bandwidthMbps"`
 	RenewalPrice           float64 `json:"renewalPrice"`
 	RenewalDiscountPercent float64 `json:"renewalDiscountPercent"`
+	BillingCycle           int     `json:"billingCycle,omitempty"`
 	MonthlyTrafficLimit    string  `json:"monthlyTrafficLimit"`
 	MonthlyTrafficUsed     string  `json:"monthlyTrafficUsed"`
 	IPStatus               string  `json:"ipStatus"`

@@ -2,8 +2,10 @@ package sshexec
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -15,18 +17,21 @@ import (
 
 // ProxyInfo 结构化代理节点信息
 type ProxyInfo struct {
-	Port       int    `json:"port"`
-	Protocol   string `json:"protocol"`
-	Security   string `json:"security,omitempty"` // reality, tls, none
-	Network    string `json:"network,omitempty"`  // tcp, ws, grpc
-	SNI        string `json:"sni,omitempty"`
-	UUID       string `json:"uuid,omitempty"`
-	PublicKey  string `json:"public_key,omitempty"`
-	ShortID    string `json:"short_id,omitempty"`
-	Path       string `json:"path,omitempty"`
-	Flow       string `json:"flow,omitempty"`
-	Remark     string `json:"remark,omitempty"`
-	Status     string `json:"status"` // "listening" or "stopped"
+	Port      int    `json:"port"`
+	Protocol  string `json:"protocol"`
+	Security  string `json:"security,omitempty"` // reality, tls, none
+	Network   string `json:"network,omitempty"`  // tcp, ws, grpc
+	SNI       string `json:"sni,omitempty"`
+	UUID      string `json:"uuid,omitempty"`
+	PublicKey string `json:"public_key,omitempty"`
+	ShortID   string `json:"short_id,omitempty"`
+	Path      string `json:"path,omitempty"`
+	Flow      string `json:"flow,omitempty"`
+	Remark    string `json:"remark,omitempty"`
+	Status    string `json:"status"` // "listening" or "stopped"
+	Method    string `json:"method,omitempty"`
+	Password  string `json:"password,omitempty"`
+	Link      string `json:"link,omitempty"`
 }
 
 // InstanceProxiesResult 主机代理服务探查综合结果
@@ -64,14 +69,27 @@ fi
 
 echo "=== SING_BOX_CFG ==="
 if [ -f /etc/sing-box/config.json ]; then
+  echo ""
+  echo "FILE:/etc/sing-box/config.json"
   cat /etc/sing-box/config.json
+  echo ""
 fi
+for c in $(docker ps --format '{{.Names}}' 2>/dev/null); do
+  if [ "$c" = "sb-ss" ] || [ "$c" = "sing-box" ] || [ "$c" = "ss1" ]; then
+    echo ""
+    echo "FILE:docker-$c"
+    docker exec "$c" cat /etc/sing-box/config.json 2>/dev/null || docker exec "$c" cat /cfg.json 2>/dev/null || true
+    echo ""
+  fi
+done
 
 echo "=== XRAY_CFG ==="
 for xp in /etc/v2ray-agent/docker/config.json /usr/local/etc/xray/config.json /etc/xray/config.json /etc/xray/sb-relay.json; do
   if [ -f "$xp" ]; then
+    echo ""
     echo "FILE:$xp"
     cat "$xp"
+    echo ""
   fi
 done
 `
@@ -147,6 +165,8 @@ func parseInspectOutput(inst *providers.Instance, output string) *InstanceProxie
 	if len(strings.TrimSpace(sbOutput)) > 10 {
 		if result.ManagementType == "unknown" {
 			result.ManagementType = "sing-box"
+		} else {
+			result.ManagementType += "+sing-box"
 		}
 		sbProxies := parseSingBoxInbounds(sbOutput, listeningPorts)
 		for _, p := range sbProxies {
@@ -160,6 +180,8 @@ func parseInspectOutput(inst *providers.Instance, output string) *InstanceProxie
 	if len(strings.TrimSpace(xrayOutput)) > 10 {
 		if result.ManagementType == "unknown" {
 			result.ManagementType = "xray"
+		} else if !strings.Contains(result.ManagementType, "xray") {
+			result.ManagementType += "+xray"
 		}
 		xrayProxies := parseXrayInbounds(xrayOutput, listeningPorts)
 		for _, p := range xrayProxies {
@@ -180,6 +202,11 @@ func parseInspectOutput(inst *providers.Instance, output string) *InstanceProxie
 				})
 			}
 		}
+	}
+
+	// 5. 自动为每一个已解析代理生成标准分享链接
+	for i := range result.Proxies {
+		result.Proxies[i].Link = GenerateProxyLink(&result.Proxies[i], inst.IP, inst.Name)
 	}
 
 	return result
@@ -380,49 +407,97 @@ func buildProxyInfoFrom3xUI(port int, protocol, rawSettings, rawStream, remark s
 // parseSingBoxInbounds 解析 sing-box 配置文件中的 inbounds
 func parseSingBoxInbounds(content string, listeningPorts map[int]bool) []ProxyInfo {
 	var proxies []ProxyInfo
-	var cfg struct {
-		Inbounds []struct {
-			Type       string `json:"type"`
-			Tag        string `json:"tag"`
-			ListenPort int    `json:"listen_port"`
-			Users      []struct {
-				UUID string `json:"uuid"`
-			} `json:"users"`
-			TLS struct {
-				Enabled    bool   `json:"enabled"`
-				ServerName string `json:"server_name"`
-				Reality    struct {
-					Enabled   bool   `json:"enabled"`
-					PublicKey string `json:"public_key"`
-					ShortID   string `json:"short_id"`
-				} `json:"reality"`
-			} `json:"tls"`
-			Transport struct {
-				Type string `json:"type"`
-				Path string `json:"path"`
-			} `json:"transport"`
-		} `json:"inbounds"`
+	lines := strings.Split(content, "\n")
+	var jsonBlocks []string
+	var currentBlock []string
+	inBlock := false
+
+	for _, line := range lines {
+		if idx := strings.Index(line, "FILE:"); idx >= 0 {
+			before := line[:idx]
+			if inBlock && len(strings.TrimSpace(before)) > 0 {
+				currentBlock = append(currentBlock, before)
+			}
+			if inBlock && len(currentBlock) > 0 {
+				jsonBlocks = append(jsonBlocks, strings.Join(currentBlock, "\n"))
+				currentBlock = nil
+			}
+			inBlock = true
+			continue
+		}
+		if inBlock {
+			currentBlock = append(currentBlock, line)
+		}
+	}
+	if inBlock && len(currentBlock) > 0 {
+		jsonBlocks = append(jsonBlocks, strings.Join(currentBlock, "\n"))
+	}
+	if len(jsonBlocks) == 0 && strings.Contains(content, "{") {
+		jsonBlocks = append(jsonBlocks, content)
 	}
 
-	start := strings.Index(content, "{")
-	end := strings.LastIndex(content, "}")
-	if start >= 0 && end > start {
-		if err := json.Unmarshal([]byte(content[start:end+1]), &cfg); err == nil {
+	for _, block := range jsonBlocks {
+		start := strings.Index(block, "{")
+		end := strings.LastIndex(block, "}")
+		if start < 0 || end <= start {
+			continue
+		}
+
+		var cfg struct {
+			Inbounds []struct {
+				Type       string `json:"type"`
+				Tag        string `json:"tag"`
+				Listen     string `json:"listen"`
+				ListenPort int    `json:"listen_port"`
+				Port       int    `json:"port"`
+				Method     string `json:"method"`
+				Password   string `json:"password"`
+				Users      []struct {
+					UUID string `json:"uuid"`
+					Flow string `json:"flow"`
+				} `json:"users"`
+				TLS struct {
+					Enabled    bool   `json:"enabled"`
+					ServerName string `json:"server_name"`
+					Reality    struct {
+						Enabled   bool   `json:"enabled"`
+						PublicKey string `json:"public_key"`
+						ShortID   string `json:"short_id"`
+					} `json:"reality"`
+				} `json:"tls"`
+				Transport struct {
+					Type string `json:"type"`
+					Path string `json:"path"`
+				} `json:"transport"`
+			} `json:"inbounds"`
+		}
+
+		if err := json.Unmarshal([]byte(block[start:end+1]), &cfg); err == nil {
 			for _, in := range cfg.Inbounds {
-				if in.ListenPort <= 0 {
+				if in.Listen == "127.0.0.1" || in.Listen == "::1" || in.Listen == "localhost" {
+					continue
+				}
+				p := in.ListenPort
+				if p <= 0 {
+					p = in.Port
+				}
+				if p <= 0 {
 					continue
 				}
 				info := ProxyInfo{
-					Port:     in.ListenPort,
+					Port:     p,
 					Protocol: in.Type,
 					Remark:   in.Tag,
 					Status:   "stopped",
+					Method:   in.Method,
+					Password: in.Password,
 				}
-				if listeningPorts[in.ListenPort] {
+				if listeningPorts[p] {
 					info.Status = "listening"
 				}
 				if len(in.Users) > 0 {
 					info.UUID = in.Users[0].UUID
+					info.Flow = in.Users[0].Flow
 				}
 				if in.TLS.Reality.Enabled {
 					info.Security = "reality"
@@ -456,7 +531,11 @@ func parseXrayInbounds(content string, listeningPorts map[int]bool) []ProxyInfo 
 	inBlock := false
 
 	for _, line := range lines {
-		if strings.HasPrefix(line, "FILE:") {
+		if idx := strings.Index(line, "FILE:"); idx >= 0 {
+			before := line[:idx]
+			if inBlock && len(strings.TrimSpace(before)) > 0 {
+				currentBlock = append(currentBlock, before)
+			}
 			if inBlock && len(currentBlock) > 0 {
 				jsonBlocks = append(jsonBlocks, strings.Join(currentBlock, "\n"))
 				currentBlock = nil
@@ -520,14 +599,18 @@ func parseXrayInbounds(content string, listeningPorts map[int]bool) []ProxyInfo 
 					info.Status = "listening"
 				}
 
-				// 提取 UUID
+				// 提取 UUID 与 Flow
 				var clientsWrap struct {
 					Clients []struct {
-						ID string `json:"id"`
+						ID   string `json:"id"`
+						Flow string `json:"flow"`
 					} `json:"clients"`
 				}
 				if err := json.Unmarshal(in.Settings, &clientsWrap); err == nil && len(clientsWrap.Clients) > 0 {
 					info.UUID = clientsWrap.Clients[0].ID
+					if clientsWrap.Clients[0].Flow != "" {
+						info.Flow = clientsWrap.Clients[0].Flow
+					}
 				}
 
 				info.Network = in.StreamSettings.Network
@@ -563,4 +646,45 @@ func parseXrayInbounds(content string, listeningPorts map[int]bool) []ProxyInfo 
 	}
 
 	return proxies
+}
+
+// GenerateProxyLink 生成标准节点分享链接 (VLESS Reality / VLESS WS / SS2022)
+func GenerateProxyLink(p *ProxyInfo, ip, hostName string) string {
+	name := p.Remark
+	if name == "" {
+		name = hostName
+	}
+	if hostName != "" && !strings.Contains(name, hostName) {
+		name = fmt.Sprintf("%s-%s", hostName, name)
+	}
+
+	proto := strings.ToLower(p.Protocol)
+	switch proto {
+	case "vless":
+		if p.Security == "reality" {
+			flow := p.Flow
+			if flow == "" {
+				flow = "xtls-rprx-vision"
+			}
+			net := p.Network
+			if net == "" {
+				net = "tcp"
+			}
+			return fmt.Sprintf("vless://%s@%s:%d?encryption=none&flow=%s&security=reality&sni=%s&fp=chrome&pbk=%s&sid=%s&type=%s#%s",
+				p.UUID, ip, p.Port, flow, p.SNI, p.PublicKey, p.ShortID, net, url.PathEscape(name))
+		}
+		if p.Network == "ws" {
+			return fmt.Sprintf("vless://%s@%s:%d?path=%s&security=%s&sni=%s&type=ws#%s",
+				p.UUID, ip, p.Port, url.QueryEscape(p.Path), p.Security, p.SNI, url.PathEscape(name))
+		}
+	case "vless_ws":
+		return fmt.Sprintf("vless://%s@%s:%d?path=%s&security=%s&sni=%s&type=ws#%s",
+			p.UUID, ip, p.Port, url.QueryEscape(p.Path), p.Security, p.SNI, url.PathEscape(name))
+	case "shadowsocks", "ss":
+		if p.Method != "" && p.Password != "" {
+			userinfo := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", p.Method, p.Password)))
+			return fmt.Sprintf("ss://%s@%s:%d#%s", userinfo, ip, p.Port, url.PathEscape(name))
+		}
+	}
+	return ""
 }

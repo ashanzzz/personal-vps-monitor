@@ -3,6 +3,8 @@ package providers
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
 
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/config"
 	"github.com/mark3labs/mcp-go/server"
@@ -75,7 +77,9 @@ type MarketItem struct {
 	ResetPrice      float64 `json:"reset_price,omitempty"`       // 流量重置费用 (¥)
 	PlatformFee     float64 `json:"platform_fee,omitempty"`      // 平台交易/过户手续费 (¥)
 	FlowUsed        string  `json:"flow_used,omitempty"`         // 已使用流量配额 (如 "7.7 GB / 1500 GB")
-	Cycle           int     `json:"cycle,omitempty"`             // 计费周期 (月)
+	Cycle           int     `json:"cycle,omitempty"`             // 计费周期 (月数，例如 1:月付, 12:年付)
+	CycleName       string  `json:"cycle_name,omitempty"`        // 周期人类可读标签: "月付", "年付", "季付", "半年付"
+	MonthlyPrice    float64 `json:"monthly_price,omitempty"`     // 归一化等效月租 (¥/月)
 	SellerUsername  string  `json:"seller_username,omitempty"`
 	SellerUserID    int     `json:"seller_user_id,omitempty"`
 	Location        string  `json:"location"`
@@ -157,5 +161,53 @@ type StoreProduct struct {
 // StoreLister 官方商城商品浏览特化接口
 type StoreLister interface {
 	ListStoreProducts(ctx context.Context) ([]StoreProduct, error)
+}
+
+// FormatCycle 格式化计费周期月数与标签名，并计算等效月供 (保留2位小数)
+func FormatCycle(cycle int, renewalPrice float64) (cycleMonths int, cycleName string, monthlyPrice float64) {
+	if cycle <= 0 {
+		cycle = 1
+	}
+	cycleMonths = cycle
+	switch cycle {
+	case 1:
+		cycleName = "月付"
+		monthlyPrice = renewalPrice
+	case 3:
+		cycleName = "季付"
+		if renewalPrice > 0 {
+			monthlyPrice = math.Round((renewalPrice/3.0)*100) / 100
+		}
+	case 6:
+		cycleName = "半年付"
+		if renewalPrice > 0 {
+			monthlyPrice = math.Round((renewalPrice/6.0)*100) / 100
+		}
+	case 12:
+		cycleName = "年付"
+		if renewalPrice > 0 {
+			monthlyPrice = math.Round((renewalPrice/12.0)*100) / 100
+		}
+	case 24:
+		cycleName = "两年付"
+		if renewalPrice > 0 {
+			monthlyPrice = math.Round((renewalPrice/24.0)*100) / 100
+		}
+	case 36:
+		cycleName = "三年付"
+		if renewalPrice > 0 {
+			monthlyPrice = math.Round((renewalPrice/36.0)*100) / 100
+		}
+	default:
+		if cycle%12 == 0 {
+			cycleName = fmt.Sprintf("%d年付", cycle/12)
+		} else {
+			cycleName = fmt.Sprintf("%d个月付", cycle)
+		}
+		if renewalPrice > 0 {
+			monthlyPrice = math.Round((renewalPrice/float64(cycle))*100) / 100
+		}
+	}
+	return
 }
 

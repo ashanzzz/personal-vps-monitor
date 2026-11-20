@@ -166,6 +166,8 @@ export interface MarketItem {
   platform_fee?: number
   flow_used?: string
   cycle?: number
+  cycle_name?: string
+  monthly_price?: number
   seller_username?: string
   seller_user_id?: number
   location: string
@@ -213,6 +215,8 @@ export interface MatchedItemPreview {
   platform_fee?: number
   flow_used?: string
   cycle?: number
+  cycle_name?: string
+  monthly_price?: number
   seller_username?: string
   seller_user_id?: number
   location?: string
@@ -240,6 +244,7 @@ export interface PurchasePlan {
   region_keyword?: string
   max_price?: number
   max_renewal_price?: number
+  cycle_filter?: 'all' | 'yearly' | 'monthly' | 'other'
   min_discount_percent?: number
   min_port_count?: number
   min_bandwidth?: number

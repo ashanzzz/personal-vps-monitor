@@ -186,6 +186,8 @@ func (p *AkileProvider) ListMarketItems(ctx context.Context) ([]providers.Market
 	for _, item := range items {
 		priceYuan := item.GetPriceYuan()
 		renewYuan := item.GetRenewalPriceYuan()
+		cycleMonths, cycleName, monthlyPrice := providers.FormatCycle(item.ServerCycle, renewYuan)
+
 		var discount float64
 		if renewYuan > 0 {
 			discount = math.Round((priceYuan/renewYuan)*1000) / 10.0
@@ -229,6 +231,9 @@ func (p *AkileProvider) ListMarketItems(ctx context.Context) ([]providers.Market
 			NodeName:        item.NodeName,
 			Price:           priceYuan,
 			RenewalPrice:    renewYuan,
+			MonthlyPrice:    monthlyPrice,
+			Cycle:           cycleMonths,
+			CycleName:       cycleName,
 			DiscountPercent: discount,
 			Location:        item.AreaName,
 			Bandwidth:       bw,
@@ -242,7 +247,6 @@ func (p *AkileProvider) ListMarketItems(ctx context.Context) ([]providers.Market
 			DueTime:         dueStr,
 			ResetPrice:      item.GetResetPriceYuan(),
 			FlowUsed:        item.GetFlowUsedStr(),
-			Cycle:           item.ServerCycle,
 			CreatedAt:       item.CreateTime,
 			CanBuy:          true,
 			MarketType:      "secondhand",

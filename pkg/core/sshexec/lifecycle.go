@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -127,32 +128,36 @@ ss -tulpn | grep -E ':%d\b'
 	}
 
 	// 原生 sing-box 或 xray 配置文件场景
-	cfgChangeScript := fmt.Sprintf(`
+	replacer := strings.NewReplacer(
+		"{OLD_PORT}", strconv.Itoa(oldPort),
+		"{NEW_PORT}", strconv.Itoa(newPort),
+	)
+	cfgChangeScript := replacer.Replace(`
 MODIFIED=0
 if [ -f /etc/sing-box/config.json ]; then
-  sed -i 's/"listen_port": %d/"listen_port": %d/g' /etc/sing-box/config.json
+  sed -i 's/"listen_port": {OLD_PORT}/"listen_port": {NEW_PORT}/g' /etc/sing-box/config.json
   systemctl reload sing-box 2>/dev/null || systemctl restart sing-box 2>/dev/null || true
   MODIFIED=1
 fi
 if [ -f /etc/v2ray-agent/docker/config.json ]; then
-  sed -i 's/"port": %d/"port": %d/g' /etc/v2ray-agent/docker/config.json
+  sed -i 's/"port": {OLD_PORT}/"port": {NEW_PORT}/g' /etc/v2ray-agent/docker/config.json
   docker restart v2ray-agent-docker 2>/dev/null || true
   MODIFIED=1
 fi
 if [ -f /usr/local/etc/xray/config.json ]; then
-  sed -i 's/"port": %d/"port": %d/g' /usr/local/etc/xray/config.json
+  sed -i 's/"port": {OLD_PORT}/"port": {NEW_PORT}/g' /usr/local/etc/xray/config.json
   systemctl reload xray 2>/dev/null || systemctl restart xray 2>/dev/null || true
   MODIFIED=1
 fi
 if [ -f /etc/xray/config.json ]; then
-  sed -i 's/"port": %d/"port": %d/g' /etc/xray/config.json
+  sed -i 's/"port": {OLD_PORT}/"port": {NEW_PORT}/g' /etc/xray/config.json
   systemctl reload xray 2>/dev/null || systemctl restart xray 2>/dev/null || true
   MODIFIED=1
 fi
-ufw allow %d/tcp 2>/dev/null || iptables -I INPUT -p tcp --dport %d -j ACCEPT 2>/dev/null || true
+ufw allow {NEW_PORT}/tcp 2>/dev/null || iptables -I INPUT -p tcp --dport {NEW_PORT} -j ACCEPT 2>/dev/null || true
 sleep 2
-ss -tulpn | grep -E ':%d\b'
-`, oldPort, newPort, oldPort, newPort, oldPort, newPort, newPort, newPort, newPort)
+ss -tulpn | grep -E ':{NEW_PORT}\b'
+`)
 
 	out, err := ExecuteCommand(ctx, inst, cfgChangeScript, 15*time.Second)
 	if err != nil {

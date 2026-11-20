@@ -75,6 +75,61 @@ function formatExpiry(expiresAt?: string, isExpired?: boolean, secondsLeft?: num
   return ''
 }
 
+// 格式化展示续费价格与周期（年付/月付/季付/半年付），区分年付总价与等效月付
+function renderRenewalDisplay(item: {
+  renewal_price?: number
+  cycle?: number
+  cycle_name?: string
+  monthly_price?: number
+  discount_percent?: number
+}) {
+  if (!item.renewal_price || item.renewal_price <= 0) {
+    return <span style={{ color: '#94a3b8' }}>-</span>
+  }
+
+  const cycleMonths = item.cycle || 1
+  let cycleName = item.cycle_name
+  if (!cycleName) {
+    if (cycleMonths >= 12) cycleName = '年付'
+    else if (cycleMonths === 6) cycleName = '半年付'
+    else if (cycleMonths === 3) cycleName = '季付'
+    else cycleName = '月付'
+  }
+
+  const isYearly = cycleMonths >= 12
+  const isMultiMonth = cycleMonths > 1
+  const monthly = item.monthly_price && item.monthly_price > 0
+    ? item.monthly_price
+    : (isMultiMonth ? Number((item.renewal_price / cycleMonths).toFixed(2)) : item.renewal_price)
+
+  const cycleTagColor = isYearly ? 'purple' : isMultiMonth ? 'cyan' : 'blue'
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+        <Tag color={cycleTagColor} style={{ fontSize: 10, padding: '0 4px', margin: 0, fontWeight: 600 }}>
+          {cycleName}
+        </Tag>
+        <span style={{ color: '#2563eb', fontWeight: 600, fontSize: 12, fontFamily: 'monospace' }}>
+          ¥{item.renewal_price.toFixed(2)}/{cycleName}
+        </span>
+      </div>
+      {isMultiMonth && (
+        <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+          折合 <span style={{ color: '#059669', fontWeight: 600 }}>¥{monthly.toFixed(2)}</span>/月
+        </div>
+      )}
+      {item.discount_percent && item.discount_percent > 0 ? (
+        <div style={{ marginTop: 2 }}>
+          <Tag color="red" style={{ fontSize: 10, padding: '0 3px', margin: 0 }}>
+            {item.discount_percent / 10}折 ({item.discount_percent}%)
+          </Tag>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 // 动态解析流量百分比，杜绝硬编码伪造数据
 function parseTrafficPercent(used?: string, total?: string): number {
   if (!used || !total) return 0
@@ -1495,6 +1550,7 @@ export default function App() {
             is_active: true,
             max_price: 50,
             max_renewal_price: 0,
+            cycle_filter: 'all',
             min_discount_percent: 0,
             min_port_count: 0,
             min_bandwidth: 0,
@@ -1554,17 +1610,12 @@ export default function App() {
                   {
                     title: '售价 / 续费 / 折扣',
                     key: 'price',
-                    width: 170,
+                    width: 175,
                     render: (_, it) => (
                       <div>
-                        <span style={{ fontWeight: 700, color: '#ef4444', fontSize: 14 }}>¥{it.price}</span>
-                        <div style={{ fontSize: 11, color: '#64748b' }}>
-                          {it.renewal_price ? <span>续费 ¥{it.renewal_price}/月</span> : null}
-                          {it.discount_percent ? (
-                            <Tag color="red" style={{ fontSize: 10, padding: '0 3px', marginLeft: 4 }}>
-                              {it.discount_percent / 10}折 ({it.discount_percent}%)
-                            </Tag>
-                          ) : null}
+                        <div style={{ fontWeight: 700, color: '#ef4444', fontSize: 14 }}>¥{it.price}</div>
+                        <div style={{ marginTop: 2 }}>
+                          {renderRenewalDisplay(it)}
                         </div>
                       </div>
                     )
@@ -1642,13 +1693,10 @@ export default function App() {
                     render: (p: number) => <span style={{ fontWeight: 700, color: '#ef4444', fontSize: 14 }}>¥{p.toFixed(2)}</span>
                   },
                   {
-                    title: '官方续费原价',
-                    dataIndex: 'renewal_price',
+                    title: '续费周期 / 价格',
                     key: 'renewal_price',
-                    width: 120,
-                    render: (rp?: number) => rp && rp > 0 ? (
-                      <span style={{ color: '#2563eb', fontWeight: 600 }}>¥{rp.toFixed(2)}/月</span>
-                    ) : <span style={{ color: '#94a3b8' }}>-</span>
+                    width: 145,
+                    render: (_, it) => renderRenewalDisplay(it)
                   },
                   {
                     title: '流量重置费',
@@ -1777,13 +1825,10 @@ export default function App() {
                     render: (p: number) => <span style={{ fontWeight: 700, color: '#ef4444', fontSize: 14 }}>¥{p.toFixed(2)}</span>
                   },
                   {
-                    title: '官方续费',
-                    dataIndex: 'renewal_price',
+                    title: '续费周期 / 价格',
                     key: 'renewal_price',
-                    width: 120,
-                    render: (rp?: number) => rp && rp > 0 ? (
-                      <span style={{ color: '#2563eb', fontWeight: 600 }}>¥{rp.toFixed(2)}/月</span>
-                    ) : <span style={{ color: '#94a3b8' }}>-</span>
+                    width: 145,
+                    render: (_, it) => renderRenewalDisplay(it)
                   },
                   {
                     title: '流量重置费',
@@ -1893,17 +1938,12 @@ export default function App() {
                 {
                   title: '价格 / 续费 / 折扣',
                   key: 'price',
-                  width: 160,
+                  width: 175,
                   render: (_, it) => (
                     <div>
-                      <span style={{ fontWeight: 700, color: '#ef4444', fontSize: 14 }}>¥{it.price}</span>
-                      <div style={{ fontSize: 11, color: '#64748b' }}>
-                        {it.renewal_price ? <span>续费 ¥{it.renewal_price}/月</span> : null}
-                        {it.discount_percent ? (
-                          <Tag color="red" style={{ fontSize: 10, padding: '0 3px', marginLeft: 4 }}>
-                            {it.discount_percent / 10}折
-                          </Tag>
-                        ) : null}
+                      <div style={{ fontWeight: 700, color: '#ef4444', fontSize: 14 }}>¥{it.price}</div>
+                      <div style={{ marginTop: 2 }}>
+                        {renderRenewalDisplay(it)}
                       </div>
                     </div>
                   )
@@ -2011,7 +2051,12 @@ export default function App() {
                     {r.region_keyword && <Tag color="geekblue">区域: {r.region_keyword}</Tag>}
                     {r.keyword_filter && <Tag color="cyan">关键词: {r.keyword_filter}</Tag>}
                     {r.max_price && r.max_price > 0 ? <Tag color="gold">售价: ≤ ¥{r.max_price}</Tag> : null}
-                    {r.max_renewal_price && r.max_renewal_price > 0 ? <Tag color="orange">续费: ≤ ¥{r.max_renewal_price}/月</Tag> : null}
+                    {r.cycle_filter && r.cycle_filter !== 'all' ? (
+                      <Tag color="purple">
+                        周期: {r.cycle_filter === 'yearly' ? '📅 年付' : r.cycle_filter === 'monthly' ? '🌙 月付' : '⏱️ 季付/半年付'}
+                      </Tag>
+                    ) : null}
+                    {r.max_renewal_price && r.max_renewal_price > 0 ? <Tag color="orange">月续费: ≤ ¥{r.max_renewal_price}/月</Tag> : null}
                     {r.min_discount_percent && r.min_discount_percent > 0 ? <Tag color="red">折扣: ≤ {r.min_discount_percent}% ({r.min_discount_percent / 10}折)</Tag> : null}
                     {r.min_port_count && r.min_port_count > 0 ? <Tag color="purple">端口: ≥ {r.min_port_count} 个</Tag> : null}
                     {r.min_bandwidth && r.min_bandwidth > 0 ? <Tag color="green">带宽: ≥ {r.min_bandwidth}M</Tag> : null}
@@ -2092,6 +2137,7 @@ export default function App() {
                         setEditingPlan(r)
                         planForm.setFieldsValue({
                           ...r,
+                          cycle_filter: r.cycle_filter || 'all',
                           max_buy_count: r.max_buy_count || 1,
                         })
                         setPlanModalOpen(true)
@@ -2915,14 +2961,24 @@ export default function App() {
                               )
                             },
                             {
-                              title: '官方续费原价',
+                              title: '续费周期 / 价格',
                               dataIndex: 'renewal_price',
                               key: 'renewal_price',
-                              width: 115,
-                              sorter: (a, b) => (a.renewal_price || 0) - (b.renewal_price || 0),
-                              render: (rp?: number) => rp && rp > 0 ? (
-                                <span style={{ color: '#2563eb', fontWeight: 600, fontSize: 12, fontFamily: 'monospace' }}>¥{rp.toFixed(2)}/月</span>
-                              ) : <span style={{ color: '#94a3b8' }}>-</span>
+                              width: 145,
+                              sorter: (a, b) => (a.monthly_price || a.renewal_price || 0) - (b.monthly_price || b.renewal_price || 0),
+                              filters: [
+                                { text: '📅 年付', value: 'yearly' },
+                                { text: '🌙 月付', value: 'monthly' },
+                                { text: '⏱️ 季付/半年付', value: 'other' }
+                              ],
+                              onFilter: (value, r) => {
+                                const c = r.cycle || 1
+                                if (value === 'yearly') return c >= 12
+                                if (value === 'monthly') return c === 1
+                                if (value === 'other') return c > 1 && c < 12
+                                return true
+                              },
+                              render: (_, r) => renderRenewalDisplay(r)
                             },
                             {
                               title: '卖家信息',
@@ -3496,14 +3552,24 @@ export default function App() {
                               )
                             },
                             {
-                              title: '官方月付续费',
+                              title: '续费周期 / 价格',
                               dataIndex: 'renewal_price',
                               key: 'renewal_price',
-                              width: 115,
-                              sorter: (a, b) => (a.renewal_price || 0) - (b.renewal_price || 0),
-                              render: (rp?: number) => rp && rp > 0 ? (
-                                <span style={{ color: '#2563eb', fontWeight: 600, fontSize: 12, fontFamily: 'monospace' }}>¥{rp.toFixed(2)}/月</span>
-                              ) : <span style={{ color: '#94a3b8' }}>-</span>
+                              width: 145,
+                              sorter: (a, b) => (a.monthly_price || a.renewal_price || 0) - (b.monthly_price || b.renewal_price || 0),
+                              filters: [
+                                { text: '📅 年付', value: 'yearly' },
+                                { text: '🌙 月付', value: 'monthly' },
+                                { text: '⏱️ 季付/半年付', value: 'other' }
+                              ],
+                              onFilter: (value, r) => {
+                                const c = r.cycle || 1
+                                if (value === 'yearly') return c >= 12
+                                if (value === 'monthly') return c === 1
+                                if (value === 'other') return c > 1 && c < 12
+                                return true
+                              },
+                              render: (_, r) => renderRenewalDisplay(r)
                             },
                             {
                               title: '卖家信息',
@@ -4060,22 +4126,23 @@ export default function App() {
                               )
                             },
                             {
-                              title: '官方月续费 / 折扣',
+                              title: '续费周期 / 价格',
                               key: 'renewal',
-                              width: 135,
-                              sorter: (a, b) => (a.renewal_price || 0) - (b.renewal_price || 0),
-                              render: (_, r) => (
-                                <div>
-                                  <div style={{ color: '#2563eb', fontWeight: 600, fontSize: 12, fontFamily: 'monospace' }}>
-                                    {r.renewal_price !== undefined && r.renewal_price > 0 ? `¥${r.renewal_price.toFixed(2)}/月` : '免费/已包含'}
-                                  </div>
-                                  {r.discount_percent && r.discount_percent > 0 ? (
-                                    <Tag color="red" style={{ fontSize: 10, padding: '0 3px', margin: 0, marginTop: 1 }}>
-                                      {r.discount_percent / 10}折 ({r.discount_percent}%)
-                                    </Tag>
-                                  ) : null}
-                                </div>
-                              )
+                              width: 145,
+                              sorter: (a, b) => (a.monthly_price || a.renewal_price || 0) - (b.monthly_price || b.renewal_price || 0),
+                              filters: [
+                                { text: '📅 年付', value: 'yearly' },
+                                { text: '🌙 月付', value: 'monthly' },
+                                { text: '⏱️ 季付/半年付', value: 'other' }
+                              ],
+                              onFilter: (value, r) => {
+                                const c = r.cycle || 1
+                                if (value === 'yearly') return c >= 12
+                                if (value === 'monthly') return c === 1
+                                if (value === 'other') return c > 1 && c < 12
+                                return true
+                              },
+                              render: (_, r) => renderRenewalDisplay(r)
                             },
                             {
                               title: 'SLA & 端口配额',
@@ -4796,7 +4863,7 @@ export default function App() {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="max_renewal_price" label="最高月续费限价 (元/月)" extra="防止低价买入却遭遇高额续费刺客 (0不限)">
+              <Form.Item name="max_renewal_price" label="最高月续费限价 (元/月)" extra="按折合月供比对，防止高额续费刺客 (0不限)">
                 <InputNumber style={{ width: '100%' }} min={0} placeholder="例如: 15.0" />
               </Form.Item>
             </Col>
@@ -4804,33 +4871,47 @@ export default function App() {
 
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item name="min_discount_percent" label="最低续费折扣 (折算百分比)" extra="例如填 30 表示 ≤ 3折/30% (0不限)">
-                <InputNumber style={{ width: '100%' }} min={0} max={100} placeholder="例如: 30" />
+              <Form.Item name="cycle_filter" label="计费周期偏好" extra="筛选年付/月付/季付挂单 (默认不限)">
+                <Select>
+                  <Select.Option value="all">全部周期 (不限)</Select.Option>
+                  <Select.Option value="yearly">📅 仅限年付 (≥12个月)</Select.Option>
+                  <Select.Option value="monthly">🌙 仅限月付 (1个月)</Select.Option>
+                  <Select.Option value="other">⏱️ 仅限季付/半年付 (3~6个月)</Select.Option>
+                </Select>
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="min_port_count" label="最低端口配额限制" extra="例如懒猫云 NAT 容器要求端口数 (0不限)">
-                <InputNumber style={{ width: '100%' }} min={0} placeholder="例如: 20" />
+              <Form.Item name="min_discount_percent" label="最低续费折扣 (折算百分比)" extra="例如填 30 表示 ≤ 3折/30% (0不限)">
+                <InputNumber style={{ width: '100%' }} min={0} max={100} placeholder="例如: 30" />
               </Form.Item>
             </Col>
           </Row>
 
           <Row gutter={16}>
             <Col span={12}>
+              <Form.Item name="min_port_count" label="最低端口配额限制" extra="例如懒猫云 NAT 容器要求端口数 (0不限)">
+                <InputNumber style={{ width: '100%' }} min={0} placeholder="例如: 20" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
               <Form.Item name="min_bandwidth" label="最低网络带宽要求 (Mbps)" extra="低于此带宽自动忽略 (0不限)">
                 <InputNumber style={{ width: '100%' }} min={0} placeholder="例如: 500" />
               </Form.Item>
             </Col>
+          </Row>
+
+          <Row gutter={16}>
             <Col span={12}>
               <Form.Item name="region_keyword" label="机房/国家区域过滤" extra="如: 香港、HK、日本、JP、LAX (留空不限)">
                 <Input placeholder="例如: 香港 或 HK" />
               </Form.Item>
             </Col>
+            <Col span={12}>
+              <Form.Item name="keyword_filter" label="标题/节点/卖家关键字过滤" extra="如: 移动 / 联通 / BGP / 超大杯 (留空不限)">
+                <Input placeholder="例如: 移动 或 特惠" />
+              </Form.Item>
+            </Col>
           </Row>
-
-          <Form.Item name="keyword_filter" label="标题/节点/卖家关键字过滤" extra="如: 移动 / 联通 / BGP / 超大杯 (留空不限)">
-            <Input placeholder="例如: 移动 或 特惠" />
-          </Form.Item>
 
           <div style={{ background: '#f8fafc', padding: '14px 18px', borderRadius: 8, border: '1px solid #e2e8f0', marginTop: 8 }}>
             <Row gutter={16} align="middle">

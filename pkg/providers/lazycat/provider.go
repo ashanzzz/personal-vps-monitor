@@ -375,6 +375,7 @@ func (p *LazyCatProvider) ListMarketItems(ctx context.Context) ([]providers.Mark
 			diskStr = fmt.Sprintf("%dG", it.Snapshot.Disk)
 		}
 		flowTotalStr := it.Snapshot.MonthlyTrafficLimit
+		cycleMonths, cycleName, monthlyPrice := providers.FormatCycle(it.Snapshot.BillingCycle, it.Snapshot.RenewalPrice)
 
 		items = append(items, providers.MarketItem{
 			ProviderID:      p.ID(),
@@ -382,10 +383,12 @@ func (p *LazyCatProvider) ListMarketItems(ctx context.Context) ([]providers.Mark
 			Name:            name,
 			Price:           price,
 			RenewalPrice:    it.Snapshot.RenewalPrice,
+			MonthlyPrice:    monthlyPrice,
+			Cycle:           cycleMonths,
+			CycleName:       cycleName,
 			DiscountPercent: it.Snapshot.RenewalDiscountPercent,
 			ResetPrice:      it.Snapshot.RenewalPrice,
 			FlowUsed:        it.Snapshot.MonthlyTrafficUsed,
-			Cycle:           1,
 			SellerUsername:  it.SellerUsername,
 			SellerUserID:    it.SellerUserID,
 			Location:        loc,
