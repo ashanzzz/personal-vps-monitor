@@ -81,6 +81,7 @@ func (p *AkileProvider) ListInstances(ctx context.Context) ([]providers.Instance
 		if renewPrice == 0 && v.Price > 0 {
 			renewPrice = v.Price / 100.0
 		}
+		cycleMonths, cycleName, monthlyPrice := providers.FormatCycle(v.Cycle, renewPrice)
 
 		sshUser := v.InitUsername
 		if sshUser == "" {
@@ -125,6 +126,9 @@ func (p *AkileProvider) ListInstances(ctx context.Context) ([]providers.Instance
 			TrafficTotal:   flowStr,
 			TrafficPercent: trafficPercent,
 			RenewPrice:     renewPrice,
+			Cycle:          cycleMonths,
+			CycleName:      cycleName,
+			MonthlyPrice:   monthlyPrice,
 			AutoRenew:      v.AutoRenew,
 			ExpireDate:     expireDate,
 		})

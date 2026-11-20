@@ -121,6 +121,23 @@ func fillDefaults(inst *providers.Instance) {
 	if inst.IP == "" && inst.IPv4 != "" {
 		inst.IP = inst.IPv4
 	}
+
+	if inst.SSHPassword == "" {
+		if cache, err := store.LoadDailyCache(); err == nil && cache != nil {
+			for _, cached := range cache.Instances {
+				if cached.IP == inst.IP || cached.ID == inst.ID {
+					if cached.SSHPassword != "" {
+						inst.SSHPassword = cached.SSHPassword
+						break
+					}
+					if cached.RootPassword != "" {
+						inst.SSHPassword = cached.RootPassword
+						break
+					}
+				}
+			}
+		}
+	}
 }
 
 // getSSHClient 获取或复用 SSH 连接 (5~8 秒拨号超时)

@@ -78,12 +78,14 @@ function formatExpiry(expiresAt?: string, isExpired?: boolean, secondsLeft?: num
 // 格式化展示续费价格与周期（年付/月付/季付/半年付），区分年付总价与等效月付
 function renderRenewalDisplay(item: {
   renewal_price?: number
+  renew_price?: number
   cycle?: number
   cycle_name?: string
   monthly_price?: number
   discount_percent?: number
 }) {
-  if (!item.renewal_price || item.renewal_price <= 0) {
+  const price = item.renewal_price ?? item.renew_price
+  if (!price || price <= 0) {
     return <span style={{ color: '#94a3b8' }}>-</span>
   }
 
@@ -100,7 +102,7 @@ function renderRenewalDisplay(item: {
   const isMultiMonth = cycleMonths > 1
   const monthly = item.monthly_price && item.monthly_price > 0
     ? item.monthly_price
-    : (isMultiMonth ? Number((item.renewal_price / cycleMonths).toFixed(2)) : item.renewal_price)
+    : (isMultiMonth ? Number((price / cycleMonths).toFixed(2)) : price)
 
   const cycleTagColor = isYearly ? 'purple' : isMultiMonth ? 'cyan' : 'blue'
 
@@ -111,7 +113,7 @@ function renderRenewalDisplay(item: {
           {cycleName}
         </Tag>
         <span style={{ color: '#2563eb', fontWeight: 600, fontSize: 12, fontFamily: 'monospace' }}>
-          ¥{item.renewal_price.toFixed(2)}/{cycleName}
+          ¥{price.toFixed(2)}/{cycleName}
         </span>
       </div>
       {isMultiMonth && (
@@ -1096,7 +1098,10 @@ export default function App() {
             </div>
             <Row gutter={[16, 12]}>
               <Col span={12}>
-                <Statistic title="续费金额" value={selectedVps.renew_price || 0} precision={2} prefix="¥" valueStyle={{ fontSize: 16, fontWeight: 600 }} />
+                <Text type="secondary">续费周期与金额:</Text>
+                <div style={{ marginTop: 4 }}>
+                  {renderRenewalDisplay(selectedVps)}
+                </div>
               </Col>
               <Col span={12}>
                 <Text type="secondary">平台账户余额:</Text>
@@ -1458,11 +1463,11 @@ export default function App() {
                   {
                     title: '到期 / 续费 / 余额',
                     key: 'expire',
-                    width: 170,
+                    width: 175,
                     render: (_, r) => (
                       <div>
-                        <div style={{ fontSize: 12, color: '#059669', fontWeight: 600 }}>¥{r.renew_price?.toFixed(2) || '0.00'} /月</div>
-                        <div style={{ fontSize: 11, color: '#94a3b8' }}>{r.expire_date || '自动扣费'}</div>
+                        {renderRenewalDisplay(r)}
+                        <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{r.expire_date || '自动扣费'}</div>
                         {r.user_balance !== undefined && r.user_balance > 0 ? (
                           <div style={{ fontSize: 10, color: '#2563eb', marginTop: 1 }}>余额: ¥{r.user_balance.toFixed(2)}</div>
                         ) : null}
@@ -2696,7 +2701,7 @@ export default function App() {
                                   )
                                 }
                               },
-                              { title: '续费金额', key: 'renew', render: (_, r) => <span style={{ color: '#059669', fontWeight: 600 }}>¥{r.renew_price?.toFixed(2)}/月</span> },
+                              { title: '续费周期 / 金额', key: 'renew', width: 145, render: (_, r) => renderRenewalDisplay(r) },
                               {
                                 title: '操作',
                                 key: 'action',
@@ -3275,7 +3280,7 @@ export default function App() {
                                   )
                                 }
                               },
-                              { title: '续费价格', key: 'renew', render: (_, r) => <span>¥{r.renew_price?.toFixed(2)}/月</span> },
+                              { title: '续费周期 / 金额', key: 'renew', width: 145, render: (_, r) => renderRenewalDisplay(r) },
                               {
                                 title: '操作',
                                 key: 'action',

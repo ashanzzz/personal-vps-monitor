@@ -107,9 +107,15 @@ func (p *ACCKProvider) ListInstances(ctx context.Context) ([]providers.Instance,
 			resetPrice = 25.0 // ACCK 标准机型默认流量重置包为 ¥25.00
 		}
 		var userBalance float64
+		renewPrice := s.Price
 		if bv, err := p.client.GetBillingView(ctx, s.ID); err == nil && bv != nil {
 			userBalance = float64(bv.BalanceCents) / 100.0
+			if bv.RenewalPriceCents > 0 {
+				renewPrice = float64(bv.RenewalPriceCents)
+			}
 		}
+
+		cycleMonths, cycleName, monthlyPrice := providers.FormatCycle(s.Cycle, renewPrice)
 
 		out = append(out, providers.Instance{
 			ProviderID:        p.ID(),
@@ -133,7 +139,10 @@ func (p *ACCKProvider) ListInstances(ctx context.Context) ([]providers.Instance,
 			AutoReset:         s.AutoReset == 1,
 			UserBalance:       userBalance,
 			RootPassword:      s.InitPassword,
-			RenewPrice:        s.Price,
+			RenewPrice:        renewPrice,
+			Cycle:             cycleMonths,
+			CycleName:         cycleName,
+			MonthlyPrice:      monthlyPrice,
 			AutoRenew:         s.AutoRenew == 1,
 			ExpireDate:        expireStr,
 		})

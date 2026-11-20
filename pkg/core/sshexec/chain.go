@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -70,60 +71,13 @@ type ChainNodesResult struct {
 	Relays      []RelayNode   `json:"relays"`
 	Landings    []LandingNode `json:"landings"`
 	Chains      []ChainNode   `json:"chains"`
+	URILinks    []string      `json:"uri_links,omitempty"`
 	ClashConfig string        `json:"clash_config,omitempty"`
 	SingBoxJSON string        `json:"sing_box_json,omitempty"`
 }
 
-// GetChainProxyNodes 动态构建并导出自建 VPS ➔ 懒猫家宽链式代理节点
-func GetChainProxyNodes(ctx context.Context, relayIDOrIP, format string) (*ChainNodesResult, error) {
-	cache, err := store.LoadDailyCache()
-	if err != nil || cache == nil {
-		return nil, fmt.Errorf("failed to load daily cache: %w", err)
-	}
-
-	// 1. 查找前置中继 VPS
-	var relayInst *providers.Instance
-	var candidateRelays []providers.Instance
-
-	for _, inst := range cache.Instances {
-		if inst.ProviderID == "lazycat" {
-			continue
-		}
-		candidateRelays = append(candidateRelays, inst)
-	}
-
-	if relayIDOrIP != "" {
-		for _, inst := range candidateRelays {
-			if inst.ID == relayIDOrIP || inst.IP == relayIDOrIP || strings.Contains(strings.ToLower(inst.Name), strings.ToLower(relayIDOrIP)) {
-				cpy := inst
-				relayInst = &cpy
-				break
-			}
-		}
-	}
-
-	// 若未指定或未匹配到，默认优先选择美西 4837 (LAX4837ISP / 38.175.222.44)
-	if relayInst == nil {
-		for _, inst := range candidateRelays {
-			if strings.Contains(inst.Name, "4837") || inst.IP == "38.175.222.44" {
-				cpy := inst
-				relayInst = &cpy
-				break
-			}
-		}
-	}
-	// 仍未找到则取第一个普通 VPS
-	if relayInst == nil && len(candidateRelays) > 0 {
-		cpy := candidateRelays[0]
-		relayInst = &cpy
-	}
-
-	if relayInst == nil {
-		return nil, fmt.Errorf("no eligible relay VPS instance found")
-	}
-
-	// 2. 提取/探查前置 VPS 的可用入站代理
-	relayProxies, _ := InspectProxies(ctx, relayInst)
+func buildRelayForInstance(ctx context.Context, inst *providers.Instance) *RelayNode {
+	relayProxies, _ := InspectProxies(ctx, inst)
 	var activeRelayProxy *ProxyInfo
 	if relayProxies != nil && len(relayProxies.Proxies) > 0 {
 		for _, p := range relayProxies.Proxies {
@@ -137,9 +91,9 @@ func GetChainProxyNodes(ctx context.Context, relayIDOrIP, format string) (*Chain
 		}
 	}
 
-	// 兜底默认值 (针对普通独立 VPS 已知的标准 Reality 参数)
+	// 兜底默认值
 	if activeRelayProxy == nil {
-		if strings.Contains(strings.ToUpper(relayInst.Name), "JPSB") || relayInst.IP == "45.192.242.72" {
+		if strings.Contains(strings.ToUpper(inst.Name), "JPSB") || inst.IP == "45.192.242.72" {
 			activeRelayProxy = &ProxyInfo{
 				Port:      23488,
 				Protocol:  "vless",
@@ -148,6 +102,16 @@ func GetChainProxyNodes(ctx context.Context, relayIDOrIP, format string) (*Chain
 				UUID:      "6c82d382-abe8-4193-8d15-36122f4569f1",
 				PublicKey: "8HDGlFr5HeRx0csoPyjuhF7jbvsPOzIIFniCpUi6xxE",
 				ShortID:   "6ba85179e30d4fc2",
+			}
+		} else if strings.Contains(strings.ToUpper(inst.Name), "IIJ") || inst.IP == "156.231.113.91" {
+			activeRelayProxy = &ProxyInfo{
+				Port:      33338,
+				Protocol:  "vless",
+				Security:  "reality",
+				SNI:       "aws.amazon.com",
+				UUID:      "625d013c-28c5-4295-a5e7-459cf52459b9",
+				PublicKey: "Djl4lJnk4RIOWfywQJxvCRwhGyZdUdSk9Xquv-35TzI",
+				ShortID:   "3c4ffcc0",
 			}
 		} else {
 			activeRelayProxy = &ProxyInfo{
@@ -163,16 +127,16 @@ func GetChainProxyNodes(ctx context.Context, relayIDOrIP, format string) (*Chain
 	}
 
 	relayFlag := "🇺🇸"
-	if strings.Contains(strings.ToUpper(relayInst.Name), "JP") || strings.Contains(relayInst.Name, "日本") || relayInst.Region == "日本" {
+	if strings.Contains(strings.ToUpper(inst.Name), "JP") || strings.Contains(inst.Name, "日本") || inst.Region == "日本" {
 		relayFlag = "🇯🇵"
 	}
 
-	relayNodeName := fmt.Sprintf("%s %s-中继", relayFlag, relayInst.Name)
-	relayTag := "relay-" + relayInst.ID
-	primaryRelay := RelayNode{
+	relayNodeName := fmt.Sprintf("%s %s-直连", relayFlag, inst.Name)
+	relayTag := "relay-" + inst.ID
+	return &RelayNode{
 		Name:      relayNodeName,
 		Tag:       relayTag,
-		Server:    relayInst.IP,
+		Server:    inst.IP,
 		Port:      activeRelayProxy.Port,
 		Protocol:  activeRelayProxy.Protocol,
 		UUID:      activeRelayProxy.UUID,
@@ -181,10 +145,64 @@ func GetChainProxyNodes(ctx context.Context, relayIDOrIP, format string) (*Chain
 		ShortID:   activeRelayProxy.ShortID,
 		Flow:      "xtls-rprx-vision",
 	}
+}
 
-	relays := []RelayNode{primaryRelay}
+// GetChainProxyNodes 动态构建并导出自建 VPS ➔ 懒猫家宽链式代理节点
+func GetChainProxyNodes(ctx context.Context, relayIDOrIP, format string) (*ChainNodesResult, error) {
+	cache, err := store.LoadDailyCache()
+	if err != nil || cache == nil {
+		return nil, fmt.Errorf("failed to load daily cache: %w", err)
+	}
 
-	// 3. 提取懒猫云家宽出口节点与端口映射
+	// 1. 查找前置中继 VPS 候选列表
+	var candidateRelays []providers.Instance
+	for _, inst := range cache.Instances {
+		if inst.ProviderID == "lazycat" {
+			continue
+		}
+		candidateRelays = append(candidateRelays, inst)
+	}
+
+	if len(candidateRelays) == 0 {
+		return nil, fmt.Errorf("no eligible relay VPS instance found")
+	}
+
+	// 构建所有可用中继节点池
+	var relays []RelayNode
+	var relayJPSB, relayIIJ, relay4837 *RelayNode
+	relayMap := make(map[string]*RelayNode)
+
+	for _, inst := range candidateRelays {
+		cpy := inst
+		r := buildRelayForInstance(ctx, &cpy)
+		relays = append(relays, *r)
+		relayMap[inst.ID] = r
+		relayMap[inst.IP] = r
+
+		if strings.Contains(strings.ToUpper(inst.Name), "JPSB") || inst.IP == "45.192.242.72" {
+			relayJPSB = r
+		} else if strings.Contains(strings.ToUpper(inst.Name), "IIJ") || inst.IP == "156.231.113.91" {
+			relayIIJ = r
+		} else if strings.Contains(inst.Name, "4837") || inst.IP == "38.175.222.44" {
+			relay4837 = r
+		}
+	}
+
+	// 检查是否指定了单特定中继
+	var fixedRelay *RelayNode
+	if relayIDOrIP != "" && relayIDOrIP != "smart" {
+		for _, inst := range candidateRelays {
+			if inst.ID == relayIDOrIP || inst.IP == relayIDOrIP || strings.Contains(strings.ToLower(inst.Name), strings.ToLower(relayIDOrIP)) {
+				fixedRelay = relayMap[inst.ID]
+				break
+			}
+		}
+		if fixedRelay == nil && len(relays) > 0 {
+			fixedRelay = &relays[0]
+		}
+	}
+
+	// 2. 提取懒猫云家宽出口节点与端口映射
 	var lazycatInst *providers.Instance
 	for _, inst := range cache.Instances {
 		if inst.ProviderID == "lazycat" {
@@ -222,33 +240,32 @@ func GetChainProxyNodes(ctx context.Context, relayIDOrIP, format string) (*Chain
 		privToPubMap[pm.PrivatePort] = pm.PublicPort
 	}
 
-	// 4. 组装落地节点与链式组合
+	// 3. 组装落地节点与链式组合
 	var landings []LandingNode
 	var chains []ChainNode
+	var uriLinks []string
 
-	// 常用家宽认证凭据 (对应 test_chain.go 实测凭据与标准分配)
 	credentials := map[int]struct {
 		user string
 		pass string
 	}{
 		1:  {"user1", "-n9U8PoHRK7uVb2zxcKpww"},
-		2:  {"user2", "aB8kLm90PqRstUvwXyZ123"},
-		3:  {"user3", "kL9mNoPqRsTuVwXyZ01234"},
-		4:  {"user4", "mNoPqRsTuVwXyZ01234567"},
+		2:  {"user2", "WdzxeU1QBpTtVWZDpPdL6Q"},
+		3:  {"user3", "IY0K2hpQ0YZiln-JVSAitA"},
+		4:  {"user4", "TiLnxc9FkHZhXy5262l-bg"},
 		5:  {"user5", "i5uHEX9OhLbDhoDc3PfNLQ"},
-		6:  {"user6", "oPqRsTuVwXyZ0123456789"},
-		7:  {"user7", "PqRsTuVwXyZ01234567890"},
+		6:  {"user6", "reE7bg2tQ1ffuM1XgaO8nA"},
+		7:  {"user7", "0P4RXF0Ls-4uVC7au3nyVA"},
 		8:  {"user8", "qRsTuVwXyZ012345678901"},
-		9:  {"user9", "RsTuVwXyZ0123456789012"},
-		10: {"user10", "sTuVwXyZ01234567890123"},
-		11: {"user11", "TuVwXyZ012345678901234"},
+		9:  {"user9", "PsIxaCMrlN5j_E22pEW1Ng"},
+		10: {"user10", "_OAOs1xN1J5oASQkN-fXUA"},
+		11: {"user11", "beS062EIVtiJBD5mujofIA"},
 		12: {"user12", "uVwXyZ0123456789012345"},
 	}
 
 	for _, en := range egressNodes {
 		pubPort := privToPubMap[en.PrivatePort]
 		if pubPort <= 0 {
-			// 若尚未映射则跳过或提供私有端口指示
 			pubPort = en.PrivatePort + 30000
 		}
 
@@ -273,16 +290,51 @@ func GetChainProxyNodes(ctx context.Context, relayIDOrIP, format string) (*Chain
 		}
 		landings = append(landings, lNode)
 
-		chainNodeName := fmt.Sprintf("🔗 链式|%s ➔ %s", relayInst.Name, lNode.Name)
-		chainTag := fmt.Sprintf("chain-%s-to-out%d", relayInst.ID, en.ID)
+		// 智能地理就近配对中继
+		var chosenRelay *RelayNode
+		if fixedRelay != nil {
+			chosenRelay = fixedRelay
+		} else {
+			// 亚太/日本 -> 首选 JPSB4 (次选 IIJ，再选 4837)
+			cc := strings.ToUpper(en.CountryCode)
+			if cc == "JP" || cc == "KR" || cc == "TW" || cc == "SG" || cc == "HK" {
+				if relayJPSB != nil {
+					chosenRelay = relayJPSB
+				} else if relayIIJ != nil {
+					chosenRelay = relayIIJ
+				} else if relay4837 != nil {
+					chosenRelay = relay4837
+				}
+			} else {
+				// 美洲/其他 -> 首选 4837 (次选 JPSB)
+				if relay4837 != nil {
+					chosenRelay = relay4837
+				} else if relayJPSB != nil {
+					chosenRelay = relayJPSB
+				} else if relayIIJ != nil {
+					chosenRelay = relayIIJ
+				}
+			}
+		}
+
+		if chosenRelay == nil && len(relays) > 0 {
+			chosenRelay = &relays[0]
+		}
+
+		if chosenRelay == nil {
+			continue
+		}
+
+		chainNodeName := fmt.Sprintf("🔗 链式|%s ➔ %s", chosenRelay.Name, lNode.Name)
+		chainTag := fmt.Sprintf("chain-%s-to-out%d", chosenRelay.Tag, en.ID)
 
 		cNode := ChainNode{
 			Name:        chainNodeName,
 			Tag:         chainTag,
-			RelayName:   primaryRelay.Name,
-			RelayTag:    primaryRelay.Tag,
-			DialerProxy: primaryRelay.Name,
-			Detour:      primaryRelay.Tag,
+			RelayName:   chosenRelay.Name,
+			RelayTag:    chosenRelay.Tag,
+			DialerProxy: chosenRelay.Name,
+			Detour:      chosenRelay.Tag,
 			Server:      lazycatHostIP,
 			Port:        pubPort,
 			Protocol:    landingProto,
@@ -291,6 +343,17 @@ func GetChainProxyNodes(ctx context.Context, relayIDOrIP, format string) (*Chain
 			SNI:         en.SNI,
 		}
 		chains = append(chains, cNode)
+
+		// Sub-Store 兼容 URI 格式 (携带 ?dialerProxy=)
+		uri := fmt.Sprintf("socks5://%s:%s@%s:%d?dialerProxy=%s#%s",
+			url.QueryEscape(cred.user),
+			url.QueryEscape(cred.pass),
+			lazycatHostIP,
+			pubPort,
+			url.QueryEscape(chosenRelay.Name),
+			url.QueryEscape(chainNodeName),
+		)
+		uriLinks = append(uriLinks, uri)
 	}
 
 	res := &ChainNodesResult{
@@ -298,15 +361,16 @@ func GetChainProxyNodes(ctx context.Context, relayIDOrIP, format string) (*Chain
 		Relays:      relays,
 		Landings:    landings,
 		Chains:      chains,
+		URILinks:    uriLinks,
 	}
 
-	// 5. 格式化输出
+	// 4. 格式化输出
 	formatLower := strings.ToLower(format)
 	if formatLower == "clash" || formatLower == "mihomo" || formatLower == "yaml" || formatLower == "all" {
-		res.ClashConfig = generateClashConfig(primaryRelay, chains)
+		res.ClashConfig = generateClashConfig(relays, chains)
 	}
 	if formatLower == "sing-box" || formatLower == "singbox" || formatLower == "json-box" || formatLower == "all" {
-		res.SingBoxJSON = generateSingBoxConfig(primaryRelay, chains)
+		res.SingBoxJSON = generateSingBoxConfig(relays, chains)
 	}
 
 	return res, nil
@@ -335,32 +399,40 @@ func GetChainProxyNodesWithAudit(ctx context.Context, source, relayIDOrIP, forma
 	return res, nil
 }
 
-func generateClashConfig(relay RelayNode, chains []ChainNode) string {
+func generateClashConfig(relays []RelayNode, chains []ChainNode) string {
 	var sb strings.Builder
 	sb.WriteString("proxies:\n")
 
-	// 1. 中继节点
-	sb.WriteString(fmt.Sprintf("  - name: %q\n", relay.Name))
-	sb.WriteString(fmt.Sprintf("    type: %s\n", relay.Protocol))
-	sb.WriteString(fmt.Sprintf("    server: %s\n", relay.Server))
-	sb.WriteString(fmt.Sprintf("    port: %d\n", relay.Port))
-	if relay.UUID != "" {
-		sb.WriteString(fmt.Sprintf("    uuid: %s\n", relay.UUID))
-	}
-	sb.WriteString("    network: tcp\n")
-	sb.WriteString("    tls: true\n")
-	sb.WriteString("    udp: true\n")
-	if relay.SNI != "" {
-		sb.WriteString(fmt.Sprintf("    servername: %s\n", relay.SNI))
-	}
-	if relay.PublicKey != "" {
-		sb.WriteString("    reality-opts:\n")
-		sb.WriteString(fmt.Sprintf("      public-key: %s\n", relay.PublicKey))
-		if relay.ShortID != "" {
-			sb.WriteString(fmt.Sprintf("      short-id: %s\n", relay.ShortID))
+	// 1. 中继节点列表 (去重)
+	seenRelays := make(map[string]bool)
+	for _, relay := range relays {
+		if seenRelays[relay.Name] {
+			continue
 		}
+		seenRelays[relay.Name] = true
+
+		sb.WriteString(fmt.Sprintf("  - name: %q\n", relay.Name))
+		sb.WriteString(fmt.Sprintf("    type: %s\n", relay.Protocol))
+		sb.WriteString(fmt.Sprintf("    server: %s\n", relay.Server))
+		sb.WriteString(fmt.Sprintf("    port: %d\n", relay.Port))
+		if relay.UUID != "" {
+			sb.WriteString(fmt.Sprintf("    uuid: %s\n", relay.UUID))
+		}
+		sb.WriteString("    network: tcp\n")
+		sb.WriteString("    tls: true\n")
+		sb.WriteString("    udp: true\n")
+		if relay.SNI != "" {
+			sb.WriteString(fmt.Sprintf("    servername: %s\n", relay.SNI))
+		}
+		if relay.PublicKey != "" {
+			sb.WriteString("    reality-opts:\n")
+			sb.WriteString(fmt.Sprintf("      public-key: %s\n", relay.PublicKey))
+			if relay.ShortID != "" {
+				sb.WriteString(fmt.Sprintf("      short-id: %s\n", relay.ShortID))
+			}
+		}
+		sb.WriteString("    client-fingerprint: chrome\n\n")
 	}
-	sb.WriteString("    client-fingerprint: chrome\n\n")
 
 	// 2. 链式落地节点
 	for _, c := range chains {
@@ -383,32 +455,40 @@ func generateClashConfig(relay RelayNode, chains []ChainNode) string {
 	return sb.String()
 }
 
-func generateSingBoxConfig(relay RelayNode, chains []ChainNode) string {
+func generateSingBoxConfig(relays []RelayNode, chains []ChainNode) string {
 	outbounds := make([]map[string]interface{}, 0)
 
-	// 中继 Outbound
-	relayOutbound := map[string]interface{}{
-		"type":        relay.Protocol,
-		"tag":         relay.Tag,
-		"server":      relay.Server,
-		"server_port": relay.Port,
-		"uuid":        relay.UUID,
-		"flow":        relay.Flow,
-		"tls": map[string]interface{}{
-			"enabled":     true,
-			"server_name": relay.SNI,
-			"reality": map[string]interface{}{
-				"enabled":    true,
-				"public_key": relay.PublicKey,
-				"short_id":   relay.ShortID,
-			},
-			"utls": map[string]interface{}{
+	// 中继 Outbounds (去重)
+	seenRelays := make(map[string]bool)
+	for _, relay := range relays {
+		if seenRelays[relay.Tag] {
+			continue
+		}
+		seenRelays[relay.Tag] = true
+
+		relayOutbound := map[string]interface{}{
+			"type":        relay.Protocol,
+			"tag":         relay.Tag,
+			"server":      relay.Server,
+			"server_port": relay.Port,
+			"uuid":        relay.UUID,
+			"flow":        relay.Flow,
+			"tls": map[string]interface{}{
 				"enabled":     true,
-				"fingerprint": "chrome",
+				"server_name": relay.SNI,
+				"reality": map[string]interface{}{
+					"enabled":    true,
+					"public_key": relay.PublicKey,
+					"short_id":   relay.ShortID,
+				},
+				"utls": map[string]interface{}{
+					"enabled":     true,
+					"fingerprint": "chrome",
+				},
 			},
-		},
+		}
+		outbounds = append(outbounds, relayOutbound)
 	}
-	outbounds = append(outbounds, relayOutbound)
 
 	// 链式落地 Outbound
 	for _, c := range chains {

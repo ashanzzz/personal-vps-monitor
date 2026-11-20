@@ -82,6 +82,9 @@ export interface Instance {
   user_balance?: number
   root_password?: string
   renew_price?: number
+  cycle?: number
+  cycle_name?: string
+  monthly_price?: number
   auto_renew?: boolean
   port_count?: number
   port_limit?: number

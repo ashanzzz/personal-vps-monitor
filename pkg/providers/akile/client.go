@@ -132,6 +132,8 @@ type AkileServerItem struct {
 	UsedFlow     int64   `json:"used_flow"`
 	Price        float64 `json:"price"`
 	RenewPrice   float64 `json:"renew_price"`
+	Cycle        int     `json:"cycle"`
+	PlanName     string  `json:"plan_name"`
 	AutoRenew    bool    `json:"auto_renew"`
 	InitUsername string  `json:"init_username"`
 	InitPassword string  `json:"init_password"`

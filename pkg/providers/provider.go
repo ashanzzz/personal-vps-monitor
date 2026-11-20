@@ -39,6 +39,9 @@ type Instance struct {
 	UserBalance       float64 `json:"user_balance,omitempty"`        // 用户平台可用余额 (¥)
 	RootPassword      string  `json:"root_password,omitempty"`       // root 初始/当前密码
 	RenewPrice        float64 `json:"renew_price,omitempty"`         // 续费金额 (¥)
+	Cycle             int     `json:"cycle,omitempty"`               // 计费周期月数 (例如 1:月付, 12:年付)
+	CycleName         string  `json:"cycle_name,omitempty"`          // 周期人类可读标签: "月付", "年付", "季付", "半年付"
+	MonthlyPrice      float64 `json:"monthly_price,omitempty"`       // 归一化等效月供 (¥/月)
 	AutoRenew        bool    `json:"auto_renew,omitempty"`         // 是否开启自动续费
 	PortCount        int     `json:"port_count,omitempty"`
 	PortLimit        int     `json:"port_limit,omitempty"`

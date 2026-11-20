@@ -125,7 +125,7 @@ func TestChainProxyGeneration(t *testing.T) {
 		},
 	}
 
-	clashYAML := generateClashConfig(relay, chains)
+	clashYAML := generateClashConfig([]RelayNode{relay}, chains)
 	if !strings.Contains(clashYAML, "dialer-proxy: \"🇺🇸 美西-4837-中继\"") {
 		t.Errorf("clash yaml missing dialer-proxy: %s", clashYAML)
 	}
@@ -133,7 +133,7 @@ func TestChainProxyGeneration(t *testing.T) {
 		t.Errorf("clash yaml missing reality opts: %s", clashYAML)
 	}
 
-	singboxJSON := generateSingBoxConfig(relay, chains)
+	singboxJSON := generateSingBoxConfig([]RelayNode{relay}, chains)
 	if !strings.Contains(singboxJSON, "\"detour\": \"relay-lax\"") {
 		t.Errorf("singbox json missing detour: %s", singboxJSON)
 	}
