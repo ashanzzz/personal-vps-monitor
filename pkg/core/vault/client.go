@@ -382,15 +382,15 @@ func PullAndSyncFromVaultwarden(ctx context.Context, server, email, password str
 
 		// 智能识别并自动持久化回写至监控凭据库
 		if strings.Contains(nameLower, "akile") && p != "" {
-			_ = config.SaveProviderCredential("akile", u, p, true)
+			_ = config.SaveProviderCredentialWithTOTP("akile", u, p, totp, true)
 			matchedItems = append(matchedItems, item)
 		}
 		if (strings.Contains(nameLower, "lazycat") || strings.Contains(nameLower, "懒猫")) && p != "" {
-			_ = config.SaveProviderCredential("lazycat", u, p, true)
+			_ = config.SaveProviderCredentialWithTOTP("lazycat", u, p, totp, true)
 			matchedItems = append(matchedItems, item)
 		}
 		if (strings.Contains(nameLower, "acck") || strings.Contains(nameLower, "acck.io")) && p != "" {
-			_ = config.SaveProviderCredential("acck", u, p, true)
+			_ = config.SaveProviderCredentialWithTOTP("acck", u, p, totp, true)
 			matchedItems = append(matchedItems, item)
 		}
 	}
