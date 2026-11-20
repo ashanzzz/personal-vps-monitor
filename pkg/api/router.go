@@ -56,6 +56,22 @@ func NewRouter() http.Handler {
 	}
 
 	r.Route("/api", func(r chi.Router) {
+		r.Get("/version", func(w http.ResponseWriter, r *http.Request) {
+			respondJSON(w, http.StatusOK, map[string]interface{}{
+				"service": "personal-vps-monitor",
+				"version": "v2.0.0-modular",
+				"arch":    "go-static-headless",
+			})
+		})
+
+		r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"status": "healthy",
+				"time":   time.Now().Format(time.RFC3339),
+			})
+		})
+
 		// 管理员认证公开接口 (/api/auth/status, /api/auth/login, /api/auth/setup, /api/auth/logout)
 		registerAuthRoutes(r)
 

@@ -65,6 +65,6 @@ VOLUME ["/app/data"]
 EXPOSE 80
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1/api/version', timeout=5).read()"
+  CMD curl -f http://127.0.0.1/api/version || curl -f http://127.0.0.1:3338/health || exit 1
 
 CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
