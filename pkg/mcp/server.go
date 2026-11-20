@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/audit"
+	"github.com/ashanzzz/personal-vps-monitor/pkg/core/sshexec"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
 	"github.com/go-chi/chi/v5"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -30,6 +31,9 @@ func New() (*Server, error) {
 	if err := providers.RegisterAllMCPTools(s); err != nil {
 		return nil, fmt.Errorf("failed to register provider mcp tools: %w", err)
 	}
+
+	// 注册普通独立主机 SSH 免交互执行、代理探查、换端口自愈与链式导出 MCP 工具
+	sshexec.RegisterTools(s)
 
 	// 注册全局审计日志查询工具 (AI 行为回溯与审计)
 	s.AddTool(mcp.NewTool("vps_hub_get_audit_logs",

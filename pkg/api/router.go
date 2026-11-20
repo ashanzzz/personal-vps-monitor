@@ -158,6 +158,9 @@ func NewRouter() http.Handler {
 				r.Post("/sync", handleLazyCatSync)
 				r.Post("/checkin", handleLazyCatCheckin)
 			})
+
+			// 普通独立主机代理生命周期管理与 SSH 执行引擎 (REST API & 链式代理导出)
+			registerInstanceExecRoutes(r)
 		})
 	})
 

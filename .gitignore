@@ -37,3 +37,4 @@ logs/
 # Go build artifacts
 bin/
 *.exe
+cmd/ssh_tool/
