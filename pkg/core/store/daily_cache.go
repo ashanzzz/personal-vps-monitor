@@ -75,6 +75,39 @@ func SaveDailyCache(cache *DailyInstancesCache) error {
 	return os.Rename(tmpFile, getDailyCacheFile())
 }
 
+// UpdateProviderInstancesInCache 单独更新某个服务商的实例数据并持久化回写每日缓存
+func UpdateProviderInstancesInCache(providerID string, newInsts []providers.Instance) error {
+	cache, err := LoadDailyCache()
+	if err != nil || cache == nil {
+		cache = &DailyInstancesCache{
+			Instances:      make([]providers.Instance, 0),
+			ProviderStatus: make(map[string]ProviderSyncStatus),
+		}
+	}
+
+	// 移除旧的同 provider 实例
+	filtered := make([]providers.Instance, 0, len(cache.Instances))
+	for _, inst := range cache.Instances {
+		if inst.ProviderID != providerID {
+			filtered = append(filtered, inst)
+		}
+	}
+	filtered = append(filtered, newInsts...)
+	cache.Instances = filtered
+	cache.Total = len(filtered)
+	cache.LastSyncedAt = time.Now().Format("2006-01-02 15:04:05")
+
+	if cache.ProviderStatus == nil {
+		cache.ProviderStatus = make(map[string]ProviderSyncStatus)
+	}
+	cache.ProviderStatus[providerID] = ProviderSyncStatus{
+		Status:        "ok",
+		LastAttemptAt: cache.LastSyncedAt,
+	}
+
+	return SaveDailyCache(cache)
+}
+
 // SyncAllInstancesDaily 每日全量同步三大服务商资产（月流量、Root密码、IP、规格）
 // 核心原则：若某厂商登录失效或接口异常，绝不清空已有缓存，标记 is_stale 并保留历史数据！
 func SyncAllInstancesDaily(ctx context.Context, force bool) (*DailyInstancesCache, error) {

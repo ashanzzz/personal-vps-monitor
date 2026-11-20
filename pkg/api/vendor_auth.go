@@ -632,6 +632,7 @@ func handleVendorSingleSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	nowStr := store.RecordRefreshTime("instances:" + provider)
+	_ = store.UpdateProviderInstancesInCache(provider, insts)
 	audit.Record("rest_api", "vendor.single_sync", provider, map[string]interface{}{"count": len(insts)}, "SUCCESS", fmt.Sprintf("单服务商 %s 强制同步成功，获取 %d 台实例", provider, len(insts)), 0)
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
