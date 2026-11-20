@@ -47,11 +47,7 @@ func MaskUsername(u string) string {
 	return u[:3] + "***"
 }
 
-// LoadSavedCredentials 读取持久化保存的账号密码凭据 (支持 credentials.json 与环境变量回退)
-func LoadSavedCredentials() *SavedCredentials {
-	credMu.RLock()
-	defer credMu.RUnlock()
-
+func loadSavedCredentialsLocked() *SavedCredentials {
 	p := getCredentialsPath()
 	b, err := os.ReadFile(p)
 	var sc SavedCredentials
@@ -85,12 +81,19 @@ func LoadSavedCredentials() *SavedCredentials {
 	return &sc
 }
 
+// LoadSavedCredentials 读取持久化保存的账号密码凭据 (支持 credentials.json 与环境变量回退)
+func LoadSavedCredentials() *SavedCredentials {
+	credMu.RLock()
+	defer credMu.RUnlock()
+	return loadSavedCredentialsLocked()
+}
+
 // SaveProviderCredential 保存或更新指定厂商的免密登录账号凭据
 func SaveProviderCredential(provider, username, password string, autoRefresh bool) error {
 	credMu.Lock()
 	defer credMu.Unlock()
 
-	sc := LoadSavedCredentials()
+	sc := loadSavedCredentialsLocked()
 	cred := &ProviderCredential{
 		Username:    username,
 		Password:    password,
