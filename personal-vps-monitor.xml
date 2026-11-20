@@ -41,4 +41,10 @@
   <Config Name="PUBLIC_CONTROL_TOKEN" Target="PUBLIC_CONTROL_TOKEN" Default="" Mode="" Description="第三方可写控制 API 密钥（可选）。配置后可通过 /api/control/v1 控制后端刷新与设置。" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
 
   <Config Name="TZ" Target="TZ" Default="Asia/Shanghai" Mode="" Description="容器时区（用于日志时间戳和定时任务）" Type="Variable" Display="advanced" Required="false" Mask="false">Asia/Shanghai</Config>
+
+  <Config Name="HTTP_PROXY" Target="HTTP_PROXY" Default="http://192.168.8.11:7890" Mode="" Description="出境代理（加速请求 Akile、ACCK 海外 API）" Type="Variable" Display="advanced" Required="false" Mask="false">http://192.168.8.11:7890</Config>
+
+  <Config Name="HTTPS_PROXY" Target="HTTPS_PROXY" Default="http://192.168.8.11:7890" Mode="" Description="出境 HTTPS 代理" Type="Variable" Display="advanced" Required="false" Mask="false">http://192.168.8.11:7890</Config>
+
+  <Config Name="NO_PROXY" Target="NO_PROXY" Default="127.0.0.1,localhost,192.168.8.11,172.17.0.0/16" Mode="" Description="代理白名单穿透" Type="Variable" Display="advanced" Required="false" Mask="false">127.0.0.1,localhost,192.168.8.11,172.17.0.0/16</Config>
 </Container>
