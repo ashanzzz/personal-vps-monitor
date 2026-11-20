@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 
-__version__ = "0.12.0"
+__version__ = "2.0.0"
 
 
 def get_version_info() -> dict:

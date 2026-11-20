@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"text/tabwriter"
 	"time"
 
@@ -65,7 +66,7 @@ var lazycatPortsCmd = &cobra.Command{
 				status := "CLOSED"
 				latencyStr := "-"
 				if m.Protocol == "tcp" && publicIP != "" {
-					addr := fmt.Sprintf("%s:%d", publicIP, m.PublicPort)
+					addr := net.JoinHostPort(publicIP, strconv.Itoa(m.PublicPort))
 					start := time.Now()
 					conn, err := net.DialTimeout("tcp", addr, 1500*time.Millisecond)
 					if err == nil {

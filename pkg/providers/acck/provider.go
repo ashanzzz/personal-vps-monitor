@@ -3,8 +3,10 @@ package acck
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/config"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
@@ -32,10 +34,25 @@ func (p *ACCKProvider) Init(ctx context.Context, cfg *config.Config) error {
 	return nil
 }
 
+func (p *ACCKProvider) SetToken(token string) {
+	if p.client == nil {
+		p.client = NewClient(token, config.Global.ProxyURL)
+	} else {
+		p.client.SetToken(token)
+	}
+}
+
+func (p *ACCKProvider) VerifyToken(ctx context.Context) error {
+	if p.client == nil {
+		return fmt.Errorf("acck client not initialized")
+	}
+	return p.client.VerifyToken(ctx)
+}
+
 // ListInstances 实例查询
 func (p *ACCKProvider) ListInstances(ctx context.Context) ([]providers.Instance, error) {
-	if p.client == nil {
-		return nil, fmt.Errorf("acck client not initialized")
+	if p.client == nil || p.client.token == "" {
+		return []providers.Instance{}, nil
 	}
 
 	servers, err := p.client.GetMyServers(ctx)
@@ -45,14 +62,80 @@ func (p *ACCKProvider) ListInstances(ctx context.Context) ([]providers.Instance,
 
 	out := make([]providers.Instance, 0, len(servers))
 	for _, s := range servers {
+		statusStr := "stopped"
+		if s.Status == 1 {
+			statusStr = "running"
+		}
+		expireStr := ""
+		if s.DueTime > 0 {
+			expireStr = time.Unix(s.DueTime, 0).Format("2006-01-02 15:04:05")
+		}
+		name := s.ServerReName
+		if name == "" {
+			name = s.ServerName
+		}
+		sshUser := s.InitUsername
+		if sshUser == "" {
+			sshUser = "root"
+		}
+
+		trafficUsed := ""
+		trafficTotal := fmt.Sprintf("%d GB", s.Flow)
+		trafficPercent := 0.0
+		trafficResetDate := ""
+
+		if s.ServerID != "" {
+			if vmInfo, err := p.client.GetVmInfo(ctx, s.ServerID); err == nil && vmInfo != nil {
+				usedGB := float64(vmInfo.BandwidthUsage) / (1024.0 * 1024.0 * 1024.0)
+				limitGB := float64(vmInfo.BandwidthLimit) / (1024.0 * 1024.0 * 1024.0)
+				if limitGB <= 0 && s.Flow > 0 {
+					limitGB = float64(s.Flow)
+				}
+				trafficUsed = fmt.Sprintf("%.2f GB", usedGB)
+				if limitGB > 0 {
+					trafficTotal = fmt.Sprintf("%.0f GB", limitGB)
+					trafficPercent = (usedGB / limitGB) * 100.0
+				}
+				if vmInfo.NextResetTime > 0 {
+					trafficResetDate = time.Unix(vmInfo.NextResetTime, 0).Format("2006-01-02 15:04:05")
+				}
+			}
+		}
+
+		resetPrice := s.ResetFlowPrice
+		if resetPrice <= 0 {
+			resetPrice = 25.0 // ACCK 标准机型默认流量重置包为 ¥25.00
+		}
+		var userBalance float64
+		if bv, err := p.client.GetBillingView(ctx, s.ID); err == nil && bv != nil {
+			userBalance = float64(bv.BalanceCents) / 100.0
+		}
+
 		out = append(out, providers.Instance{
-			ProviderID: p.ID(),
-			ID:         strconv.Itoa(s.ID),
-			Name:       s.Name,
-			IP:         s.IP,
-			Status:     s.Status,
-			Region:     s.Region,
-			ExpireDate: s.ExpireDate,
+			ProviderID:        p.ID(),
+			ID:                strconv.Itoa(s.ID),
+			Name:              name,
+			IP:                s.IPv4,
+			IPv4:              s.IPv4,
+			IPv6:              s.IPv6,
+			SSHUser:           sshUser,
+			SSHPassword:       s.InitPassword,
+			SSHPort:           22,
+			Status:            statusStr,
+			Region:            s.AreaName,
+			CPU:               fmt.Sprintf("%d核", s.CPU),
+			Memory:            fmt.Sprintf("%d MB", s.Memory),
+			TrafficUsed:       trafficUsed,
+			TrafficTotal:      trafficTotal,
+			TrafficPercent:    trafficPercent,
+			TrafficResetDate:  trafficResetDate,
+			TrafficResetPrice: resetPrice,
+			AutoReset:         s.AutoReset == 1,
+			UserBalance:       userBalance,
+			RootPassword:      s.InitPassword,
+			RenewPrice:        s.Price,
+			AutoRenew:         s.AutoRenew == 1,
+			ExpireDate:        expireStr,
 		})
 	}
 	return out, nil
@@ -115,18 +198,77 @@ func (p *ACCKProvider) ListMarketItems(ctx context.Context) ([]providers.MarketI
 		if l.BandwidthMbps > 0 {
 			bw = fmt.Sprintf("%d Mbps", l.BandwidthMbps)
 		}
+		detail := l.IntroText
+		if detail == "" {
+			detail = l.NodeComment
+		}
+		var discount float64
+		if l.RenewalPrice > 0 {
+			discount = math.Round((l.Price/l.RenewalPrice)*1000) / 10.0
+		}
+		cfgDesc := fmt.Sprintf("%dC / %dM", l.CPU, l.MemoryMB)
+		if l.DiskGB > 0 {
+			cfgDesc = fmt.Sprintf("%s / %dG", cfgDesc, l.DiskGB)
+		}
+		if l.FlowGB > 0 {
+			cfgDesc = fmt.Sprintf("%s · %dG", cfgDesc, l.FlowGB)
+		}
+		cpuStr := ""
+		if l.CPU > 0 {
+			cpuStr = fmt.Sprintf("%dC", l.CPU)
+		}
+		memStr := ""
+		if l.MemoryMB > 0 {
+			memStr = fmt.Sprintf("%dM", l.MemoryMB)
+		}
+		diskStr := ""
+		if l.DiskGB > 0 {
+			diskStr = fmt.Sprintf("%dG", l.DiskGB)
+		}
+		flowStr := ""
+		if l.FlowGB > 0 {
+			flowStr = fmt.Sprintf("%dG", l.FlowGB)
+		}
+
 		out = append(out, providers.MarketItem{
-			ProviderID: p.ID(),
-			ID:         strconv.Itoa(l.ID),
-			Name:       name,
-			Price:      l.Price,
-			Location:   loc,
-			Bandwidth:  bw,
-			ConfigDesc: fmt.Sprintf("%dC / %dM", l.CPU, l.MemoryMB),
-			CreatedAt:  l.CreatedAt,
+			ProviderID:      p.ID(),
+			ID:              strconv.Itoa(l.ID),
+			Name:            name,
+			Price:           l.Price,
+			RenewalPrice:    l.RenewalPrice,
+			DiscountPercent: discount,
+			ResetPrice:      l.ResetPrice,
+			PlatformFee:     l.PlatformFee,
+			FlowUsed:        l.FlowUsed,
+			Cycle:           l.Cycle,
+			SellerUserID:    l.SellerUserID,
+			Location:        loc,
+			Bandwidth:       bw,
+			ConfigDesc:      cfgDesc,
+			CPU:             cpuStr,
+			Memory:          memStr,
+			Disk:            diskStr,
+			TrafficTotal:    flowStr,
+			Detail:          detail,
+			DueTime:         l.DueTime,
+			CreatedAt:       l.CreatedAt,
+			CanBuy:          true,
+			MarketType:      "secondhand",
 		})
 	}
 	return out, nil
+}
+
+// BuyMarketItem 购买二手集市商品 (Exchange)
+func (p *ACCKProvider) BuyMarketItem(ctx context.Context, itemID string) error {
+	if p.client == nil {
+		return fmt.Errorf("acck client not initialized")
+	}
+	id, err := strconv.Atoi(itemID)
+	if err != nil {
+		return fmt.Errorf("invalid acck item id: %s", itemID)
+	}
+	return p.client.BuyExchangeListing(ctx, id)
 }
 
 func (p *ACCKProvider) RegisterMCPTools(s *server.MCPServer) error {

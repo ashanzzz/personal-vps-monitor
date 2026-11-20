@@ -629,11 +629,13 @@ async def auth_setup(body: SetupBody, db: AsyncSession = Depends(get_db)):
 
 @app.post("/api/auth/login", tags=["admin"])
 async def auth_login(body: LoginBody, db: AsyncSession = Depends(get_db)):
-    admin = await auth.get_admin(db)
-    # Constant-ish behaviour: don't reveal whether the username exists.
-    if admin is None or admin.username != body.username or not auth.verify_password(
-        body.password, admin.password_hash
-    ):
+    admin = await auth.get_admin_by_username(db, body.username)
+    if admin is None:
+        primary = await auth.get_admin(db)
+        if primary is not None and primary.username == body.username:
+            admin = primary
+
+    if admin is None or not auth.verify_password(body.password, admin.password_hash):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     token = await auth.issue_token(db, admin.username)
     return {"token": token, "username": admin.username}

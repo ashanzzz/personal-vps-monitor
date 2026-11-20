@@ -107,22 +107,40 @@ async def get_admin(db: AsyncSession) -> AdminUser | None:
     return await db.scalar(select(AdminUser).limit(1))
 
 
+async def get_admin_by_username(db: AsyncSession, username: str) -> AdminUser | None:
+    return await db.scalar(select(AdminUser).where(AdminUser.username == username))
+
+
 async def admin_exists() -> bool:
     async with SessionLocal() as db:
         return (await get_admin(db)) is not None
 
 
 async def provision_from_env() -> None:
-    """Create the admin from ADMIN_USER/ADMIN_PASSWORD if none exists yet."""
+    """Provision or sync admin credentials from env / Docker variables.
+
+    1. If ADMIN_USER / ADMIN_PASSWORD are set via Docker / env, update or insert that admin
+       so Docker variable injection always takes effect.
+    2. If not set and no admin exists yet, default to admin / admin.
+    """
     user = os.getenv("ADMIN_USER", "").strip()
     pw = os.getenv("ADMIN_PASSWORD", "")
-    if not user or not pw:
-        return
+
     async with SessionLocal() as db:
-        if await get_admin(db) is not None:
-            return
-        db.add(AdminUser(username=user, password_hash=hash_password(pw)))
-        await db.commit()
+        admin = await get_admin(db)
+        if user and pw:
+            existing = await get_admin_by_username(db, user)
+            if existing is not None:
+                existing.password_hash = hash_password(pw)
+            elif admin is not None:
+                admin.username = user
+                admin.password_hash = hash_password(pw)
+            else:
+                db.add(AdminUser(username=user, password_hash=hash_password(pw)))
+            await db.commit()
+        elif admin is None:
+            db.add(AdminUser(username="admin", password_hash=hash_password("admin")))
+            await db.commit()
 
 
 async def create_admin(db: AsyncSession, username: str, password: str) -> None:

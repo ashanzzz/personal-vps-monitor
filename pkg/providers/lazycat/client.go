@@ -15,12 +15,17 @@ import (
 type Client struct {
 	baseURL    string
 	token      string
+	proxyURL   string
 	httpClient *http.Client
 }
 
 func NewClient(token, proxyURL string) *Client {
 	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
+		Proxy:                 http.ProxyFromEnvironment,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 6 * time.Second,
+		IdleConnTimeout:       10 * time.Second,
+		DisableKeepAlives:     true,
 	}
 	if proxyURL != "" {
 		if u, err := url.Parse(proxyURL); err == nil {
@@ -29,13 +34,18 @@ func NewClient(token, proxyURL string) *Client {
 	}
 
 	return &Client{
-		baseURL: "https://dash.lazycat.wiki/api",
-		token:   token,
+		baseURL:  "https://dash.lazycat.wiki/api",
+		token:    token,
+		proxyURL: proxyURL,
 		httpClient: &http.Client{
 			Transport: transport,
-			Timeout:   15 * time.Second,
+			Timeout:   8 * time.Second,
 		},
 	}
+}
+
+func (c *Client) SetProxyURL(proxyURL string) {
+	c.proxyURL = proxyURL
 }
 
 func (c *Client) doRequest(ctx context.Context, method, path string, body interface{}) ([]byte, error) {
@@ -74,6 +84,66 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	}
 
 	return respBody, nil
+}
+
+type LazyCatLoginResponse struct {
+	Token       string `json:"token"`
+	AccessToken string `json:"access_token"`
+	Message     string `json:"message"`
+	Data        *struct {
+		Token       string `json:"token"`
+		AccessToken string `json:"accessToken"`
+	} `json:"data,omitempty"`
+}
+
+// Login 使用账号密码 (可选 2FA TOTP 动态码) 登录懒猫云
+func (c *Client) Login(ctx context.Context, username, password, totpCode string) (token string, need2FA bool, msg string, err error) {
+	payload := map[string]interface{}{
+		"username":          username,
+		"password":          password,
+		"totpCode":          nil,
+		"recoveryCode":      nil,
+		"turnstileToken":    nil,
+		"deviceFingerprint": "",
+	}
+	if strings.TrimSpace(totpCode) != "" {
+		payload["totpCode"] = strings.TrimSpace(totpCode)
+	}
+
+	data, err := c.doRequest(ctx, "POST", "/auth/login", payload)
+	if err != nil {
+		errStr := strings.ToLower(err.Error())
+		if strings.TrimSpace(totpCode) == "" && (strings.Contains(errStr, "totp") || strings.Contains(errStr, "2fa") || strings.Contains(errStr, "二次验证") || strings.Contains(errStr, "动态码")) {
+			return "", true, "该账号已开启 2FA 二次验证，请输入验证器 6 位动态码", nil
+		}
+		return "", false, "", err
+	}
+
+	var res LazyCatLoginResponse
+	_ = json.Unmarshal(data, &res)
+
+	tok := res.Token
+	if tok == "" {
+		tok = res.AccessToken
+	}
+	if tok == "" && res.Data != nil {
+		if res.Data.Token != "" {
+			tok = res.Data.Token
+		} else {
+			tok = res.Data.AccessToken
+		}
+	}
+
+	if tok == "" {
+		raw := string(data)
+		if strings.TrimSpace(totpCode) == "" && (strings.Contains(raw, "totp") || strings.Contains(raw, "2fa") || strings.Contains(raw, "二次验证")) {
+			return "", true, "请输入二次验证码", nil
+		}
+		return "", false, "", fmt.Errorf("登录成功但未提取到 Token: %s", raw)
+	}
+
+	c.token = tok
+	return tok, false, "登录成功", nil
 }
 
 type PortMappingItem struct {
@@ -162,12 +232,115 @@ func (c *Client) GetInstanceDetail(ctx context.Context, instanceID string) (*Ins
 	return &res, nil
 }
 
+type InstanceTrafficResponse struct {
+	MonthlyUsed           string  `json:"monthlyUsed"`
+	MonthlyUsedFormatted  string  `json:"monthlyUsedFormatted"`
+	MonthlyLimit          string  `json:"monthlyLimit"`
+	MonthlyLimitFormatted string  `json:"monthlyLimitFormatted"`
+	TrafficStatus         string  `json:"trafficStatus"`
+	Percentage            float64 `json:"percentage"`
+	PeriodStart           string  `json:"periodStart"`
+	PeriodEnd             string  `json:"periodEnd"`
+	PaidResetAvailable    bool    `json:"paidResetAvailable"`
+}
+
+func (c *Client) GetInstanceTraffic(ctx context.Context, instanceID int) (*InstanceTrafficResponse, error) {
+	path := fmt.Sprintf("/instances/%d/traffic", instanceID)
+	data, err := c.doRequest(ctx, "GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var res InstanceTrafficResponse
+	if err := json.Unmarshal(data, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+type TrafficResetQuoteResponse struct {
+	Available            bool    `json:"available"`
+	Price                float64 `json:"price"`
+	PriceMode            string  `json:"priceMode"`
+	OriginalCyclePrice   float64 `json:"originalCyclePrice"`
+	DiscountedCyclePrice float64 `json:"discountedCyclePrice"`
+	BillingCycle         int     `json:"billingCycle"`
+	DiscountPercent      float64 `json:"discountPercent"`
+	Balance              float64 `json:"balance"`
+	MonthlyUsedFormatted string  `json:"monthlyUsedFormatted"`
+	MonthlyLimitFormatted string `json:"monthlyLimitFormatted"`
+	PeriodStart          string  `json:"periodStart"`
+	PeriodEnd            string  `json:"periodEnd"`
+}
+
+func (c *Client) GetTrafficResetQuote(ctx context.Context, instanceID int) (*TrafficResetQuoteResponse, error) {
+	path := fmt.Sprintf("/instances/%d/traffic/reset-quote", instanceID)
+	data, err := c.doRequest(ctx, "GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var res TrafficResetQuoteResponse
+	if err := json.Unmarshal(data, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+type InstancePasswordResponse struct {
+	RootPassword string `json:"rootPassword"`
+}
+
+func (c *Client) GetInstancePassword(ctx context.Context, instanceID int) (string, error) {
+	path := fmt.Sprintf("/instances/%d/password", instanceID)
+	data, err := c.doRequest(ctx, "GET", path, nil)
+	if err != nil {
+		return "", err
+	}
+	var res InstancePasswordResponse
+	if err := json.Unmarshal(data, &res); err != nil {
+		return "", err
+	}
+	return res.RootPassword, nil
+}
+
+type InstanceBillingResponse struct {
+	Billing struct {
+		InstanceID   int     `json:"instanceId"`
+		InstanceName string  `json:"instanceName"`
+		Price        float64 `json:"price"`
+		BillingCycle int     `json:"billingCycle"`
+		ExpiresAt    string  `json:"expiresAt"`
+		AutoRenew    bool    `json:"autoRenew"`
+	} `json:"billing"`
+}
+
+func (c *Client) GetInstanceBilling(ctx context.Context, instanceID int) (*InstanceBillingResponse, error) {
+	path := fmt.Sprintf("/instances/%d/billing", instanceID)
+	data, err := c.doRequest(ctx, "GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var res InstanceBillingResponse
+	if err := json.Unmarshal(data, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+// BuyMarketListing 购买二手集市指定挂单
+func (c *Client) BuyMarketListing(ctx context.Context, listingID int) error {
+	path := fmt.Sprintf("/instance-market/listings/%d/buy", listingID)
+	_, err := c.doRequest(ctx, "POST", path, map[string]interface{}{})
+	return err
+}
+
 func (c *Client) AddPortMapping(ctx context.Context, instanceID string, privatePort int, protocol, remark string) (int, error) {
-	path := fmt.Sprintf("/instances/%s/port-mappings", instanceID)
+	path := fmt.Sprintf("/instances/%s/ports", instanceID)
 	payload := map[string]interface{}{
 		"privatePort": privatePort,
 		"protocol":    protocol,
-		"remark":      remark,
+	}
+	if remark != "" {
+		payload["remark"] = remark
 	}
 
 	data, err := c.doRequest(ctx, "POST", path, payload)
@@ -185,8 +358,9 @@ func (c *Client) AddPortMapping(ctx context.Context, instanceID string, privateP
 }
 
 func (c *Client) DeletePortMapping(ctx context.Context, instanceID string, mappingID int) error {
-	path := fmt.Sprintf("/instances/%s/port-mappings/%d", instanceID, mappingID)
-	_, err := c.doRequest(ctx, "DELETE", path, nil)
+	path := fmt.Sprintf("/instances/%s/ports/%d", instanceID, mappingID)
+	// 懒猫云官方 DELETE /instances/{id}/ports/{portId} 要求带 JSON body {}
+	_, err := c.doRequest(ctx, "DELETE", path, map[string]interface{}{})
 	return err
 }
 
@@ -249,4 +423,136 @@ func (c *Client) Checkin(ctx context.Context) (*CheckinResponse, error) {
 		return nil, err
 	}
 	return &res, nil
+}
+
+// PackagePlan 懒猫云官方新机套餐子方案规格
+type PackagePlan struct {
+	ID           int    `json:"id"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	CPUCores     int    `json:"cpuCores"`
+	MemoryMB     int    `json:"memory"`
+	DiskMB       int    `json:"disk"`
+	PortLimit    int    `json:"portLimit"`
+	LimitsIngress string `json:"limitsIngress"`
+	LimitsEgress  string `json:"limitsEgress"`
+	PriceCents   int    `json:"price"`
+	MonthlyPrice int    `json:"monthlyPrice"`
+}
+
+// PublicPackage 懒猫云官方直营在售套餐定义 (公网公开接口，无需Token)
+type PublicPackage struct {
+	ID            int           `json:"id"`
+	Name          string        `json:"name"`
+	Description   string        `json:"description"`
+	NetworkMode   string        `json:"network_mode"`
+	InstanceType  string        `json:"instance_type"`
+	LimitsIngress string        `json:"limits_ingress"`
+	LimitsEgress  string        `json:"limits_egress"`
+	SoldOut       bool          `json:"soldOut"`
+	Plans         []PackagePlan `json:"plans"`
+}
+
+// GetPublicPackages 获取懒猫云官方所有真实在售新机规格 (共 42+ 个套餐)
+func (c *Client) GetPublicPackages(ctx context.Context) ([]PublicPackage, error) {
+	data, err := c.doRequest(ctx, "GET", "/packages/public", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var raw struct {
+		Packages []PublicPackage `json:"packages"`
+		Total    int             `json:"total"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	return raw.Packages, nil
+}
+
+// LazyMarketSnapshot 懒猫云二手市场规格快照
+type LazyMarketSnapshot struct {
+	CPU                    int     `json:"cpu"`
+	Memory                 int     `json:"memory"`
+	Disk                   int     `json:"disk"`
+	CPUCores               int     `json:"cpuCores"`
+	NodeName               string  `json:"nodeName"`
+	PlanName               string  `json:"planName"`
+	RegionName             string  `json:"regionName"`
+	RegionCode             string  `json:"regionCode"`
+	BandwidthMbps          int     `json:"bandwidthMbps"`
+	RenewalPrice           float64 `json:"renewalPrice"`
+	RenewalDiscountPercent float64 `json:"renewalDiscountPercent"`
+	MonthlyTrafficLimit    string  `json:"monthlyTrafficLimit"`
+	MonthlyTrafficUsed     string  `json:"monthlyTrafficUsed"`
+	IPStatus               string  `json:"ipStatus"`
+	NetworkMode            string  `json:"networkMode"`
+	PortLimit              int     `json:"portLimit"`
+	SLA                    string  `json:"sla"`
+}
+
+// LazyMarketListing 懒猫云二手市场挂单结构
+type LazyMarketListing struct {
+	ID             int                `json:"id"`
+	InstanceID     int                `json:"instanceId"`
+	SellerUserID   int                `json:"sellerUserId"`
+	SellerUsername string             `json:"sellerUsername"`
+	Title          string             `json:"title"`
+	InstanceName   string             `json:"instanceName"`
+	Remark         string             `json:"remark"`
+	SalePrice      float64            `json:"salePrice"`
+	Status         string             `json:"status"`
+	Snapshot       LazyMarketSnapshot `json:"snapshot"`
+	CreatedAt      string             `json:"createdAt"`
+	CanBuy         bool               `json:"canBuy"`
+}
+
+// GetAllMarketListings 获取懒猫云二手流转集市挂单 (自动分页收集全部)
+func (c *Client) GetAllMarketListings(ctx context.Context) ([]LazyMarketListing, error) {
+	if c.token == "" {
+		return []LazyMarketListing{}, nil
+	}
+
+	pageSize := 30
+	var allItems []LazyMarketListing
+
+	for page := 1; page <= 15; page++ {
+		path := fmt.Sprintf("/instance-market/listings?page=%d&pageSize=%d", page, pageSize)
+		data, err := c.doRequest(ctx, "GET", path, nil)
+		if err != nil {
+			if len(allItems) > 0 {
+				break
+			}
+			return nil, err
+		}
+
+		var raw struct {
+			Total    int                 `json:"total"`
+			Items    []LazyMarketListing `json:"items"`
+			Listings []LazyMarketListing `json:"listings"`
+			Data     []LazyMarketListing `json:"data"`
+		}
+		_ = json.Unmarshal(data, &raw)
+		batch := raw.Items
+		if len(batch) == 0 {
+			batch = raw.Listings
+		}
+		if len(batch) == 0 {
+			batch = raw.Data
+		}
+		if len(batch) == 0 {
+			break
+		}
+
+		allItems = append(allItems, batch...)
+
+		if raw.Total > 0 && len(allItems) >= raw.Total {
+			break
+		}
+		if len(batch) < pageSize {
+			break
+		}
+	}
+
+	return allItems, nil
 }

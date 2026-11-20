@@ -203,11 +203,17 @@ export const UnifiedSecondhandPage: React.FC = () => {
       dataIndex: 'platform',
       key: 'platform',
       width: 90,
-      render: (p: string) => (
-        <span className={p === 'akile' ? 'badge-proxy' : 'badge-online'} style={{ textTransform: 'uppercase' }}>
-          {p === 'akile' ? 'PushShop' : 'Exchange'}
-        </span>
-      ),
+      render: (p: string) => {
+        let label = 'Exchange'
+        let badgeClass = 'badge-online'
+        if (p === 'akile') { label = 'PushShop'; badgeClass = 'badge-proxy' }
+        else if (p === 'lazycat') { label = 'LazyCat'; badgeClass = 'badge-offline' }
+        return (
+          <span className={badgeClass} style={{ textTransform: 'uppercase' }}>
+            {label}
+          </span>
+        )
+      },
     },
     {
       title: '挂售商品 / 线路与IP评估',
@@ -509,7 +515,7 @@ export const UnifiedSecondhandPage: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <SwapOutlined style={{ color: '#2563eb' }} />
-              双平台二手集市与捡漏大宽表（Akile PushShop: {counts.akile} / ACCK Exchange: {counts.acck}）
+              多平台二手集市与捡漏大宽表（Akile: {counts.akile || 0} / ACCK: {counts.acck || 0} / 懒猫云: {counts.lazycat || 0}）
             </span>
             <Button
               type="text"
@@ -626,8 +632,9 @@ export const UnifiedSecondhandPage: React.FC = () => {
               size="small"
             >
               <Radio.Button value="all">全部平台</Radio.Button>
-              <Radio.Button value="akile">🔵 Akile ({counts.akile})</Radio.Button>
-              <Radio.Button value="acck">🟢 ACCK ({counts.acck})</Radio.Button>
+              <Radio.Button value="akile">🔵 Akile ({counts.akile || 0})</Radio.Button>
+              <Radio.Button value="acck">🟢 ACCK ({counts.acck || 0})</Radio.Button>
+              <Radio.Button value="lazycat">🐱 懒猫云 ({counts.lazycat || 0})</Radio.Button>
             </Radio.Group>
 
             <span style={{ fontSize: 13, fontWeight: 600, color: '#334155', display: 'flex', alignItems: 'center', gap: 4, marginLeft: 6 }}>

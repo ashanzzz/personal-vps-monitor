@@ -9,6 +9,8 @@ services:
     ports:
       - "${PORT:-8080}:80"
     environment:
+      - ADMIN_USER=${ADMIN_USER:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
       - AKILE_TOKEN=${AKILE_TOKEN}
       - PUBLIC_READ_TOKEN=${PUBLIC_READ_TOKEN}
       - PUBLIC_CONTROL_TOKEN=${PUBLIC_CONTROL_TOKEN}

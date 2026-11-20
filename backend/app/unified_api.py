@@ -78,7 +78,7 @@ class StoreBuyRequest(BaseModel):
 
 
 class SecondhandBuyRequest(BaseModel):
-    platform: str = Field(..., description="'akile' or 'acck'")
+    platform: str = Field(..., description="'akile', 'acck', or 'lazycat'")
     listing_id: int = Field(...)
     price_cents: int = Field(default=0)
     captcha: str = Field(default="")
@@ -1330,6 +1330,7 @@ async def get_unified_secondhand(
         "counts": {
             "akile": len([i for i in items if i["platform"] == "akile"]),
             "acck": len([i for i in items if i["platform"] == "acck"]),
+            "lazycat": len([i for i in items if i["platform"] == "lazycat"]),
         }
     }
 
@@ -1586,3 +1587,220 @@ async def get_market_kline_history(
         "days": days,
         "history": data,
     }
+
+
+# ---------------------------------------------------------------------------
+# 7. Network Probes (Latency, Google 'SongZhong' & Grouping)
+# ---------------------------------------------------------------------------
+
+class PingTargetRequest(BaseModel):
+    host: str = Field(..., description="Target IP or hostname")
+    port: int = Field(default=22, description="Target TCP port")
+    timeout: float = Field(default=3.0, ge=0.5, le=10.0)
+
+
+class GeoCheckRequest(BaseModel):
+    ip: str | None = Field(default=None, description="Target IP to inspect location")
+    proxy_url: str | None = Field(default=None, description="Optional outbound proxy URL to test Google SongZhong")
+    timeout: float = Field(default=8.0, ge=1.0, le=20.0)
+
+
+@router.post("/probe/ping")
+async def probe_tcp_latency(
+    req: PingTargetRequest,
+    _: str = Depends(require_auth),
+) -> dict[str, Any]:
+    """Actively measure TCP connection RTT to host:port."""
+    from .probe.latency import tcp_ping
+    return await tcp_ping(host=req.host, port=req.port, timeout=req.timeout)
+
+
+@router.post("/probe/geo")
+async def probe_geo_and_songzhong(
+    req: GeoCheckRequest,
+    _: str = Depends(require_auth),
+) -> dict[str, Any]:
+    """Actively test IP geo attributes and Google SongZhong redirection."""
+    from .probe.geo_check import check_ip_location, check_google_songzhong
+    out: dict[str, Any] = {}
+    if req.ip:
+        out["location"] = await check_ip_location(req.ip, timeout=req.timeout)
+    # Also perform Google SongZhong detection
+    out["songzhong"] = await check_google_songzhong(proxy_url=req.proxy_url, timeout=req.timeout)
+    return out
+
+
+@router.get("/probe/groups")
+async def probe_instance_groups(
+    by: str = Query("region", description="分组维度: region (地区), platform (平台), tier (线路级别)"),
+    timeout: float = Query(3.0, ge=0.5, le=10.0),
+    _: str = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Batch health and latency probe across all instances grouped by region or platform."""
+    from .probe.group_checker import check_groups_health
+    servers_res = await get_unified_servers(_, db)
+    servers = servers_res.get("servers") or []
+    return await check_groups_health(instances=servers, by=by, timeout=timeout)
+
+
+# ---------------------------------------------------------------------------
+# 8. External Integrations (Unraid Gateway & Sub-Store Connectors)
+# ---------------------------------------------------------------------------
+
+class SingboxDelayRequest(BaseModel):
+    node_name: str = Field(...)
+    test_url: str = Field(default="http://www.gstatic.com/generate_204")
+    timeout_ms: int = Field(default=5000, ge=500, le=15000)
+
+
+class SingboxSelectRequest(BaseModel):
+    group_name: str = Field(...)
+    target_node: str = Field(...)
+
+
+class SubStoreGenerateLazyCatRequest(BaseModel):
+    instance_name: str = Field(default="global-2-NJR3An")
+    entrance_ip: str = Field(...)
+    reality_port: int = Field(...)
+    ss_port: int | None = Field(default=None)
+
+
+# --- Unraid 宿主网关层连接器 (UnraidGatewayConnector) ---
+
+@router.get("/integrations/gateway/status")
+@router.get("/singbox/status")
+@router.get("/singbox/gateway/status")
+async def get_gateway_singbox_status(
+    api_url: str = Query("http://192.168.8.11:9090", description="Unraid 网关 Clash API 地址"),
+    secret: str = Query("Woo@@@204317", description="Unraid 网关控制密钥"),
+    _: str = Depends(require_auth),
+) -> dict[str, Any]:
+    """查询 Unraid 宿主机全局 sing-box/Clash.Meta 网关运行状态."""
+    from .integrations.gateway import UnraidGatewayConnector
+    gw = UnraidGatewayConnector(api_base=api_url, secret=secret)
+    return await gw.get_version()
+
+
+@router.get("/integrations/gateway/proxies")
+@router.get("/singbox/proxies")
+@router.get("/singbox/gateway/proxies")
+async def get_gateway_singbox_proxies(
+    api_url: str = Query("http://192.168.8.11:9090"),
+    secret: str = Query("Woo@@@204317"),
+    _: str = Depends(require_auth),
+) -> dict[str, Any]:
+    """获取 Unraid 网关全量节点与策略组（含自有节点、送中、不送中等）."""
+    from .integrations.gateway import UnraidGatewayConnector
+    gw = UnraidGatewayConnector(api_base=api_url, secret=secret)
+    return await gw.get_proxies()
+
+
+@router.post("/integrations/gateway/delay")
+@router.post("/singbox/delay")
+@router.post("/singbox/gateway/delay")
+async def test_gateway_singbox_delay(
+    req: SingboxDelayRequest,
+    api_url: str = Query("http://192.168.8.11:9090"),
+    secret: str = Query("Woo@@@204317"),
+    _: str = Depends(require_auth),
+) -> dict[str, Any]:
+    """实测 Unraid 网关中特定出站节点的真实延时."""
+    from .integrations.gateway import UnraidGatewayConnector
+    gw = UnraidGatewayConnector(api_base=api_url, secret=secret)
+    return await gw.test_node_delay(node_name=req.node_name, test_url=req.test_url, timeout_ms=req.timeout_ms)
+
+
+@router.post("/integrations/gateway/select")
+@router.post("/singbox/select")
+@router.post("/singbox/gateway/select")
+async def select_gateway_singbox_node(
+    req: SingboxSelectRequest,
+    api_url: str = Query("http://192.168.8.11:9090"),
+    secret: str = Query("Woo@@@204317"),
+    _: str = Depends(require_auth),
+) -> dict[str, Any]:
+    """在策略组（如 '自有节点' / '送中'）中切换活跃出口节点."""
+    from .integrations.gateway import UnraidGatewayConnector
+    gw = UnraidGatewayConnector(api_base=api_url, secret=secret)
+    return await gw.select_node(group_name=req.group_name, target_node=req.target_node)
+
+
+@router.post("/integrations/gateway/reload")
+@router.post("/singbox/reload")
+@router.post("/singbox/gateway/reload")
+async def reload_gateway_singbox_config(
+    api_url: str = Query("http://192.168.8.11:9090"),
+    secret: str = Query("Woo@@@204317"),
+    _: str = Depends(require_auth),
+) -> dict[str, Any]:
+    """热重载 Unraid 网关配置."""
+    from .integrations.gateway import UnraidGatewayConnector
+    gw = UnraidGatewayConnector(api_base=api_url, secret=secret)
+    return await gw.reload_config()
+
+
+# --- Sub-Store 订阅聚合管线连接器 ---
+
+class GenerateSubStoreNodesRequest(BaseModel):
+    server_info: dict[str, Any] = Field(..., description="机器实例信息 (含平台、IP、端口、规格等)")
+    proxy_configs: list[dict[str, Any]] | None = Field(default=None, description="可选指定该机器上的代理协议细节")
+
+
+@router.get("/integrations/substore/status")
+@router.get("/substore/status")
+async def get_substore_status(
+    base_url: str = Query("http://192.168.8.11:3000", description="Sub-Store 服务地址"),
+    _: str = Depends(require_auth),
+) -> dict[str, Any]:
+    """查询运行在 Unraid 服务器上的 Sub-Store 实例运行状态与版本."""
+    from .integrations.substore import SubStoreConnector
+    mgr = SubStoreConnector(base_url=base_url)
+    return await mgr.get_status()
+
+
+@router.post("/integrations/substore/generate-nodes")
+@router.post("/substore/generate-nodes")
+async def generate_substore_nodes_for_vps(
+    req: GenerateSubStoreNodesRequest,
+    _: str = Depends(require_auth),
+) -> dict[str, Any]:
+    """为任意一台具体的 VPS 机器动态生成 Sub-Store 规范节点 JSON，供外部订阅拉取."""
+    from .integrations.substore import substore_connector
+    nodes = substore_connector.format_node_from_vps(
+        server_info=req.server_info,
+        custom_configs=req.proxy_configs,
+    )
+    return {
+        "count": len(nodes),
+        "nodes": nodes,
+    }
+
+
+@router.get("/integrations/overview")
+async def get_integrations_overview(
+    gateway_url: str = Query("http://192.168.8.11:9090"),
+    gateway_secret: str = Query("Woo@@@204317"),
+    substore_url: str = Query("http://192.168.8.11:3000"),
+    _: str = Depends(require_auth),
+) -> dict[str, Any]:
+    """同时获取 Unraid Gateway 和 Sub-Store 的健康状态一览."""
+    from .integrations.gateway import UnraidGatewayConnector
+    from .integrations.substore import SubStoreConnector
+
+    gw = UnraidGatewayConnector(api_base=gateway_url, secret=gateway_secret)
+    sub = SubStoreConnector(base_url=substore_url)
+
+    gw_res, sub_res = await asyncio.gather(
+        gw.get_version(),
+        sub.get_status(),
+        return_exceptions=True,
+    )
+    return {
+        "gateway": gw_res if not isinstance(gw_res, Exception) else {"running": False, "error": str(gw_res)},
+        "substore": sub_res if not isinstance(sub_res, Exception) else {"online": False, "error": str(sub_res)},
+    }
+
+
+
+

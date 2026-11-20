@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/joho/godotenv"
@@ -10,28 +12,100 @@ import (
 
 type Config struct {
 	// 懒猫云凭证
-	LazyCatToken    string
-	LazyCatInstance string
+	LazyCatToken    string `json:"lazycat_token"`
+	LazyCatInstance string `json:"lazycat_instance"`
 
 	// Akile 凭证
-	AkileToken string
+	AkileToken string `json:"akile_token"`
 
 	// ACCK 凭证
-	ACCKToken string
+	ACCKToken string `json:"acck_token"`
 
 	// 网络代理配置 (避免境内直连 Cloudflare 403)
-	ProxyURL string
+	ProxyURL string `json:"proxy_url"`
 
 	// 通知凭证
-	TelegramBotToken string
-	TelegramChatID   string
+	TelegramBotToken string `json:"telegram_bot_token"`
+	TelegramChatID   string `json:"telegram_chat_id"`
 
 	// 服务端口配置
-	HTTPPort string
-	MCPPort  string
+	HTTPPort string `json:"http_port"`
+	MCPPort  string `json:"mcp_port"`
+
+	// 统一访问与开放 API 鉴权密钥
+	PublicReadToken    string `json:"public_read_token"`
+	PublicControlToken string `json:"public_control_token"`
+}
+
+type SavedTokens struct {
+	AkileToken   string `json:"akile_token"`
+	ACCKToken    string `json:"acck_token"`
+	LazyCatToken string `json:"lazycat_token"`
+	ProxyURL     string `json:"proxy_url,omitempty"`
 }
 
 var Global = &Config{}
+
+func getTokensCandidatePaths() []string {
+	paths := []string{"./data/tokens.json"}
+	if runtime.GOOS == "linux" {
+		paths = append(paths, "/app/data/tokens.json", "/mnt/user/appdata/akile-monitor/tokens.json")
+	}
+	return paths
+}
+
+func getTokensWritePath() string {
+	if runtime.GOOS == "linux" {
+		for _, p := range []string{"/app/data", "/mnt/user/appdata/akile-monitor"} {
+			if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+				return filepath.Join(p, "tokens.json")
+			}
+		}
+	}
+	_ = os.MkdirAll("./data", 0755)
+	return "./data/tokens.json"
+}
+
+func LoadSavedTokens() *SavedTokens {
+	for _, p := range getTokensCandidatePaths() {
+		if b, err := os.ReadFile(p); err == nil && len(b) > 0 {
+			var st SavedTokens
+			if err := json.Unmarshal(b, &st); err == nil {
+				return &st
+			}
+		}
+	}
+	return &SavedTokens{}
+}
+
+func SaveTokens(akile, acck, lazycat, proxy string) error {
+	target := getTokensWritePath()
+	_ = os.MkdirAll(filepath.Dir(target), 0755)
+
+	st := LoadSavedTokens()
+	if akile != "" {
+		st.AkileToken = akile
+		Global.AkileToken = akile
+	}
+	if acck != "" {
+		st.ACCKToken = acck
+		Global.ACCKToken = acck
+	}
+	if lazycat != "" {
+		st.LazyCatToken = lazycat
+		Global.LazyCatToken = lazycat
+	}
+	if proxy != "" {
+		st.ProxyURL = proxy
+		Global.ProxyURL = proxy
+	}
+
+	data, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(target, data, 0644)
+}
 
 func Load() *Config {
 	candidates := []string{
@@ -61,8 +135,25 @@ func Load() *Config {
 		ProxyURL:         getEnv("PROXY_URL", getEnv("HTTPS_PROXY", getEnv("HTTP_PROXY", "http://192.168.8.11:7890"))),
 		TelegramBotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
 		TelegramChatID:   getEnv("TELEGRAM_CHAT_ID", ""),
-		HTTPPort:         getEnv("VPS_HUB_HTTP_PORT", "3338"),
-		MCPPort:          getEnv("VPS_HUB_MCP_PORT", "3337"),
+		HTTPPort:           getEnv("VPS_HUB_HTTP_PORT", "3338"),
+		MCPPort:            getEnv("VPS_HUB_MCP_PORT", "3337"),
+		PublicReadToken:    getEnv("PUBLIC_READ_TOKEN", ""),
+		PublicControlToken: getEnv("PUBLIC_CONTROL_TOKEN", ""),
+	}
+
+	// 尝试从持久化 tokens.json 载入覆盖 (文件优先级高于旧环境变量)
+	st := LoadSavedTokens()
+	if st.AkileToken != "" {
+		Global.AkileToken = st.AkileToken
+	}
+	if st.ACCKToken != "" {
+		Global.ACCKToken = st.ACCKToken
+	}
+	if st.LazyCatToken != "" {
+		Global.LazyCatToken = st.LazyCatToken
+	}
+	if st.ProxyURL != "" {
+		Global.ProxyURL = st.ProxyURL
 	}
 
 	if Global.LazyCatToken == "" {

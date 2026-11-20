@@ -3,9 +3,11 @@ package lazycat
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/config"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
@@ -37,8 +39,8 @@ func (p *LazyCatProvider) Init(ctx context.Context, cfg *config.Config) error {
 
 // ListInstances 实例查询（动态发现名下所有懒猫云实例）
 func (p *LazyCatProvider) ListInstances(ctx context.Context) ([]providers.Instance, error) {
-	if p.client == nil {
-		return nil, fmt.Errorf("lazycat client not initialized")
+	if p.client == nil || p.client.token == "" {
+		return []providers.Instance{}, nil
 	}
 
 	rawList, err := p.client.GetInstances(ctx)
@@ -53,16 +55,61 @@ func (p *LazyCatProvider) ListInstances(ctx context.Context) ([]providers.Instan
 			if isResidential(item.PackageName, item.PlanName, item.Name) {
 				category = "全球家宽"
 			}
+
+			trafficUsed := ""
+			trafficTotal := ""
+			trafficPercent := 0.0
+			trafficResetDate := ""
+
+			if traffic, trErr := p.client.GetInstanceTraffic(ctx, item.ID); trErr == nil && traffic != nil {
+				trafficUsed = traffic.MonthlyUsedFormatted
+				trafficTotal = traffic.MonthlyLimitFormatted
+				trafficPercent = traffic.Percentage
+				trafficResetDate = traffic.PeriodEnd
+			}
+
+			trafficResetPrice := 0.0
+			userBalance := 0.0
+			if quote, qErr := p.client.GetTrafficResetQuote(ctx, item.ID); qErr == nil && quote != nil {
+				trafficResetPrice = quote.Price
+				userBalance = quote.Balance
+			}
+
+			rootPassword := ""
+			if pwd, pErr := p.client.GetInstancePassword(ctx, item.ID); pErr == nil && pwd != "" {
+				rootPassword = pwd
+			}
+
+			renewPrice := 0.0
+			autoRenew := false
+			if billing, bErr := p.client.GetInstanceBilling(ctx, item.ID); bErr == nil && billing != nil {
+				renewPrice = billing.Billing.Price
+				autoRenew = billing.Billing.AutoRenew
+			}
+
 			out = append(out, providers.Instance{
-				ProviderID: p.ID(),
-				ID:         strconv.Itoa(item.ID),
-				Name:       item.Name,
-				IP:         ip,
-				Status:     item.Status,
-				Region:     "Tokyo",
-				Category:   category,
-				PortLimit:  item.PortLimit,
-				ExpireDate: item.ExpiresAt,
+				ProviderID:        p.ID(),
+				ID:                strconv.Itoa(item.ID),
+				Name:              item.Name,
+				IP:                ip,
+				IPv4:              ip,
+				SSHUser:           "root",
+				SSHPassword:       rootPassword,
+				RootPassword:      rootPassword,
+				SSHPort:           22,
+				Status:            item.Status,
+				Region:            "Tokyo",
+				Category:          category,
+				TrafficUsed:       trafficUsed,
+				TrafficTotal:      trafficTotal,
+				TrafficPercent:    trafficPercent,
+				TrafficResetDate:  trafficResetDate,
+				TrafficResetPrice: trafficResetPrice,
+				UserBalance:       userBalance,
+				RenewPrice:        renewPrice,
+				AutoRenew:         autoRenew,
+				PortLimit:         item.PortLimit,
+				ExpireDate:        item.ExpiresAt,
 			})
 		}
 		return out, nil
@@ -87,18 +134,61 @@ func (p *LazyCatProvider) ListInstances(ctx context.Context) ([]providers.Instan
 		category = "全球家宽"
 	}
 
+	trafficUsed := ""
+	trafficTotal := ""
+	trafficPercent := 0.0
+	trafficResetDate := ""
+	if traffic, trErr := p.client.GetInstanceTraffic(ctx, detail.ID); trErr == nil && traffic != nil {
+		trafficUsed = traffic.MonthlyUsedFormatted
+		trafficTotal = traffic.MonthlyLimitFormatted
+		trafficPercent = traffic.Percentage
+		trafficResetDate = traffic.PeriodEnd
+	}
+
+	trafficResetPrice := 0.0
+	userBalance := 0.0
+	if quote, qErr := p.client.GetTrafficResetQuote(ctx, detail.ID); qErr == nil && quote != nil {
+		trafficResetPrice = quote.Price
+		userBalance = quote.Balance
+	}
+
+	rootPassword := ""
+	if pwd, pErr := p.client.GetInstancePassword(ctx, detail.ID); pErr == nil && pwd != "" {
+		rootPassword = pwd
+	}
+
+	renewPrice := 0.0
+	autoRenew := false
+	if billing, bErr := p.client.GetInstanceBilling(ctx, detail.ID); bErr == nil && billing != nil {
+		renewPrice = billing.Billing.Price
+		autoRenew = billing.Billing.AutoRenew
+	}
+
 	return []providers.Instance{
 		{
-			ProviderID: p.ID(),
-			ID:         strconv.Itoa(detail.ID),
-			Name:       detail.Name,
-			IP:         ip,
-			Status:     detail.Status,
-			Region:     "Tokyo",
-			Category:   category,
-			PortLimit:  detail.PortLimit,
-			PortCount:  len(detail.PortMappings),
-			ExpireDate: detail.ExpiresAt,
+			ProviderID:        p.ID(),
+			ID:                strconv.Itoa(detail.ID),
+			Name:              detail.Name,
+			IP:                ip,
+			IPv4:              ip,
+			SSHUser:           "root",
+			SSHPassword:       rootPassword,
+			RootPassword:      rootPassword,
+			SSHPort:           22,
+			Status:            detail.Status,
+			Region:            "Tokyo",
+			Category:          category,
+			TrafficUsed:       trafficUsed,
+			TrafficTotal:      trafficTotal,
+			TrafficPercent:    trafficPercent,
+			TrafficResetDate:  trafficResetDate,
+			TrafficResetPrice: trafficResetPrice,
+			UserBalance:       userBalance,
+			RenewPrice:        renewPrice,
+			AutoRenew:         autoRenew,
+			PortLimit:         detail.PortLimit,
+			PortCount:         len(detail.PortMappings),
+			ExpireDate:        detail.ExpiresAt,
 		},
 	}, nil
 }
@@ -110,12 +200,15 @@ func isResidential(pkg, plan, name string) bool {
 
 // ListPortMappings 端口映射查询
 func (p *LazyCatProvider) ListPortMappings(ctx context.Context, instanceID string) ([]providers.PortMapping, error) {
+	if p.client == nil || p.client.token == "" {
+		return []providers.PortMapping{}, nil
+	}
 	if instanceID == "" {
 		instanceID = p.defaultInst
 	}
 	detail, err := p.client.GetInstanceDetail(ctx, instanceID)
 	if err != nil {
-		return nil, err
+		return []providers.PortMapping{}, nil
 	}
 
 	res := make([]providers.PortMapping, 0, len(detail.PortMappings))
@@ -206,6 +299,272 @@ func (p *LazyCatProvider) DoCheckin(ctx context.Context) (*providers.CheckinResu
 	}, nil
 }
 
+// ListMarketItems 实现 providers.MarketLister 接口，动态全量分页获取懒猫云二手市场在售挂单
+func (p *LazyCatProvider) ListMarketItems(ctx context.Context) ([]providers.MarketItem, error) {
+	if p.client == nil || p.client.token == "" {
+		return []providers.MarketItem{}, nil
+	}
+
+	rawList, err := p.client.GetAllMarketListings(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]providers.MarketItem, 0, len(rawList))
+	for _, it := range rawList {
+		price := it.SalePrice
+		name := it.Title
+		if name == "" {
+			name = it.InstanceName
+		}
+		loc := it.Snapshot.RegionName
+		if loc == "" {
+			loc = it.Snapshot.RegionCode
+		}
+		if loc == "" {
+			loc = "全球节点"
+		}
+		bw := ""
+		if it.Snapshot.BandwidthMbps > 0 {
+			bw = fmt.Sprintf("%d Mbps", it.Snapshot.BandwidthMbps)
+		}
+		cfgDesc := ""
+		if it.Snapshot.Memory > 0 {
+			cfgDesc = fmt.Sprintf("%d MB 内存", it.Snapshot.Memory)
+		}
+		if it.Snapshot.CPUCores > 0 {
+			if cfgDesc != "" {
+				cfgDesc = fmt.Sprintf("%d核 / %s", it.Snapshot.CPUCores, cfgDesc)
+			} else {
+				cfgDesc = fmt.Sprintf("%d核", it.Snapshot.CPUCores)
+			}
+		}
+		if it.Remark != "" {
+			if cfgDesc != "" {
+				cfgDesc = fmt.Sprintf("%s (%s)", cfgDesc, it.Remark)
+			} else {
+				cfgDesc = it.Remark
+			}
+		}
+
+		sla := it.Snapshot.SLA
+		if sla == "" {
+			sla = "99.9%"
+		}
+		ipDetail := ""
+		if it.Snapshot.IPStatus != "" {
+			ipDetail = fmt.Sprintf("IP: %s", it.Snapshot.IPStatus)
+		}
+		portLimit := it.Snapshot.PortLimit
+		if portLimit == 0 {
+			portLimit = 10
+		}
+
+		cpuStr := ""
+		if it.Snapshot.CPUCores > 0 {
+			cpuStr = fmt.Sprintf("%dC", it.Snapshot.CPUCores)
+		} else if it.Snapshot.CPU > 0 {
+			cpuStr = fmt.Sprintf("%dC", it.Snapshot.CPU)
+		}
+		memStr := ""
+		if it.Snapshot.Memory > 0 {
+			memStr = fmt.Sprintf("%dM", it.Snapshot.Memory)
+		}
+		diskStr := ""
+		if it.Snapshot.Disk > 0 {
+			diskStr = fmt.Sprintf("%dG", it.Snapshot.Disk)
+		}
+		flowTotalStr := it.Snapshot.MonthlyTrafficLimit
+
+		items = append(items, providers.MarketItem{
+			ProviderID:      p.ID(),
+			ID:              strconv.Itoa(it.ID),
+			Name:            name,
+			Price:           price,
+			RenewalPrice:    it.Snapshot.RenewalPrice,
+			DiscountPercent: it.Snapshot.RenewalDiscountPercent,
+			ResetPrice:      it.Snapshot.RenewalPrice,
+			FlowUsed:        it.Snapshot.MonthlyTrafficUsed,
+			Cycle:           1,
+			SellerUsername:  it.SellerUsername,
+			SellerUserID:    it.SellerUserID,
+			Location:        loc,
+			NodeName:        it.Snapshot.NodeName,
+			Bandwidth:       bw,
+			PortLimit:       portLimit,
+			ConfigDesc:      cfgDesc,
+			CPU:             cpuStr,
+			Memory:          memStr,
+			Disk:            diskStr,
+			TrafficTotal:    flowTotalStr,
+			Detail:          ipDetail,
+			SLA:             sla,
+			CreatedAt:       it.CreatedAt,
+			CanBuy:          it.CanBuy,
+			MarketType:      "secondhand",
+			BargainTag:      "🏷️ 懒猫二手",
+		})
+	}
+	return items, nil
+}
+
+// BuyMarketItem 购买二手集市商品
+func (p *LazyCatProvider) BuyMarketItem(ctx context.Context, itemID string) error {
+	if p.client == nil {
+		return fmt.Errorf("lazycat client not initialized")
+	}
+	id, err := strconv.Atoi(itemID)
+	if err != nil {
+		return fmt.Errorf("invalid lazycat item id: %s", itemID)
+	}
+	return p.client.BuyMarketListing(ctx, id)
+}
+
+// ListStoreProducts 实现 providers.StoreLister 接口，动态获取懒猫云官方在售套餐 (全量 42+ 款真实规格)
+func (p *LazyCatProvider) ListStoreProducts(ctx context.Context) ([]providers.StoreProduct, error) {
+	if p.client == nil {
+		return []providers.StoreProduct{}, nil
+	}
+
+	pkgs, err := p.client.GetPublicPackages(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make([]providers.StoreProduct, 0, len(pkgs))
+	for _, pkg := range pkgs {
+		priceStr := "¥--/月"
+		cfgDesc := pkg.Description
+		bandwidth := pkg.LimitsEgress
+		if bandwidth == "" {
+			bandwidth = "共享带宽"
+		}
+		cpuStr := ""
+		memStr := ""
+		diskStr := ""
+		if len(pkg.Plans) > 0 {
+			minPrice := pkg.Plans[0].PriceCents
+			if minPrice == 0 && pkg.Plans[0].MonthlyPrice > 0 {
+				minPrice = pkg.Plans[0].MonthlyPrice
+			}
+			p0 := pkg.Plans[0]
+			priceStr = fmt.Sprintf("¥%.2f/月起", float64(minPrice)/100.0)
+			cfgDesc = fmt.Sprintf("%d核 / %dMB 内存 / %dMB 磁盘 (%s)", p0.CPUCores, p0.MemoryMB, p0.DiskMB, pkg.Description)
+			if p0.CPUCores > 0 {
+				cpuStr = fmt.Sprintf("%dC", p0.CPUCores)
+			}
+			if p0.MemoryMB > 0 {
+				memStr = fmt.Sprintf("%dM", p0.MemoryMB)
+			}
+			if p0.DiskMB > 0 {
+				if p0.DiskMB >= 1024 {
+					diskStr = fmt.Sprintf("%dG", p0.DiskMB/1024)
+				} else {
+					diskStr = fmt.Sprintf("%dM", p0.DiskMB)
+				}
+			}
+		}
+		loc := "日本/香港/海外"
+		nameUpper := strings.ToUpper(pkg.Name)
+		if strings.Contains(nameUpper, "HK") || strings.Contains(pkg.Name, "香港") {
+			loc = "中国香港"
+		} else if strings.Contains(nameUpper, "JP") || strings.Contains(pkg.Name, "日本") || strings.Contains(nameUpper, "TOKYO") {
+			loc = "日本东京"
+		} else if strings.Contains(nameUpper, "SG") || strings.Contains(pkg.Name, "狮城") || strings.Contains(pkg.Name, "新加坡") {
+			loc = "新加坡"
+		} else if strings.Contains(nameUpper, "US") || strings.Contains(pkg.Name, "美") || strings.Contains(pkg.Name, "Frontier") {
+			loc = "美国"
+		} else if strings.Contains(nameUpper, "TW") || strings.Contains(pkg.Name, "台湾") {
+			loc = "中国台湾"
+		} else if strings.Contains(nameUpper, "PH") || strings.Contains(pkg.Name, "菲律宾") {
+			loc = "菲律宾"
+		}
+
+		trafficTotal := pkg.LimitsIngress
+		if trafficTotal == "" {
+			trafficTotal = "不限"
+		}
+
+		res = append(res, providers.StoreProduct{
+			ID:           fmt.Sprintf("lz-pkg-%d", pkg.ID),
+			ProviderID:   p.ID(),
+			Name:         pkg.Name,
+			Location:     loc,
+			Bandwidth:    bandwidth,
+			ConfigDesc:   cfgDesc,
+			CPU:          cpuStr,
+			Memory:       memStr,
+			Disk:         diskStr,
+			TrafficTotal: trafficTotal,
+			Price:        priceStr,
+			InStock:      !pkg.SoldOut,
+		})
+	}
+	return res, nil
+}
+
+// GetPublicPackages 获取懒猫云官方在售套餐真实列表 (无需鉴权，全量 42+ 套餐)
+func (p *LazyCatProvider) GetPublicPackages(ctx context.Context) ([]PublicPackage, error) {
+	if p.client == nil {
+		return []PublicPackage{}, nil
+	}
+	return p.client.GetPublicPackages(ctx)
+}
+
 func (p *LazyCatProvider) RegisterMCPTools(s *server.MCPServer) error {
 	return registerTools(s, p)
+}
+
+func (p *LazyCatProvider) Client() *Client {
+	return p.client
+}
+
+func (p *LazyCatProvider) ProxyTerminalWebSocket(w http.ResponseWriter, r *http.Request, instanceID string) error {
+	if p.client == nil {
+		return fmt.Errorf("lazycat client not initialized")
+	}
+	return p.client.ProxyTerminalWebSocket(w, r, instanceID)
+}
+
+func (p *LazyCatProvider) ExecTerminalCommand(ctx context.Context, instanceID, cmd string, timeout time.Duration) (string, error) {
+	if p.client == nil {
+		return "", fmt.Errorf("lazycat client not initialized")
+	}
+	return p.client.ExecTerminalCommand(ctx, instanceID, cmd, timeout)
+}
+
+func (p *LazyCatProvider) FetchFleetTelemetry(ctx context.Context, forceRefresh bool) ([]FleetNode, error) {
+	if p.client == nil {
+		return nil, fmt.Errorf("lazycat client not initialized")
+	}
+	return p.client.FetchFleetTelemetry(ctx, forceRefresh)
+}
+
+func (p *LazyCatProvider) GetContainerEgressNodes(ctx context.Context, instanceID string, forceRefresh bool) ([]EgressNode, error) {
+	if p.client == nil {
+		return nil, fmt.Errorf("lazycat client not initialized")
+	}
+	return p.client.GetContainerEgressNodes(ctx, instanceID, forceRefresh)
+}
+
+func (p *LazyCatProvider) GetInstanceDetail(ctx context.Context, instanceID string) (*InstanceDetailResponse, error) {
+	if p.client == nil {
+		return nil, fmt.Errorf("lazycat client not initialized")
+	}
+	return p.client.GetInstanceDetail(ctx, instanceID)
+}
+
+func (p *LazyCatProvider) Login(ctx context.Context, username, password, totpCode string) (token string, need2FA bool, msg string, err error) {
+	if p.client == nil {
+		p.client = NewClient("", config.Global.ProxyURL)
+	}
+	return p.client.Login(ctx, username, password, totpCode)
+}
+
+func (p *LazyCatProvider) SetToken(token string) {
+	if p.client == nil {
+		p.client = NewClient(token, config.Global.ProxyURL)
+	} else {
+		p.client.token = token
+	}
 }

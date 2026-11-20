@@ -1,872 +1,433 @@
 import axios from 'axios'
-import { API_BASE } from './config'
 
-const TOKEN_KEY = 'akile_token'
+// 始终使用相对路径，纯天然适配单一端口部署
+const http = axios.create({
+  baseURL: '',
+  timeout: 15000,
+})
+
+let authToken = localStorage.getItem('vps_token') || ''
+
+export function setToken(token: string) {
+  authToken = token
+  if (token) {
+    localStorage.setItem('vps_token', token)
+  } else {
+    localStorage.removeItem('vps_token')
+  }
+}
 
 export function getToken(): string {
-  return localStorage.getItem(TOKEN_KEY) ?? ''
-}
-export function setToken(t: string): void {
-  localStorage.setItem(TOKEN_KEY, t)
-}
-export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY)
+  return authToken
 }
 
-// Called when a 401 is seen — wired up by App to bounce back to login.
-let onUnauthorized: (() => void) | null = null
-export function setUnauthorizedHandler(fn: () => void): void {
-  onUnauthorized = fn
+export function clearToken() {
+  authToken = ''
+  localStorage.removeItem('vps_token')
 }
 
-const http = axios.create({ baseURL: API_BASE })
-
-// Attach bearer token to every request.
-http.interceptors.request.use(cfg => {
-  const t = getToken()
-  if (t) cfg.headers.Authorization = ['Bearer', t].join(' ')
+// 请求拦截器注入 Token
+http.interceptors.request.use((cfg) => {
+  if (authToken) {
+    cfg.headers.Authorization = `Bearer ${authToken}`
+  }
   return cfg
 })
 
-// On 401, clear the token and notify the app (skip the login call itself).
+// 响应拦截器处理 401
+let onUnauthorized: (() => void) | null = null
+export function setUnauthorizedHandler(fn: () => void) {
+  onUnauthorized = fn
+}
+
 http.interceptors.response.use(
-  r => r,
-  err => {
-    if (err?.response?.status === 401) {
-      const url: string = err.config?.url ?? ''
-      if (!url.includes('/api/auth/login') && !url.includes('/api/auth/setup')) {
-        clearToken()
-        onUnauthorized?.()
-      }
+  (res) => res,
+  (err) => {
+    // 只有在管理端主系统的会话失效或未授权时才触发全局登出，绝不能因第三方供应商 Token 报错而误踢出管理员
+    const isMainAuthFailure =
+      err.response?.status === 401 &&
+      ((err.config?.url?.includes('/api/auth/') && !err.config?.url?.includes('/api/auth/login')) ||
+        err.response?.data?.error === 'unauthorized')
+    if (isMainAuthFailure) {
+      clearToken()
+      onUnauthorized?.()
     }
     return Promise.reject(err)
   }
 )
 
-export interface OfficialMatch {
-  plan_id: string
-  name: string
-  area: string
-  price_monthly: number
-  available: boolean
-  price_delta: number   // official - secondhand (fen); + means official pricier
-  cheaper: 'official' | 'secondhand' | 'equal'
-  buy_url: string
-}
+// ==================== 接口定义 ====================
 
-export interface Machine {
-  id: number
-  category: 'vps' | 'ls' | 'secondhand'
-  plan_id: string
-  area: string
-  node: string
-  name: string
-  stock: number
-  price_monthly: number
-  price_yearly: number | null
-  cpu: number
-  memory_mb: number
-  disk_gb: number
-  bandwidth_mbps: number
-  traffic_gb: number
-  ipv4: number
-  available: boolean
-  ip_status: '' | 'normal' | 'gfw'
-  score: number
-  star_rating: number
-  price_recommendation: { recommend: string; reason: string; savings_pct: number | null } | null
-  official_match: OfficialMatch | null
-  updated_at: string
-}
-
-export interface AlertEvent {
-  id: number
-  category: string
-  plan_id: string
-  name: string
-  area: string
-  event_type: string
-  old_value: string | null
-  new_value: string | null
-  notified: boolean
-  created_at: string
-}
-
-export interface PriceHistory {
-  plan_id: string
-  price: number
-  cycle: number
-  fetched_at: string
-}
-
-// One spec dimension's range (min/max). 0 on a side = unbounded there.
-// memory range is in MB (matches the stored field); others map 1:1.
-export interface SpecRange {
-  min: number
-  max: number
-}
-export type SpecDimension = 'cpu' | 'memory' | 'disk' | 'bandwidth' | 'traffic'
-export type RuleSpec = Record<SpecDimension, SpecRange>
-
-export interface BuyRule {
+export interface Instance {
+  provider_id: 'lazycat' | 'akile' | 'acck'
   id: string
-  enabled: boolean
-  label: string
-  platform?: 'all' | 'akile' | 'acck' | string // targeted platform
-  tags_include: string[]        // match ANY substring in name/node; [] = any
-  spec: RuleSpec                // cpu/memory/disk/bandwidth/traffic min-max
-  price_type: 'monthly' | 'yearly'
-  price_max: number             // fen; cap on chosen-cycle renewal price; 0 = no limit
-  sale_price_max: number        // fen; cap on sale price; 0 = no limit
-  max_buy: number               // per-rule buy cap; 0 = unlimited
-  search_prefix?: string        // optional search prefix for fast Akile API filtering
+  name: string
+  ip: string
+  ipv4?: string
+  ipv6?: string
+  ssh_user?: string
+  ssh_password?: string
+  ssh_port?: number
+  status: string
+  region: string
+  category?: string
+  cpu?: string
+  memory?: string
+  traffic_used?: string
+  traffic_total?: string
+  traffic_percent?: number
+  traffic_reset_date?: string
+  traffic_reset_price?: number
+  auto_reset?: boolean
+  user_balance?: number
+  root_password?: string
+  renew_price?: number
+  auto_renew?: boolean
+  port_count?: number
+  port_limit?: number
+  expire_date?: string
+  is_stale?: boolean
+  stale_reason?: string
+  last_synced_at?: string
+  // 前端探测状态
+  rtt?: number
+  songzhong?: boolean
+  probing?: boolean
 }
 
-export interface PageBuyConfig {
-  enabled: boolean
-  refresh_interval: number     // seconds
-  max_total_per_run: number
-  max_total_daily: number
-  max_price: number            // fen; legacy page cap, retained for back-compat
-  cycle: number
-  on_limit_reached: 'stop' | 'keep_watching'
-  rules: BuyRule[]
+export interface PortMapping {
+  id: number
+  protocol: string
+  private_port: number
+  public_port: number
+  remark: string
 }
 
-// Per-page hardware scoring weights: {dimension -> weight}. score = Σ(value×weight).
-// Positive = more is better; negative (price/latency) = less is better.
-// latency is skipped when a machine has no measured value. Mirrors backend
-// scoring.DEFAULT_SCORE_RULES.
-export type ScoreDimension =
-  | 'cpu' | 'memory' | 'disk' | 'bandwidth' | 'traffic'
-  | 'price_monthly' | 'sale_price' | 'latency'
-export type ScoreRules = Record<ScoreDimension, number>
-
-export interface AppSettings {
-  // API & connection
-  akile_token: string
-  lazycat_token: string
-  refresh_interval: number
-  auto_refresh_token: boolean
-  refresh_margin_min_seconds: number
-  refresh_margin_max_seconds: number
-  request_timeout: number
-  request_retries: number
-  account_refresh_interval: number
-  // Monitor scope
-  vps_enabled: boolean
-  ls_enabled: boolean
-  secondhand_enabled: boolean
-  ls_regions: string[]
-  // Filters
-  watched_plans: string[]
-  filter_areas: string[]
-  filter_name_include: string
-  filter_name_exclude: string
-  filter_max_price: number
-  filter_min_cpu: number
-  filter_min_memory_mb: number
-  filter_min_traffic_gb: number
-  filter_min_score: number
-  filter_min_star: number
-  // Telegram
-  tg_bot_token: string
-  tg_chat_id: string
-  tg_notify_new_listing: boolean
-  tg_notify_restock: boolean
-  tg_notify_delisted: boolean
-  tg_notify_price_change: boolean
-  tg_notify_purchased: boolean
-  notify_scope: 'all' | 'watched'
-  dnd_enabled: boolean
-  dnd_start: string
-  dnd_end: string
-  merge_interval_minutes: number
-  // Webhook
-  webhook_enabled: boolean
-  webhook_url: string
-  webhook_notify_new_listing: boolean
-  webhook_notify_restock: boolean
-  webhook_notify_delisted: boolean
-  webhook_notify_price_change: boolean
-  webhook_notify_purchased: boolean
-  // Per-page auto-buy
-  cloud_buy: PageBuyConfig
-  ls_buy: PageBuyConfig
-  secondhand_buy: PageBuyConfig
-  plan_label_map: Record<string, string>
-  // Per-page table column widths ({col key -> width px}); {} = code defaults
-  col_widths_cloud: Record<string, number>
-  col_widths_ls: Record<string, number>
-  col_widths_secondhand: Record<string, number>
-  // Per-page hardware scoring rules ({dimension -> weight}); drives the 评分 column
-  score_rules_cloud: ScoreRules
-  score_rules_ls: ScoreRules
-  score_rules_secondhand: ScoreRules
-  // Scoring weights
-  score_w_cpu: number
-  score_w_mem: number
-  score_w_disk: number
-  score_w_bw: number
-  score_w_traffic: number
-  // Logging
-  log_level: 'INFO' | 'DEBUG'
-  auto_checkin_enabled: boolean
-  acck_auto_checkin_enabled?: boolean
-  checkin_mode?: 'fixed' | 'random'
-  checkin_fixed_time?: string
-  checkin_time_start: string
-  checkin_time_end: string
-  random_jitter_enabled: boolean
-  // System
-  event_retention_days: number
-  store_last_refresh: string | null
-  timezone: string
+export interface PortMappingDetail {
+  total: number
+  host_public_ip?: string
+  ssh_port?: number
+  port_limit?: number
+  ports: PortMapping[]
 }
 
-export interface TokenStatus {
-  configured: boolean
-  exp: number
-  seconds_left: number
-  expires_at: string | null
-  auto_refresh: boolean
+export interface LazyCatInstanceDetail {
+  id: number
+  name: string
+  status: string
+  packageName: string
+  planName: string
+  host_public_ip: string
+  nat_public_ip: string
+  port_limit: number
+  port_mappings: PortMapping[]
+  expires_at: string
 }
+
+export interface FleetNode {
+  uuid: string
+  name: string
+  region: string
+  is_mother: boolean
+  is_residential: boolean
+  status: string
+  cpu_percent: number
+  load_avg: number
+  ram_used_gb: number
+  ram_total_gb: number
+  ram_percent: number
+  speed_down_kb: number
+  speed_up_kb: number
+  uptime_days: number
+}
+
+export interface EgressNode {
+  id: number
+  name: string
+  country_code: string
+  flag_emoji: string
+  private_port: number
+  outbound_tag: string
+  protocol: string
+  flow: string
+  sni: string
+  public_port?: number
+  vless_url?: string
+}
+
+export interface MarketItem {
+  provider_id: string
+  id: string
+  name: string
+  price: number
+  renewal_price?: number
+  discount_percent?: number
+  reset_price?: number
+  platform_fee?: number
+  flow_used?: string
+  cycle?: number
+  seller_username?: string
+  seller_user_id?: number
+  location: string
+  node_name?: string
+  bandwidth?: string
+  port_limit?: number
+  config_desc?: string
+  cpu?: string
+  memory?: string
+  disk?: string
+  traffic_total?: string
+  detail?: string
+  ip_check_detail?: string
+  due_time?: string
+  sla?: string
+  created_at?: string
+  bargain_tag?: string
+  diff_percent?: number
+  can_buy?: boolean
+}
+
+export interface StoreProductItem {
+  id: string
+  provider_id: string
+  name: string
+  location: string
+  bandwidth: string
+  config_desc: string
+  cpu?: string
+  memory?: string
+  disk?: string
+  traffic_total?: string
+  price: string
+  in_stock: boolean
+}
+
+export interface MatchedItemPreview {
+  id: string
+  provider: string
+  title: string
+  price: number
+  renewal_price?: number
+  discount_percent?: number
+  reset_price?: number
+  platform_fee?: number
+  flow_used?: string
+  cycle?: number
+  seller_username?: string
+  seller_user_id?: number
+  location?: string
+  node_name?: string
+  bandwidth?: string
+  port_limit?: number
+  config_desc?: string
+  cpu?: string
+  memory?: string
+  disk?: string
+  traffic_total?: string
+  detail?: string
+  ip_check_detail?: string
+  due_time?: string
+  sla?: string
+  can_buy: boolean
+  matched_at: string
+}
+
+export interface PurchasePlan {
+  id: string
+  name: string
+  provider: 'akile' | 'acck' | 'lazycat' | 'all'
+  market_type: 'secondhand' | 'new_stock' | 'all'
+  region_keyword?: string
+  max_price?: number
+  max_renewal_price?: number
+  min_discount_percent?: number
+  min_port_count?: number
+  min_bandwidth?: number
+  keyword_filter?: string
+  safe_mode: boolean
+  auto_buy: boolean
+  max_buy_count: number
+  current_bought_count: number
+  is_active: boolean
+  created_at: string
+  last_triggered_at?: string
+  match_count: number
+  last_match_item?: string
+  matched_items?: MatchedItemPreview[]
+}
+
+export interface SchedulerStatus {
+  mode: 'idle' | 'steady' | 'burst'
+  active_plans_count: number
+  current_interval_sec: number
+  slow_interval_sec: number
+  burst_interval_sec: number
+  burst_remaining_seconds: number
+  last_poll_at: string
+  total_matched: number
+}
+
+export interface MarketStats {
+  total_tracked: number
+  active_items: number
+  avg_price: number
+  avg_duration_sec: number
+  by_location: Record<string, number>
+  hot_models: string[]
+}
+
+export interface CheckinResult {
+  success: boolean
+  message: string
+  reward?: string
+  website?: string
+  account?: string
+}
+
+export interface AuditEntry {
+  id: string
+  timestamp: string
+  source: string // "ai_mcp" | "daemon" | "cli" | "rest_api" | "security"
+  action: string
+  provider: string
+  params?: any
+  status: 'SUCCESS' | 'FAILED'
+  message: string
+  duration_ms?: number
+}
+
+export interface UnraidContainerStatus {
+  name: string
+  target: string
+  online: boolean
+  detail?: string
+  latency_ms: number
+}
+
+export interface UnraidStatusReport {
+  timestamp: string
+  containers: UnraidContainerStatus[]
+  credentials_found: string[]
+}
+
+export interface TokensConfig {
+  akile_configured: boolean
+  akile_token_masked: string
+  akile_expires_at?: string
+  akile_is_expired?: boolean
+  akile_seconds_left?: number
+  akile_has_credentials?: boolean
+  akile_auto_refresh?: boolean
+
+  acck_configured: boolean
+  acck_token_masked: string
+  acck_expires_at?: string
+  acck_is_expired?: boolean
+  acck_seconds_left?: number
+  acck_has_credentials?: boolean
+
+  lazycat_configured: boolean
+  lazycat_token_masked: string
+  lazycat_expires_at?: string
+  lazycat_is_expired?: boolean
+  lazycat_seconds_left?: number
+  lazycat_has_credentials?: boolean
+  lazycat_auto_refresh?: boolean
+
+  proxy_url: string
+}
+
+// ==================== API 客户端方法 ====================
 
 export const api = {
-  getMachines: (params?: { category?: string; available_only?: boolean }) =>
-    http.get<Machine[]>('/api/machines', { params }).then(r => r.data),
-
-  getEvents: (params?: { limit?: number; category?: string; event_type?: string }) =>
-    http.get<AlertEvent[]>('/api/events', { params }).then(r => r.data),
-
-  getPriceHistory: (plan_id?: string) =>
-    http.get<PriceHistory[]>('/api/price-history', { params: plan_id ? { plan_id } : {} }).then(r => r.data),
-
-  getSettings: () =>
-    http.get<AppSettings>('/api/settings').then(r => r.data),
-
-  saveSettings: (data: Partial<AppSettings>) =>
-    http.post<AppSettings>('/api/settings', data).then(r => r.data),
-
-  triggerPoll: () =>
-    http.post('/api/poll/trigger').then(r => r.data),
-
-  refreshStore: (page?: string, limit?: number) =>
-    http.post<{ status: string; page: string; limit: number }>('/api/store/refresh', { page, limit }).then(r => r.data),
-
-  buyMachine: (plan_id: string) =>
-    http.post(`/api/buy/${plan_id}`).then(r => r.data),
-
-  getTokenStatus: () =>
-    http.get<TokenStatus>('/api/token/status').then(r => r.data),
-
-  refreshToken: () =>
-    http.post<{ status: string }>('/api/token/refresh').then(r => r.data),
-
-  akileLogin: (username: string, password: string, ga_code?: string) =>
-    http.post<TokenStatus & { need_2fa?: boolean; message?: string }>('/api/akile-login', { username, password, ga_code: ga_code || '' }).then(r => r.data),
-
-  lazycatLogin: (username: string, password: string, ga_code?: string) =>
-    http.post<{ status: string; message?: string; token_length?: number }>('/api/lazycat/login', { username, password, ga_code: ga_code || '' }).then(r => r.data),
-
-  // --- LazyCat 懒猫云 ---
-  getLazyCatAccount: () =>
-    http.get<LazyCatAccount>('/api/lazycat/account').then(r => r.data),
-
-  getLazyCatInstance: (id: number) =>
-    http.get<LazyCatInstance & { error?: string }>(`/api/lazycat/instances/${id}`).then(r => r.data),
-  addLazyCatPort: (id: number, body: { protocol: string; privatePort: number; remark?: string }) =>
-    http.post<{ message?: string; mapping?: LazyCatPortMapping; error?: string; detail?: string }>(
-      `/api/lazycat/instances/${id}/ports`, body,
-    ).then(r => r.data),
-  deleteLazyCatPort: (id: number, portId: number) =>
-    http.delete<{ message?: string; error?: string }>(`/api/lazycat/instances/${id}/ports/${portId}`).then(r => r.data),
-  getLazyCatTerminal: (id: number) =>
-    http.get<{ ws_url: string; official_page: string; error?: string }>(`/api/lazycat/instances/${id}/terminal`).then(r => r.data),
-
-  getLazyCatInstances: () =>
-    http.get<LazyCatInstance[] | { error: string }>('/api/lazycat/instances').then(r => r.data),
-
-  lazycatCheckin: () =>
-    http.post<Record<string, unknown>>('/api/lazycat/checkin').then(r => r.data),
-
-  // --- Auth ---
-  authStatus: () =>
-    http.get<{ initialized: boolean }>('/api/auth/status').then(r => r.data),
-
+  // 认证体系
+  authStatus: () => http.get<{ initialized: boolean }>('/api/auth/status').then(r => r.data),
   login: (username: string, password: string) =>
     http.post<{ token: string; username: string }>('/api/auth/login', { username, password }).then(r => r.data),
-
-  setupAdmin: (username: string, password: string) =>
-    http.post<{ token: string; username: string }>('/api/auth/setup', { username, password }).then(r => r.data),
-
   changePassword: (old_password: string, new_password: string) =>
     http.post<{ status: string }>('/api/auth/change-password', { old_password, new_password }).then(r => r.data),
 
-  // --- Version & logs ---
-  getVersion: () =>
-    http.get<VersionInfo>('/api/version').then(r => r.data),
+  // 厂商 API 凭证与 Token 配置
+  getTokens: () => http.get<TokensConfig>('/api/settings/tokens').then(r => r.data),
+  saveTokens: (payload: { akile_token?: string; acck_token?: string; lazycat_token?: string; proxy_url?: string }) =>
+    http.post<{ status: string; message: string }>('/api/settings/tokens', payload).then(r => r.data),
 
-  getSniperStatus: () =>
-    http.get<{ status: string; task_exists: boolean; task_done: boolean | null; task_exception: string | null; interval_seconds: number; secondhand_buy_enabled: boolean; real_purchase_enabled: boolean; rules_count: number; rules: any[]; daily_bought: number }>('/api/sniper/status').then(r => r.data),
+  // 厂商交互式一键登录与免密自动续期
+  akileLogin: (payload: { username: string; password: string; ga_code?: string; save_credentials?: boolean }) =>
+    http.post<{ status: string; message: string; need_2fa?: boolean; token?: string; expires_at?: string }>('/api/akile/login', payload).then(r => r.data),
+  akileRefreshToken: () =>
+    http.post<{ status: string; message: string; token: string; expires_at: string }>('/api/akile/refresh-token').then(r => r.data),
+  lazycatLogin: (payload: { username: string; password: string; ga_code?: string; save_credentials?: boolean }) =>
+    http.post<{ status: string; message: string; need_2fa?: boolean; token?: string; expires_at?: string }>('/api/lazycat/login', payload).then(r => r.data),
+  acckLogin: (token: string) =>
+    http.post<{ status: string; message: string; token: string; expires_at?: string }>('/api/acck/login', { token }).then(r => r.data),
 
-  // Logs
-  getAppLog: (lines = 500) =>
-    http.get<{ lines: number; content: string }>('/api/logs/app', { params: { lines } }).then(r => r.data),
-
-  // --- My account ---
-  getAccount: () =>
-    http.get<AccountInfo>('/api/account').then(r => r.data),
-
-  refreshAccount: () =>
-    http.post<AccountInfo>('/api/account/refresh').then(r => r.data),
-
-  // --- Checkin ---
-  getCheckinStatus: () =>
-    http.get<{
-      today: string
-      config: {
-        mode: 'fixed' | 'random'
-        fixed_time: string
-        time_start: string
-        time_end: string
-        akile_enabled: boolean
-        acck_enabled: boolean
-      }
-      status: {
-        akile: { checked_in: boolean; status: string; last_log: any }
-        acck: { checked_in: boolean; status: string; last_log: any }
-      }
-      history: Array<{
-        id: number
-        platform: string
-        checkin_date: string
-        status: string
-        message: string
-        created_at: string | null
-      }>
-    }>('/api/checkin/status').then(r => r.data),
-
-  checkin: () =>
-    http.post<{ status_code: number; status_msg: string; ak_coin_earned?: number }>('/api/checkin').then(r => r.data),
-
-  // --- ACCK Platform ---
-  getAcckAccount: () =>
-    http.get<AcckAccountInfo>('/api/acck/account').then(r => r.data),
-
-  refreshAcckAccount: () =>
-    http.post<AcckAccountInfo>('/api/acck/account/refresh').then(r => r.data),
-
-  checkinAcck: () =>
-    http.post<Record<string, unknown>>('/api/acck/checkin').then(r => r.data),
-
-  getAcckServers: () =>
-    http.get<AcckServer[]>('/api/acck/servers').then(r => r.data),
-
-  getAcckShop: () =>
-    http.get<{ shop: Record<string, unknown>; logs: Array<Record<string, unknown>> }>('/api/acck/shop').then(r => r.data),
-
-  acckBuyPreview: (payload: Record<string, unknown>) =>
-    http.post<Record<string, unknown>>('/api/acck/buy-preview', payload).then(r => r.data),
-
-  // --- Dual-Rate Refresh Control ---
-  getRefreshStatus: () =>
-    http.get<RefreshState>('/api/unified/refresh/status').then(r => r.data),
-
-  startBurstRefresh: (duration = 300, interval = 2) =>
-    http.post<RefreshState>('/api/unified/refresh/burst', { duration, interval }).then(r => r.data),
-
-  stopBurstRefresh: () =>
-    http.post<RefreshState>('/api/unified/refresh/slow').then(r => r.data),
-
-  // --- Unified Dual-Platform Management ---
-  getPlatformsHealth: (force = false) =>
-    http.get<PlatformsHealth>('/api/platforms/health', { params: force ? { force: true } : {} }).then(r => r.data),
-
-  getUnifiedServers: () =>
-    http.get<{ total: number; servers: UnifiedServer[]; counts: Record<string, number> }>('/api/unified/servers').then(r => r.data),
-
-  updateServerAutoRenew: (platform: string, server_id: number, auto_renew: boolean) =>
-    http.post<{ platform: string; server_id: number; auto_renew: boolean; status_text?: string; result: any }>('/api/unified/servers/auto-renew', {
-      platform,
-      server_id,
-      auto_renew,
-    }).then(r => r.data),
-
-  getServersAutoRenewStatus: () =>
+  // 全网聚合资产与打卡
+  getInstances: (provider?: string, refresh?: boolean) =>
     http.get<{
       total: number
-      enabled_count: number
-      disabled_count: number
-      servers: any[]
-      mechanism_docs: any
-    }>('/api/unified/servers/auto-renew-status').then(r => r.data),
+      instances: Instance[]
+      last_synced_at?: string
+      next_scheduled_sync?: string
+      provider_status?: Record<string, { status: string; message?: string; last_attempt_at: string }>
+      refreshed_at?: string
+      provider_refresh_times?: Record<string, string>
+      provider_errors?: Record<string, string>
+    }>('/api/instances', { params: { provider, refresh: refresh ? 'true' : undefined } }).then(r => r.data),
+  getProviders: () => http.get<Array<{ id: string; name: string }>>('/api/providers').then(r => r.data),
+  checkinAll: () => http.post<Record<string, CheckinResult>>('/api/checkin').then(r => r.data),
+  checkinProvider: (providerId: string) => http.post<CheckinResult>(`/api/checkin/${providerId}`).then(r => r.data),
 
-  renewServer: (platform: string, server_id: number, cycle = 1, auto_pay = false) =>
-    http.post<{ platform: string; server_id: number; order?: any; paid?: boolean; pay_result?: any }>('/api/unified/servers/renew', {
-      platform,
-      server_id,
-      cycle,
-      auto_pay,
-    }).then(r => r.data),
+  // 二手与新机集市
+  getMarket: (provider?: string) =>
+    http.get<{ total: number; items: MarketItem[]; refreshed_at?: string; provider_refresh_times?: Record<string, string>; provider_errors?: Record<string, string> }>('/api/market', { params: { provider } }).then(r => r.data),
+  getMarketStats: () => http.get<MarketStats>('/api/market/stats').then(r => r.data),
+  getStoreProducts: (provider?: string) =>
+    http.get<{ total: number; products: StoreProductItem[]; refreshed_at?: string; provider_refresh_times?: Record<string, string> }>('/api/store', { params: { provider } }).then(r => r.data),
+  getRefreshTimes: () => http.get<Record<string, string>>('/api/system/refresh-times').then(r => r.data),
 
-  getUnifiedBilling: (page = 1, page_size = 20) =>
-    http.get<UnifiedBillingData>('/api/unified/billing', { params: { page, page_size } }).then(r => r.data),
+  // 购买计划与智能狙击 (Purchase Plans)
+  getPlans: () => http.get<{ total: number; plans: PurchasePlan[] }>('/api/plans').then(r => r.data),
+  createPlan: (plan: Partial<PurchasePlan>) => http.post<PurchasePlan>('/api/plans', plan).then(r => r.data),
+  updatePlan: (id: string, plan: Partial<PurchasePlan>) => http.put<PurchasePlan>(`/api/plans/${id}`, plan).then(r => r.data),
+  deletePlan: (id: string) => http.delete(`/api/plans/${id}`).then(r => r.data),
+  togglePlan: (id: string) => http.post<PurchasePlan>(`/api/plans/${id}/toggle`).then(r => r.data),
+  buyMarketItemDirect: (providerId: string, itemId: string) =>
+    http.post<{ status: string; message: string }>('/api/plans/buy-item', { provider_id: providerId, item_id: itemId }).then(r => r.data),
 
-  payUnifiedOrder: (platform: string, order_id?: any, order_no?: string, method = 'balance') =>
-    http.post('/api/unified/billing/pay', { platform, order_id, order_no, method }).then(r => r.data),
+  // 巡检调度器控制
+  getSchedulerStatus: () => http.get<SchedulerStatus>('/api/scheduler/status').then(r => r.data),
+  triggerBurst: () => http.post<{ status: string; message: string }>('/api/scheduler/burst').then(r => r.data),
 
-  getUnifiedStore: () =>
-    http.get<{ total: number; packages: StorePackage[]; akile_store: any; acck_store: any }>('/api/unified/store').then(r => r.data),
+  // 懒猫云特化与深度管理
+  getLazyCatInstances: () => http.get<{ total: number; instances: Instance[] }>('/api/lazycat/instances').then(r => r.data),
+  getLazyCatPorts: (instanceId?: string) =>
+    http.get<PortMappingDetail>('/api/lazycat/ports', { params: { instance_id: instanceId } }).then(r => r.data),
+  addLazyCatPort: (instanceId: string, privatePort: number, protocol: string, remark?: string) =>
+    http.post<{ status: string; public_port: number; private_port: number; protocol: string; remark: string }>('/api/lazycat/ports', { instance_id: instanceId, private_port: privatePort, protocol, remark }).then(r => r.data),
+  deleteLazyCatPort: (instanceId: string, mappingId: number) =>
+    http.delete<{ status: string; message: string }>(`/api/lazycat/ports/${mappingId}`, { params: { instance_id: instanceId } }).then(r => r.data),
+  getLazyCatInstanceDetail: (instanceId: string) =>
+    http.get<LazyCatInstanceDetail>('/api/lazycat/detail', { params: { instance_id: instanceId } }).then(r => r.data),
+  lazycatExecCommand: (instanceId: string, command: string, timeoutSec?: number) =>
+    http.post<{ status: string; instance_id: string; output: string }>('/api/lazycat/terminal/exec', { instance_id: instanceId, command, timeout_sec: timeoutSec }).then(r => r.data),
+  lazycatGetFleetProbe: (refresh?: boolean) =>
+    http.get<{ total: number; nodes: FleetNode[]; refreshed_at: string }>('/api/lazycat/fleet-probe', { params: { refresh: refresh ? 'true' : 'false' } }).then(r => r.data),
+  lazycatGetEgressNodes: (instanceId: string, refresh?: boolean) =>
+    http.get<{ total: number; instance_id: string; nodes: EgressNode[]; refreshed_at: string }>('/api/lazycat/container/egress-nodes', { params: { instance_id: instanceId, refresh: refresh ? 'true' : undefined } }).then(r => r.data),
+  syncLazyCatEgress: () => http.post<{ status: string; message: string }>('/api/lazycat/sync').then(r => r.data),
 
-  buyStorePackage: (platform: string, plan_id: any, order_data: any[] = [], safe_mode = true) =>
-    http.post('/api/unified/store/buy', { platform, plan_id, order_data, safe_mode }).then(r => r.data),
+  // 网关联动 (Sing-box / OpenClash)
+  getGatewayProxies: () => http.get<any>('/api/gateway/proxies').then(r => r.data),
+  selectGatewayNode: (group_name: string, target_node: string) =>
+    http.put<{ status: string; group: string; selected: string }>('/api/gateway/select', { group_name, target_node }).then(r => r.data),
+  testGatewayDelay: (node_name: string, test_url = 'http://www.gstatic.com/generate_204', timeout_ms = 5000) =>
+    http.post<{ name: string; delay: number; error?: string }>('/api/gateway/delay', { node_name, test_url, timeout_ms }).then(r => r.data),
 
-  getUnifiedSecondhand: (params?: { page?: number; page_size?: number; platform?: string; force_refresh?: boolean; min_renew?: number; max_renew?: number; min_score?: number; max_payback?: number; sort_by?: string; sort_order?: string }) =>
-    http.get<{ total: number; items: SecondhandItem[]; counts: Record<string, number> }>('/api/unified/secondhand', { params }).then(r => r.data),
+  // 行为审计日志
+  getAuditLogs: (params?: { days?: number; limit?: number; source?: string; provider?: string; status?: string }) =>
+    http.get<{ total: number; entries: AuditEntry[] }>('/api/audit', { params }).then(r => r.data),
 
-  buySecondhandItem: (platform: string, listing_id: number | string, price_cents = 0, safe_mode = true, captcha = '', force_buy_depleted = false) =>
-    http.post('/api/unified/secondhand/buy', { platform, listing_id, price_cents, safe_mode, captcha, force_buy_depleted }).then(r => r.data),
-}
-
-export interface RefreshState {
-  mode: 'slow' | 'burst'
-  current_interval: number
-  slow_interval: number
-  burst_interval: number
-  burst_duration: number
-  remaining_seconds: number
-  expires_at: number | null
-  last_poll_at: number | null
-  total_bursts: number
-}
-
-export interface UnifiedServer {
-  uid: string
-  platform: 'akile' | 'acck' | 'lazycat'
-  id: number
-  server_id: string
-  name: string
-  node_name: string
-  area_name: string
-  ipv4: string
-  ipv6: string
-  cpu: number
-  memory: number
-  disk: number
-  bandwidth: number
-  flow: number
-  used_flow: number
-  due_time: number
-  auto_renew: boolean
-  price?: number
-  price_cents?: number
-  price_cny: number
-  price_monthly?: number
-  last_synced_at?: string | null
-  sync_mode?: 'live' | 'cache'
-  fair_market_value_cny?: number | null
-  value_ratio?: number | null
-  monthly_leverage?: number | null
-  m_market?: number | null
-  valuation_rationale?: string | null
-  cycle: number
-  cycle_text?: string
-  status: number
-  system_name?: string
-  raw?: Record<string, unknown>
-}
-
-export interface UnifiedBillingData {
-  akile: {
-    orders: any[]
-    money_logs: any[]
-    pending_invoices: any[]
-  }
-  acck: {
-    orders: any[]
-    shop_logs: any[]
-  }
-}
-
-export interface RouteAnalysis {
-  tier: 'S' | 'A' | 'B' | 'C'
-  tier_label: string
-  is_optimized: boolean
-  routes: string[]
-  primary_route: string
-  native_ip: boolean
-  ip_clean: boolean
-  ip_status: string
-  ip_status_text: string
-}
-
-export interface TrafficAnalysis {
-  total_gb: number
-  used_gb: number
-  remaining_gb: number
-  remaining_ratio_percent: number
-  is_depleted: boolean
-  is_low: boolean
-  status: string
-  status_text: string
-  badge_tone: string
-  reset_price_cny: number
-}
-
-export interface PricingAnalysis {
-  ask_price_cny: number
-  renew_price_cny: number
-  reset_traffic_fee_cny: number
-  ip_repair_fee_cny?: number
-  real_total_cost_cny: number
-  intrinsic_value_cny: number
-}
-
-export interface SnipingVerdict {
-  is_snipable: boolean
-  score: number
-  reasons: string[]
-  verdict_text: string
-}
-
-export interface CostEffectiveness {
-  score: number
-  grade: string
-  grade_label: string
-  intent_label?: string
-  renew_intent_tip?: string
-  badge_color: string
-  points_per_yuan?: number
-  points_per_usd?: number
-  cost_per_point_cny?: number
-  monthly_points_per_yuan?: number
-  monthly_points_per_usd?: number
-  fair_market_value_cny?: number
-  valuation_rationale?: string
-  value_ratio?: number
-  monthly_leverage?: number
-  m_market?: number
-  annual_saving?: number
-  breakdown: {
-    network_score: number
-    ltv_score: number
-    traffic_score: number
-    price_score: number
-  }
-  reasons: string[]
-}
-
-export interface StorePackage {
-  uid: string
-  platform: 'akile' | 'acck'
-  id: number | string
-  name: string
-  area: string
-  node: string
-  cpu: number
-  memory: number
-  disk: number
-  bandwidth: number
-  flow: number
-  price_cny: number
-  cycle: number
-  monthly_cny: number
-  stock: number
-  cost_effectiveness?: CostEffectiveness
-  score?: number
-  grade_label?: string
-  badge_color?: string
-  network_tier_level?: number
-  network_tier_name?: string
-  route_score?: number
-  bandwidth_score?: number
-  traffic_score?: number
-  specs_score?: number
-  hardware_perf_score?: number
-  performance_score?: number
-  renew_price_score?: number
-  sale_price_score?: number
-  arbitrage_score?: number
-  points_per_yuan?: number
-  points_per_usd?: number
-  fair_market_value_cny?: number
-  valuation_rationale?: string
-  value_ratio?: number
-  monthly_leverage?: number
-  m_market?: number
-  reasons?: string[]
-  raw?: Record<string, unknown>
-}
-
-export interface SecondhandItem {
-  uid: string
-  platform: 'akile' | 'acck'
-  id: number | string
-  title: string
-  area: string
-  node: string
-  price_cents: number
-  price_cny: number
-  renew_price_cny?: number
-  bandwidth: number
-  flow: number
-  due_time: number
-  seller: string
-  intro?: string
-  route?: RouteAnalysis
-  traffic?: TrafficAnalysis
-  pricing_analysis?: PricingAnalysis
-  cost_effectiveness?: CostEffectiveness
-  sniping?: SnipingVerdict
-  score?: number
-  grade_label?: string
-  badge_color?: string
-  network_tier_level?: number
-  network_tier_name?: string
-  route_score?: number
-  bandwidth_score?: number
-  traffic_score?: number
-  specs_score?: number
-  hardware_perf_score?: number
-  performance_score?: number
-  renew_price_score?: number
-  sale_price_score?: number
-  arbitrage_score?: number
-  points_per_yuan?: number
-  points_per_usd?: number
-  fair_market_value_cny?: number
-  valuation_rationale?: string
-  value_ratio?: number
-  monthly_leverage?: number
-  m_market?: number
-  monthly_cash_savings?: number
-  payback_months?: number
-  annual_roi_percent?: number
-  payback_tier?: string
-  payback_badge_color?: string
-  reasons?: string[]
-  raw?: Record<string, unknown>
-}
-
-export interface AcckProfile {
-  username: string
-  email: string
-  role: string
-  money?: number | null
-  points: number | null
-  coins?: number | null
-  telegram_id?: string | number | null
-  created_at?: string | null
-  status?: string
-  last_checkin_time?: number | null
-  checked_in_today?: boolean
-}
-
-export interface AcckServer {
-  id?: string | number
-  name?: string
-  ip?: string
-  node?: string
-  status?: string
-  expired_at?: string
-  [key: string]: unknown
-}
-
-export interface AcckAccountInfo {
-  configured: boolean
-  platform: string
-  profile: AcckProfile | null
-  servers: AcckServer[]
-  shop?: Record<string, unknown> | null
-  errors: string[]
-  updated_at: string | null
-}
-
-// --- 平台健康度 ---
-export interface PlatformHealth {
-  key: 'lazycat' | 'akile' | 'acck'
-  name: string
-  host: string
-  configured: boolean
-  token_valid: boolean
-  error: string | null
-  data_source: 'live' | 'cache'
-  data_source_label: string
-  cache_updated_at: string | null
-  display_name?: string | null
-  vip_level?: number | null
-}
-
-export interface PlatformsHealth {
-  checked_at: string
-  cache_ttl_seconds: number
-  platforms: PlatformHealth[]
-}
-
-// --- LazyCat 懒猫云（字段名严格对齐 dash.lazycat.wiki 真实响应）---
-export interface LazyCatHost {
-  name?: string
-  country_code?: string
-  nat_public_ip?: string
-}
-
-export interface LazyCatInstance {
-  id?: number
-  name?: string
-  incusId?: string
-  status?: string
-  image?: string
-  imageName?: string
-  cpu?: number
-  cpuCores?: number
-  memory?: number
-  disk?: number
-  ipv4?: string | null
-  ipv6?: string | null
-  host?: LazyCatHost
-  hostCountryCode?: string
-  networkMode?: string
-  natPublicIp?: string
-  hostPublicIp?: string
-  createdAt?: string
-  packageName?: string
-  planName?: string
-  billingPrice?: number
-  monthlyTrafficLimit?: string | number | null
-  monthlyTrafficUsed?: string | number | null
-  expiresAt?: string
-  portLimit?: number
-  port_limit?: number
-  sshPort?: number
-  ssh_port?: number
-  portMappings?: LazyCatPortMapping[] | null
-  port_mappings?: LazyCatPortMapping[] | null
-  nat_public_ip?: string
-  host_public_ip?: string
-  hidePublicIpOnlyCopy?: boolean
-  hide_public_ip_only_copy?: boolean
-  limitsIngress?: string
-  limitsEgress?: string
-  remainingQuota?: string
-  remaining_quota?: string
-  created_at?: string
-  allow_instance_deletion?: boolean
-}
-
-export interface LazyCatPortMapping {
-  id: number
-  protocol: string
-  ipVersion?: string
-  ip_version?: string
-  publicPort?: number
-  public_port?: number
-  privatePort?: number
-  private_port?: number
-  remark?: string | null
-}
-
-export interface LazyCatUser {
-  id?: number
-  username?: string
-  email?: string
-  role?: string
-  vipLevel?: number
-  instanceCreateGrant?: boolean
-}
-
-export interface LazyCatBalance {
-  balance?: number
-  frozen?: number
-  totalRecharge?: number
-  totalConsume?: number
-  thisMonthConsume?: number
-  vipLevel?: number
-  vipProgress?: number
-  vipNextLevel?: number
-  vipNextThreshold?: number
-}
-
-export interface LazyCatVipCard {
-  enabled?: boolean
-  cardName?: string
-  minVipLevel?: number
-  userVipLevel?: number
-  canClaim?: boolean
-  claimBlockReason?: string
-  card?: Record<string, unknown> | null
-}
-
-export interface LazyCatCheckin {
-  enabled?: boolean
-  checkedIn?: boolean
-  points?: number
-  minPoints?: number
-  maxPoints?: number
-  instances?: number
-  day?: string
-  nextResetAt?: string
-}
-
-export interface LazyCatAccount {
-  error?: string
-  user?: LazyCatUser | null
-  balance?: LazyCatBalance | null
-  vip_card?: LazyCatVipCard | null
-  checkin?: LazyCatCheckin | null
-}
-
-export interface AccountProfile {
-  username: string
-  email: string
-  role: string
-  money: number | null        // balance in fen
-  telegram_id: number | null
-  is_real_name: boolean
-  is_ga: boolean
-  last_checkin_time: number | null
-  ak_coin: number | null
-}
-
-export interface MyServer {
-  [key: string]: unknown
-}
-
-export interface AccountInfo {
-  configured: boolean
-  profile: AccountProfile | null
-  servers: MyServer[]
-  errors: string[]
-  updated_at: string | null
-}
-
-export interface VersionInfo {
-  version: string
-  git_sha: string
-  build_time: string
-}
-
-export function fmtPrice(fen: number | null | undefined): string {
-  if (fen == null) return '—'
-  return `¥${(fen / 100).toFixed(2)}`
-}
-
-export function fmtMemory(mb: number): string {
-  if (mb >= 1024) return `${mb / 1024}GB`
-  return `${mb}MB`
-}
-
-export const EVENT_LABELS: Record<string, { label: string; color: string }> = {
-  new_listing:  { label: '新上架',   color: 'blue' },
-  restock:      { label: '已补货',   color: 'green' },
-  out_of_stock: { label: '已售罄',   color: 'orange' },
-  delisted:     { label: '已下架',   color: 'red' },
-  price_change: { label: '价格变动', color: 'purple' },
-  purchased:    { label: '购买成功', color: 'cyan' },
-}
-
-export const CAT_LABELS: Record<string, string> = {
-  vps: '新机VPS',
-  ls: '轻量机',
-  secondhand: '二手机',
+  // Unraid 生态探测与自动连接状态
+  getUnraidStatus: () => http.get<UnraidStatusReport>('/api/system/unraid-status').then(r => r.data),
 }

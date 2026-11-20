@@ -49,19 +49,19 @@ docker compose up -d --build
 
 1. SSH 到 Unraid 或使用 Web Terminal，运行：
    ```bash
-   wget https://raw.githubusercontent.com/ashanzzz/personal-vps-monitor/master/my-akile-monitor.xml \
-     -O /boot/config/plugins/dockerMan/templates-user/my-akile-monitor.xml
+   wget https://raw.githubusercontent.com/ashanzzz/personal-vps-monitor/master/personal-vps-monitor.xml \
+     -O /boot/config/plugins/dockerMan/templates-user/personal-vps-monitor.xml
    ```
 
 2. 打开 Unraid WebGUI → **Docker** 标签页
 
 3. 点击 **Add Container**
 
-4. 在 **Template** 下拉框中选择 **my-akile-monitor**
+4. 在 **Template** 下拉框中选择 **personal-vps-monitor**
 
-5. 填入你的 **AKILE_TOKEN**（必填）
+5. 填入你的 **AKILE_TOKEN** / **ACCK_TOKEN** / **LAZYCAT_TOKEN**（按需填写）
 
-6. 调整端口（默认 8080）和数据目录（默认 `/mnt/user/appdata/akile-monitor`）
+6. 调整端口（默认 8080）和数据目录（默认 `/mnt/user/appdata/personal-vps-monitor`）
 
 7. 点击 **Apply** 创建容器
 

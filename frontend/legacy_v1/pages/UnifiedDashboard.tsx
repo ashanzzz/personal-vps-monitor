@@ -5,7 +5,7 @@ import {
 } from 'antd'
 import {
   CloudServerOutlined, WalletOutlined,
-  CopyOutlined, ReloadOutlined
+  CopyOutlined, ReloadOutlined, ThunderboltOutlined
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
@@ -29,21 +29,53 @@ export const UnifiedDashboard: React.FC = () => {
   // Account balances
   const [akileBalance, setAkileBalance] = useState<number | null>(null)
   const [acckBalance, setAcckBalance] = useState<number | null>(null)
+  const [lazycatBalance, setLazycatBalance] = useState<number | null>(null)
   const [akCoin, setAkCoin] = useState<number | null>(null)
   const [acCoin, setAcCoin] = useState<number | null>(null)
+  const [lazycatPoints, setLazycatPoints] = useState<number | null>(null)
+  const [probeResults, setProbeResults] = useState<Record<string, { rtt?: number; songzhong?: boolean; probing?: boolean }>>({})
+
+  const handleProbeServer = async (srv: UnifiedServer) => {
+    const ip = srv.ipv4
+    if (!ip) {
+      message.warning('该机器暂无有效公网 IP')
+      return
+    }
+    setProbeResults(prev => ({ ...prev, [srv.uid]: { ...prev[srv.uid], probing: true } }))
+    try {
+      const pingPort = srv.ssh_port || 22
+      const [pingRes, geoRes] = await Promise.all([
+        api.probePing(ip, pingPort, 3.0).catch(() => ({ alive: false, rtt_ms: -1 })),
+        api.probeGeo(ip, undefined, 5.0).catch(() => null),
+      ])
+      const isSongzhong = geoRes?.songzhong?.is_songzhong ?? false
+      setProbeResults(prev => ({
+        ...prev,
+        [srv.uid]: {
+          rtt: pingRes.alive ? pingRes.rtt_ms : -1,
+          songzhong: isSongzhong,
+          probing: false,
+        },
+      }))
+      message.success(`${srv.name} 网络体检完成！`)
+    } catch {
+      setProbeResults(prev => ({ ...prev, [srv.uid]: { probing: false } }))
+    }
+  }
 
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [srvRes, refRes, akAcc, acAcc] = await Promise.all([
-        api.getUnifiedServers().catch(() => ({ total: 0, servers: [], counts: { akile: 0, acck: 0 } })),
+      const [srvRes, refRes, akAcc, acAcc, lzAcc] = await Promise.all([
+        api.getUnifiedServers().catch(() => ({ total: 0, servers: [], counts: { akile: 0, acck: 0, lazycat: 0 } })),
         api.getRefreshStatus().catch(() => null),
         api.getAccount().catch(() => null),
         api.getAcckAccount().catch(() => null),
+        api.getLazyCatAccount().catch(() => null),
       ])
 
       setServers(srvRes.servers || [])
-      setCounts(srvRes.counts || { akile: 0, acck: 0 })
+      setCounts(srvRes.counts || { akile: 0, acck: 0, lazycat: 0 })
       if (refRes) setRefreshState(refRes)
 
       // Extract balances
@@ -52,10 +84,13 @@ export const UnifiedDashboard: React.FC = () => {
         setAkCoin(akAcc.profile.ak_coin ?? null)
       }
       if (acAcc?.profile) {
-        // ACCK money is in cents (分), coins is AC币
         const acckMoney = acAcc.profile.money != null ? acAcc.profile.money / 100 : (acAcc.profile.points != null ? acAcc.profile.points / 100 : null)
         setAcckBalance(acckMoney)
         setAcCoin(acAcc.profile.coins ?? null)
+      }
+      if (lzAcc?.balance) {
+        setLazycatBalance(Number(lzAcc.balance.balance ?? 0))
+        setLazycatPoints(lzAcc.checkin?.points ?? null)
       }
     } catch (e) {
       console.error('Unified dashboard load error:', e)
@@ -153,11 +188,16 @@ export const UnifiedDashboard: React.FC = () => {
       dataIndex: 'platform',
       key: 'platform',
       width: 90,
-      render: (p: string) => (
-        <span className={p === 'akile' ? 'badge-proxy' : 'badge-online'} style={{ textTransform: 'uppercase' }}>
-          {p}
-        </span>
-      ),
+      render: (p: string) => {
+        let badge = 'badge-online'
+        if (p === 'akile') badge = 'badge-proxy'
+        else if (p === 'lazycat') badge = 'badge-offline'
+        return (
+          <span className={badge} style={{ textTransform: 'uppercase' }}>
+            {p}
+          </span>
+        )
+      },
     },
     {
       title: '主机名称 / 别名',
@@ -256,6 +296,47 @@ export const UnifiedDashboard: React.FC = () => {
       ),
     },
     {
+      title: '网络体检',
+      key: 'probe',
+      width: 170,
+      render: (_, r) => {
+        const pr = probeResults[r.uid]
+        if (!pr || (pr.rtt === undefined && !pr.probing)) {
+          return (
+            <Button
+              size="small"
+              icon={<ThunderboltOutlined />}
+              style={{ fontSize: 11, height: 22, padding: '0 6px' }}
+              onClick={() => handleProbeServer(r)}
+            >
+              测速/送中
+            </Button>
+          )
+        }
+        if (pr.probing) {
+          return <span style={{ fontSize: 11, color: '#2563eb' }}>正在探测...</span>
+        }
+        return (
+          <Space size={4} wrap>
+            <Tooltip title="点击重新测速">
+              <Tag
+                color={pr.rtt != null && pr.rtt > 0 ? (pr.rtt < 200 ? 'success' : pr.rtt < 500 ? 'warning' : 'error') : 'error'}
+                style={{ cursor: 'pointer', fontSize: 11, margin: 0 }}
+                onClick={() => handleProbeServer(r)}
+              >
+                {pr.rtt != null && pr.rtt > 0 ? `${pr.rtt}ms` : '超时'}
+              </Tag>
+            </Tooltip>
+            {pr.songzhong !== undefined && (
+              <Tag color={pr.songzhong ? 'error' : 'blue'} style={{ fontSize: 11, margin: 0 }}>
+                {pr.songzhong ? 'Google送中' : 'Google未送中'}
+              </Tag>
+            )}
+          </Space>
+        )
+      },
+    },
+    {
       title: '操作',
       key: 'actions',
       width: 110,
@@ -286,7 +367,7 @@ export const UnifiedDashboard: React.FC = () => {
             <Statistic
               title={<span style={{ color: '#64748b', fontSize: 13, fontWeight: 500 }}>在线服务器总数</span>}
               value={servers.length}
-              suffix={<span style={{ fontSize: 12, color: '#64748b' }}>台 (Akile: {counts.akile} / ACCK: {counts.acck})</span>}
+              suffix={<span style={{ fontSize: 12, color: '#64748b' }}>台 (Akile: {counts.akile || 0} / ACCK: {counts.acck || 0} / 懒猫: {counts.lazycat || 0})</span>}
               prefix={<CloudServerOutlined style={{ color: '#2563eb', marginRight: 6 }} />}
               valueStyle={{ color: '#0f172a', fontWeight: 700, fontSize: 24 }}
             />
@@ -308,9 +389,15 @@ export const UnifiedDashboard: React.FC = () => {
         <Col xs={24} sm={12} md={6}>
           <Card className="ashan-card" bordered={false}>
             <Statistic
-              title={<span style={{ color: '#64748b', fontSize: 13, fontWeight: 500 }}>ACCK 余额 & 积分</span>}
+              title={<span style={{ color: '#64748b', fontSize: 13, fontWeight: 500 }}>ACCK & 懒猫余额</span>}
               value={acckBalance != null ? `¥${acckBalance.toFixed(2)}` : '未连接'}
-              suffix={acCoin != null ? <span style={{ fontSize: 12, color: '#64748b' }}>({acCoin} AC币)</span> : ''}
+              suffix={
+                <span style={{ fontSize: 12, color: '#64748b' }}>
+                  {acCoin != null ? `(${acCoin} AC币)` : ''}
+                  {lazycatBalance != null ? ` · 懒猫: ¥${lazycatBalance.toFixed(2)}` : ''}
+                  {lazycatPoints != null ? ` (${lazycatPoints}分)` : ''}
+                </span>
+              }
               prefix={<WalletOutlined style={{ color: '#0284c7', marginRight: 6 }} />}
               valueStyle={{ color: '#0f172a', fontWeight: 700, fontSize: 22 }}
             />

@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>personal-vps-monitor</Name>
+  <Repository>ghcr.io/ashanzzz/personal-vps-monitor:latest</Repository>
+  <Registry>https://ghcr.io</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/ashanzzz/personal-vps-monitor/issues</Support>
+  <Project>https://github.com/ashanzzz/personal-vps-monitor</Project>
+  <Overview>Personal VPS Monitor (个人 VPS 监控) — 统一管理懒猫云 (LazyCat)、AkileCloud、ACCK 多平台个人云服务器资产监控与自动化中心。具备每日自动签到与 Token 续期、节点网络探测（延迟/送中/分组）、新机与二手机监控告警、以及具备安全防误购保护锁的选购与试算接口。</Overview>
+  <Category>Tools: Network:Management Status:Stable</Category>
+  <WebUI>http://[IP]:[PORT:80]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/ashanzzz/personal-vps-monitor/master/personal-vps-monitor.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/ashanzzz/personal-vps-monitor/master/frontend/public/favicon.svg</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled></DateInstalled>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+
+  <Config Name="WebUI Port" Target="80" Default="8080" Mode="tcp" Description="统一访问端口（前端 Web 界面、后台 API、AI MCP 控制三合一全部走此端口）" Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+
+  <Config Name="Data Volume" Target="/app/data" Default="/mnt/user/appdata/personal-vps-monitor" Mode="rw" Description="数据持久化目录（SQLite 数据库、配置缓存）" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/personal-vps-monitor</Config>
+
+  <Config Name="ADMIN_USER" Target="ADMIN_USER" Default="admin" Mode="" Description="Web 管理员用户名（默认 admin，可通过环境变量覆盖）" Type="Variable" Display="always" Required="false" Mask="false">admin</Config>
+
+  <Config Name="ADMIN_PASSWORD" Target="ADMIN_PASSWORD" Default="admin" Mode="" Description="Web 管理员密码（默认 admin，可通过环境变量覆盖）" Type="Variable" Display="always" Required="false" Mask="true">admin</Config>
+
+  <Config Name="AKILE_TOKEN" Target="AKILE_TOKEN" Default="" Mode="" Description="AkileCloud API Token（可选）。从 akile.ai 获取，用于调用监控与打卡。" Type="Variable" Display="always" Required="false" Mask="true"></Config>
+
+  <Config Name="ACCK_TOKEN" Target="ACCK_TOKEN" Default="" Mode="" Description="ACCK API Token（可选）。从 acck.io 获取，用于打卡与资产管理。" Type="Variable" Display="always" Required="false" Mask="true"></Config>
+
+  <Config Name="LAZYCAT_TOKEN" Target="LAZYCAT_TOKEN" Default="" Mode="" Description="懒猫云 API Token（可选）。亦可在 Web 界面设置中通过账号密码一键登录。" Type="Variable" Display="always" Required="false" Mask="true"></Config>
+
+  <Config Name="PUBLIC_READ_TOKEN" Target="PUBLIC_READ_TOKEN" Default="" Mode="" Description="第三方只读 API 密钥（可选）。配置后可通过 /api/read/v1 读取公开机器数据。" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+
+  <Config Name="PUBLIC_CONTROL_TOKEN" Target="PUBLIC_CONTROL_TOKEN" Default="" Mode="" Description="第三方可写控制 API 密钥（可选）。配置后可通过 /api/control/v1 控制后端刷新与设置。" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+
+  <Config Name="TZ" Target="TZ" Default="Asia/Shanghai" Mode="" Description="容器时区（用于日志时间戳和定时任务）" Type="Variable" Display="advanced" Required="false" Mask="false">Asia/Shanghai</Config>
+</Container>
