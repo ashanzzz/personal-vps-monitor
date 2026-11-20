@@ -176,6 +176,10 @@ func TryAutoRecoverProvider(ctx context.Context, providerID string) bool {
 	}
 
 	creds := config.LoadSavedCredentials()
+	if creds.Akile == nil || creds.LazyCat == nil || creds.ACCK == nil {
+		_, _ = vault.PullAndSyncFromVaultwarden(ctx, "", "", "")
+		creds = config.LoadSavedCredentials()
+	}
 
 	switch providerID {
 	case "akile":

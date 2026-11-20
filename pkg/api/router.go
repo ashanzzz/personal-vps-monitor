@@ -421,9 +421,11 @@ func handleUnifiedCheckin(w http.ResponseWriter, r *http.Request) {
 					Success: false,
 					Message: err.Error(),
 				}
+				scheduler.GetCheckinManager().RecordResult(id, nil, err)
 				audit.Record("rest_api", "checkin", id, nil, "FAILED", err.Error(), dur)
 			} else {
 				results[id] = res
+				scheduler.GetCheckinManager().RecordResult(id, res, nil)
 				audit.Record("rest_api", "checkin", id, map[string]interface{}{"account": res.Account, "reward": res.Reward, "website": res.Website}, "SUCCESS", res.Message, dur)
 			}
 		}
@@ -452,6 +454,7 @@ func handleSingleCheckin(w http.ResponseWriter, r *http.Request) {
 	res, err := ac.DoCheckin(ctx)
 	dur := time.Since(start).Milliseconds()
 	if err != nil {
+		scheduler.GetCheckinManager().RecordResult(id, nil, err)
 		audit.Record("rest_api", "checkin", id, nil, "FAILED", err.Error(), dur)
 		respondJSON(w, http.StatusOK, &providers.CheckinResult{
 			Success: false,
@@ -459,6 +462,7 @@ func handleSingleCheckin(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	scheduler.GetCheckinManager().RecordResult(id, res, nil)
 	audit.Record("rest_api", "checkin", id, map[string]interface{}{"account": res.Account, "reward": res.Reward, "website": res.Website}, "SUCCESS", res.Message, dur)
 	respondJSON(w, http.StatusOK, res)
 }

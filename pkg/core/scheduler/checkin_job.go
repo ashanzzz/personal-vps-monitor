@@ -274,6 +274,57 @@ func (m *DailyCheckinManager) CheckinSingle(ctx context.Context, providerID stri
 	}
 }
 
+// RecordResult 允许外部（如手动单点签到、批量签到）直接回写打卡状态
+func (m *DailyCheckinManager) RecordResult(providerID string, res *providers.CheckinResult, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	today := time.Now().Format("2006-01-02")
+	if m.date != today {
+		m.date = today
+		m.states = make(map[string]*ProviderCheckinState)
+	}
+
+	st, exists := m.states[providerID]
+	if !exists {
+		st = &ProviderCheckinState{
+			ProviderID: providerID,
+		}
+		m.states[providerID] = st
+	}
+
+	now := time.Now()
+	st.LastAttemptAt = now
+
+	if err == nil && res != nil && res.Success {
+		st.Status = "success"
+		st.SuccessAt = now
+		st.Message = res.Message
+		st.Reward = res.Reward
+		st.Account = res.Account
+		st.NextRetryAt = time.Time{}
+
+		if strings.Contains(res.Message, "已经") || strings.Contains(res.Message, "已签") {
+			st.Status = "already_signed"
+		}
+
+		if t, ok := m.timers[providerID]; ok {
+			t.Stop()
+			delete(m.timers, providerID)
+		}
+	} else {
+		st.Status = "retrying"
+		st.RetryCount++
+		if err != nil {
+			st.Message = err.Error()
+		} else if res != nil {
+			st.Message = res.Message
+		}
+		st.NextRetryAt = now.Add(30 * time.Minute)
+	}
+	m.saveLocked()
+}
+
 // GetSummary 获取今日打卡全局健康状态摘要 (0ms 极速响应)
 func (m *DailyCheckinManager) GetSummary() map[string]interface{} {
 	m.mu.RLock()
