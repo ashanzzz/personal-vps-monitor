@@ -11,6 +11,7 @@ import (
 type ProviderCredential struct {
 	Username    string `json:"username"`
 	Password    string `json:"password"`
+	TOTPSecret  string `json:"totp_secret,omitempty"`
 	AutoRefresh bool   `json:"auto_refresh"`
 }
 
@@ -90,6 +91,11 @@ func LoadSavedCredentials() *SavedCredentials {
 
 // SaveProviderCredential 保存或更新指定厂商的免密登录账号凭据
 func SaveProviderCredential(provider, username, password string, autoRefresh bool) error {
+	return SaveProviderCredentialWithTOTP(provider, username, password, "", autoRefresh)
+}
+
+// SaveProviderCredentialWithTOTP 保存或更新指定厂商的免密登录账号凭据 (支持 TOTP 密钥)
+func SaveProviderCredentialWithTOTP(provider, username, password, totpSecret string, autoRefresh bool) error {
 	credMu.Lock()
 	defer credMu.Unlock()
 
@@ -97,6 +103,7 @@ func SaveProviderCredential(provider, username, password string, autoRefresh boo
 	cred := &ProviderCredential{
 		Username:    username,
 		Password:    password,
+		TOTPSecret:  totpSecret,
 		AutoRefresh: autoRefresh,
 	}
 

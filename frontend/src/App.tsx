@@ -243,6 +243,7 @@ export default function App() {
   const [vendorHealth, setVendorHealth] = useState<VendorHealthSummary | null>(null)
   const [singleSyncing, setSingleSyncing] = useState<string | null>(null)
   const [quickLogging, setQuickLogging] = useState<string | null>(null)
+  const [vaultSyncing, setVaultSyncing] = useState(false)
 
   const loadVendorHealth = useCallback(async () => {
     try {
@@ -252,6 +253,20 @@ export default function App() {
       // 容错不阻断
     }
   }, [])
+
+  const handleGlobalVaultSync = async () => {
+    try {
+      setVaultSyncing(true)
+      const res = await api.vendorVaultSync()
+      message.success(res.message || `成功从 Vaultwarden 解密提取 ${res.matched_count} 家厂商凭据！`)
+      loadVendorHealth()
+      loadData()
+    } catch (err: any) {
+      message.error(err.response?.data?.error || err.message || '从 Vaultwarden 自动同步解密失败')
+    } finally {
+      setVaultSyncing(false)
+    }
+  }
 
   const handleSingleSync = async (provider: string) => {
     try {
@@ -376,6 +391,15 @@ export default function App() {
                 onClick={() => handleSingleSync(providerKey)}
               >
                 从官网获取最新
+              </Button>
+              <Button
+                size="small"
+                type="dashed"
+                icon={<SafetyCertificateOutlined />}
+                loading={vaultSyncing}
+                onClick={handleGlobalVaultSync}
+              >
+                🔐 从 Vaultwarden 提取
               </Button>
               <Button
                 size="small"

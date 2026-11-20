@@ -139,6 +139,7 @@ func NewRouter() http.Handler {
 			r.Post("/vendor/quick-login/{provider}", handleVendorQuickLogin)
 			r.Post("/vendor/sync/{provider}", handleVendorSingleSync)
 			r.Post("/vendor/credentials/save", handleSaveProviderCredentials)
+			r.Post("/vendor/vault/sync", handleVaultSync)
 
 			// 懒猫云特化端点
 			r.Route("/lazycat", func(r chi.Router) {

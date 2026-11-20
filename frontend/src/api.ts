@@ -467,4 +467,6 @@ export const api = {
     http.post<{ status: string; provider_id: string; instances: Instance[]; count: number; last_synced_at: string }>(`/api/vendor/sync/${provider}`).then(r => r.data),
   saveVendorCredentials: (data: { provider: string; username: string; password: string; auto_refresh: boolean }) =>
     http.post<{ status: string; message: string }>('/api/vendor/credentials/save', data).then(r => r.data),
+  vendorVaultSync: () =>
+    http.post<{ status: string; message: string; matched_count: number; items: any[]; credentials: any }>('/api/vendor/vault/sync').then(r => r.data),
 }

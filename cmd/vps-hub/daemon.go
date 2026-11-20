@@ -14,6 +14,7 @@ import (
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/audit"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/config"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/notify"
+	"github.com/ashanzzz/personal-vps-monitor/pkg/core/vault"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
 	"github.com/spf13/cobra"
 )
@@ -38,6 +39,12 @@ var daemonCmd = &cobra.Command{
 				audit.Record("daemon", "system.log_prune", "system", nil, "SUCCESS", fmt.Sprintf("已清理 %d 个过期日志文件", del), 0)
 			}
 			audit.Record("daemon", "system.startup", "system", nil, "SUCCESS", "VPS-Hub daemon 启动成功", 0)
+
+			// 启动时在后台静默尝试从 Vaultwarden 自动解密同步一次最新凭据
+			time.Sleep(2 * time.Second)
+			if items, err := vault.PullAndSyncFromVaultwarden(context.Background(), "", "", ""); err == nil && len(items) > 0 {
+				log.Printf("[Startup] 成功从 Vaultwarden 自动解密提取并更新了 %d 个厂商凭据！", len(items))
+			}
 		}()
 
 		ctx, cancel := context.WithCancel(context.Background())

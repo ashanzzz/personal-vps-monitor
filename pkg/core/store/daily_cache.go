@@ -12,6 +12,7 @@ import (
 
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/audit"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/config"
+	"github.com/ashanzzz/personal-vps-monitor/pkg/core/vault"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers/acck"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers/akile"
@@ -190,11 +191,17 @@ func TryAutoRecoverProvider(ctx context.Context, providerID string) bool {
 			}
 			// 2. 续期失败 (如 401 完全过期)，尝试使用凭据库账号密码重新登录
 			if creds.Akile != nil && creds.Akile.Username != "" && creds.Akile.Password != "" {
-				if newTok, need2FA, _, err := ak.Login(ctx, creds.Akile.Username, creds.Akile.Password, ""); err == nil && newTok != "" && !need2FA {
+				gaCode := ""
+				if creds.Akile.TOTPSecret != "" {
+					if code, err := vault.GenerateTOTP(creds.Akile.TOTPSecret); err == nil && code != "" {
+						gaCode = code
+					}
+				}
+				if newTok, need2FA, _, err := ak.Login(ctx, creds.Akile.Username, creds.Akile.Password, gaCode); err == nil && newTok != "" && !need2FA {
 					_ = config.SaveTokens(newTok, "", "", "")
 					config.Global.AkileToken = newTok
 					ak.SetToken(newTok)
-					audit.Record("security", "akile.auto_relogin", "akile", map[string]interface{}{"username": creds.Akile.Username}, "SUCCESS", "检测到 Akile Token 掉线，已自动依据凭据库免密重新登录并恢复！", 0)
+					audit.Record("security", "akile.auto_relogin", "akile", map[string]interface{}{"username": creds.Akile.Username}, "SUCCESS", "检测到 Akile Token 掉线，已自动依据凭据库(及实时TOTP)免密重新登录并恢复！", 0)
 					log.Printf("[AutoRecover] Akile 自动免密重新登录成功，Token 已更新")
 					return true
 				}

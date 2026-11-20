@@ -35,11 +35,26 @@ export const ProviderLoginModal: React.FC<Props> = ({
   const [activeTab, setActiveTab] = useState<'password' | 'token'>('password')
   const [submitting, setSubmitting] = useState(false)
   const [quickLogging, setQuickLogging] = useState(false)
+  const [vaultSyncing, setVaultSyncing] = useState(false)
   const [need2FA, setNeed2FA] = useState(false)
   const [twoFaPrompt, setTwoFaPrompt] = useState('')
 
   const [pwdForm] = Form.useForm()
   const [tokenForm] = Form.useForm()
+
+  const handleVaultSync = async () => {
+    try {
+      setVaultSyncing(true)
+      const res = await api.vendorVaultSync()
+      message.success(res.message || `从 Vaultwarden 成功提取 ${res.matched_count} 家厂商凭据！`)
+      // 自动触发一次快速免密登录
+      await handleQuickLogin()
+    } catch (err: any) {
+      message.error(err.response?.data?.error || err.message || 'Vaultwarden 自动同步解密失败')
+    } finally {
+      setVaultSyncing(false)
+    }
+  }
 
   const handleQuickLogin = async () => {
     try {
@@ -181,11 +196,21 @@ export const ProviderLoginModal: React.FC<Props> = ({
           <div>
             <Alert
               message="ACCK 凭据配置"
-              description="ACCK 开启了 Cloudflare 人机验证防护，请从浏览器登录控制台后复制 Token 粘贴至下方，系统将自动校验连通性并持久化。"
+              description="ACCK 开启了 Cloudflare 人机验证防护，请从浏览器登录控制台后复制 Token 粘贴至下方，或直接点击下方按钮从 Vaultwarden 自动提取。"
               type="info"
               showIcon
-              style={{ marginBottom: 16 }}
+              style={{ marginBottom: 12 }}
             />
+            <Button
+              type="default"
+              icon={<SafetyCertificateOutlined />}
+              loading={vaultSyncing}
+              onClick={handleVaultSync}
+              block
+              style={{ height: 36, fontWeight: 600, marginBottom: 16, borderColor: '#3b82f6', color: '#1d4ed8' }}
+            >
+              🔐 从本地 Vaultwarden (4743) 一键自动提取解密
+            </Button>
             <Form form={tokenForm} layout="vertical" onFinish={handleTokenSubmit}>
               <Form.Item
                 label="ACCK API Token (JWT)"
@@ -229,9 +254,19 @@ export const ProviderLoginModal: React.FC<Props> = ({
                       loading={quickLogging}
                       onClick={handleQuickLogin}
                       block
-                      style={{ background: '#059669', borderColor: '#059669', height: 40, fontWeight: 600, marginBottom: 16 }}
+                      style={{ background: '#059669', borderColor: '#059669', height: 40, fontWeight: 600, marginBottom: 10 }}
                     >
                       ⚡ 从凭据库一键免密登录 (1秒完成)
+                    </Button>
+                    <Button
+                      type="default"
+                      icon={<SafetyCertificateOutlined />}
+                      loading={vaultSyncing}
+                      onClick={handleVaultSync}
+                      block
+                      style={{ height: 36, fontWeight: 600, marginBottom: 16, borderColor: '#3b82f6', color: '#1d4ed8' }}
+                    >
+                      🔐 从本地 Vaultwarden (4743) 一键自动提取解密
                     </Button>
                     <Alert
                       type="info"

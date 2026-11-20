@@ -14,6 +14,7 @@ import (
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/config"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/scheduler"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/store"
+	"github.com/ashanzzz/personal-vps-monitor/pkg/core/vault"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers/acck"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers/akile"
@@ -84,7 +85,18 @@ func handleAkileLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, need2FA, msg, err := akProvider.Login(r.Context(), req.Username, req.Password, req.GACode)
+	gaCode := strings.TrimSpace(req.GACode)
+	if gaCode == "" {
+		creds := config.LoadSavedCredentials()
+		if creds.Akile != nil && creds.Akile.TOTPSecret != "" {
+			if autoCode, err := vault.GenerateTOTP(creds.Akile.TOTPSecret); err == nil && autoCode != "" {
+				gaCode = autoCode
+				log.Printf("[AkileLogin] 自动利用 Vaultwarden TOTP 密钥生成 2FA 动态码: %s", autoCode)
+			}
+		}
+	}
+
+	token, need2FA, msg, err := akProvider.Login(r.Context(), req.Username, req.Password, gaCode)
 	if need2FA {
 		respondJSON(w, http.StatusOK, map[string]interface{}{
 			"need_2fa": true,
@@ -371,15 +383,23 @@ func handleVendorHealthSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /api/vendor/quick-login/{provider} 手动一键免密快速登录 (从凭据库读取自动完成登录)
+// POST /api/vendor/quick-login/{provider} 手动一键免密快速登录 (从凭据库读取自动完成登录，缺失时自动从 Vaultwarden 穿透解密同步)
 func handleVendorQuickLogin(w http.ResponseWriter, r *http.Request) {
 	provider := strings.ToLower(chi.URLParam(r, "provider"))
 	creds := config.LoadSavedCredentials()
 
 	switch provider {
 	case "akile":
+		// 若本地尚未保存凭据，尝试先从 Vaultwarden 自动解密同步
+		if creds.Akile == nil || creds.Akile.Username == "" || creds.Akile.Password == "" {
+			log.Printf("[QuickLogin] 本地凭据库未找到 Akile，正在尝试从 Vaultwarden (192.168.8.11:4743) 自动解密同步...")
+			_, _ = vault.PullAndSyncFromVaultwarden(r.Context(), "", "", "")
+			creds = config.LoadSavedCredentials()
+		}
+
 		if creds.Akile == nil || creds.Akile.Username == "" || creds.Akile.Password == "" {
 			respondJSON(w, http.StatusBadRequest, map[string]string{
-				"error": "尚未保存 Akile 账号密码凭据，请先在凭据设置中输入并保存",
+				"error": "未能从 Vaultwarden 或本地凭据库获取 Akile 账号密码，请在凭据设置中输入并保存",
 			})
 			return
 		}
@@ -391,13 +411,28 @@ func handleVendorQuickLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		akProvider := p.(*akile.AkileProvider)
 
-		// 检查是否有 2FA 动态码传入 (可选)
+		// 检查是否有 2FA 动态码传入；若无且保存了 TOTP 密钥，自动计算实时 6 位动态验证码
 		var body struct {
 			GACode string `json:"ga_code"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
+		gaCode := strings.TrimSpace(body.GACode)
+		if gaCode == "" && creds.Akile.TOTPSecret != "" {
+			if autoCode, err := vault.GenerateTOTP(creds.Akile.TOTPSecret); err == nil && autoCode != "" {
+				gaCode = autoCode
+				log.Printf("[QuickLogin] 自动基于 Vaultwarden TOTP 密钥生成 Akile 2FA 动态码: %s", autoCode)
+			}
+		}
 
-		tok, need2FA, msg, err := akProvider.Login(r.Context(), creds.Akile.Username, creds.Akile.Password, body.GACode)
+		tok, need2FA, msg, err := akProvider.Login(r.Context(), creds.Akile.Username, creds.Akile.Password, gaCode)
+		if need2FA {
+			// 若初次尝试需要 2FA 且之前未带 gaCode，尝试即时生成并再次重试
+			if gaCode == "" && creds.Akile.TOTPSecret != "" {
+				if autoCode, err2 := vault.GenerateTOTP(creds.Akile.TOTPSecret); err2 == nil && autoCode != "" {
+					tok, need2FA, msg, err = akProvider.Login(r.Context(), creds.Akile.Username, creds.Akile.Password, autoCode)
+				}
+			}
+		}
 		if need2FA {
 			respondJSON(w, http.StatusOK, map[string]interface{}{
 				"need_2fa": true,
@@ -415,7 +450,7 @@ func handleVendorQuickLogin(w http.ResponseWriter, r *http.Request) {
 		akProvider.SetToken(tok)
 
 		_, expTime, _ := ParseJWTExp(tok)
-		audit.Record("rest_api", "akile.quick_login", "akile", map[string]interface{}{"username": creds.Akile.Username}, "SUCCESS", "用户通过凭据库一键免密登录 Akile 成功", 0)
+		audit.Record("rest_api", "akile.quick_login", "akile", map[string]interface{}{"username": creds.Akile.Username, "auto_totp": gaCode != ""}, "SUCCESS", "用户通过凭据库(及Vaultwarden)一键免密登录 Akile 成功", 0)
 
 		respondJSON(w, http.StatusOK, map[string]interface{}{
 			"status":     "success",
@@ -425,9 +460,16 @@ func handleVendorQuickLogin(w http.ResponseWriter, r *http.Request) {
 		})
 
 	case "lazycat":
+		// 若本地尚未保存凭据，尝试先从 Vaultwarden 自动解密同步
+		if creds.LazyCat == nil || creds.LazyCat.Username == "" || creds.LazyCat.Password == "" {
+			log.Printf("[QuickLogin] 本地凭据库未找到 LazyCat，正在尝试从 Vaultwarden 自动解密同步...")
+			_, _ = vault.PullAndSyncFromVaultwarden(r.Context(), "", "", "")
+			creds = config.LoadSavedCredentials()
+		}
+
 		if creds.LazyCat == nil || creds.LazyCat.Username == "" || creds.LazyCat.Password == "" {
 			respondJSON(w, http.StatusBadRequest, map[string]string{
-				"error": "尚未保存懒猫云账号密码凭据，请先在凭据设置中输入并保存",
+				"error": "未能从 Vaultwarden 或本地凭据库获取懒猫云账号密码，请先在凭据设置中输入并保存",
 			})
 			return
 		}
@@ -472,7 +514,13 @@ func handleVendorQuickLogin(w http.ResponseWriter, r *http.Request) {
 		})
 
 	case "acck":
-		// 如果 ACCK 凭据库已保存 Token 或密码
+		// 若 ACCK 未配置 Token，尝试从 Vaultwarden 获取
+		if (creds.ACCK == nil || creds.ACCK.Password == "") && config.Global.ACCKToken == "" {
+			log.Printf("[QuickLogin] 未找到 ACCK 凭据，正在尝试从 Vaultwarden 自动解密同步...")
+			_, _ = vault.PullAndSyncFromVaultwarden(r.Context(), "", "", "")
+			creds = config.LoadSavedCredentials()
+		}
+
 		p, ok := providers.Get("acck")
 		if !ok {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "acck provider 未注册"})
@@ -511,6 +559,42 @@ func handleVendorQuickLogin(w http.ResponseWriter, r *http.Request) {
 	default:
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "未知服务商: " + provider})
 	}
+}
+
+// POST /api/vendor/vault/sync 手动从 Vaultwarden (192.168.8.11:4743) 触发解密同步至本地凭据库
+func handleVaultSync(w http.ResponseWriter, r *http.Request) {
+	items, err := vault.PullAndSyncFromVaultwarden(r.Context(), "", "", "")
+	if err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("从 Vaultwarden 同步解密失败: %v", err),
+		})
+		return
+	}
+
+	creds := config.LoadSavedCredentials()
+	type ItemSummary struct {
+		Name     string `json:"name"`
+		Username string `json:"username"`
+		HasTOTP  bool   `json:"has_totp"`
+	}
+	var res []ItemSummary
+	for _, it := range items {
+		res = append(res, ItemSummary{
+			Name:     it.Name,
+			Username: config.MaskUsername(it.Username),
+			HasTOTP:  it.TOTPSecret != "",
+		})
+	}
+
+	audit.Record("security", "vaultwarden.sync", "vaultwarden", map[string]interface{}{"matched_count": len(items)}, "SUCCESS", fmt.Sprintf("成功从 Vaultwarden 解密提取 %d 家服务商凭据", len(items)), 0)
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"status":        "success",
+		"message":       fmt.Sprintf("成功从 Vaultwarden 自动解密提取并更新了 %d 家厂商凭据！", len(items)),
+		"matched_count": len(items),
+		"items":         res,
+		"credentials":   creds,
+	})
 }
 
 // POST /api/vendor/sync/{provider} 单个服务商独立增量同步
