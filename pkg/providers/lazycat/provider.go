@@ -282,8 +282,8 @@ func (p *LazyCatProvider) SyncEgress(ctx context.Context) error {
 		instID = "11433"
 	}
 
-	// 若尚未运行，则在后台以 setsid 启动，避免 100 秒级长命令被 WS 空闲或整点重启中断
-	startCmd := "if pgrep -f '/opt/lazycat-multi-egress/sync_egress.py' >/dev/null 2>&1; then echo 'ALREADY_RUNNING'; else setsid sh -c 'python3 /opt/lazycat-multi-egress/sync_egress.py >> /var/log/lazycat-cron.log 2>&1' </dev/null >/dev/null 2>&1 & echo 'STARTED'; fi"
+	// 若尚未运行，则在后台以 setsid 启动，避免 100 秒级长命令被 WS 空闲或整点重启中断（[s] 防止 pgrep -f 自匹配 sh -c）
+	startCmd := "if pgrep -f 'python3 /opt/lazycat-multi-egress/[s]ync_egress.py' >/dev/null 2>&1; then echo 'ALREADY_RUNNING'; else setsid sh -c 'python3 /opt/lazycat-multi-egress/sync_egress.py >> /var/log/lazycat-cron.log 2>&1' </dev/null >/dev/null 2>&1 & echo 'STARTED'; fi"
 	startRes, err := p.client.ExecTerminalCommandWithResult(ctx, instID, startCmd, 15*time.Second)
 	if err != nil {
 		return fmt.Errorf("trigger sync egress failed: %w", err)
@@ -302,7 +302,7 @@ func (p *LazyCatProvider) SyncEgress(ctx context.Context) error {
 		case <-time.After(6 * time.Second):
 		}
 
-		pollRes, pollErr := p.client.ExecTerminalCommandWithResult(ctx, instID, "pgrep -f '/opt/lazycat-multi-egress/sync_egress.py' >/dev/null 2>&1 && echo RUNNING || echo IDLE", 12*time.Second)
+		pollRes, pollErr := p.client.ExecTerminalCommandWithResult(ctx, instID, "pgrep -f 'python3 /opt/lazycat-multi-egress/[s]ync_egress.py' >/dev/null 2>&1 && echo RUNNING || echo IDLE", 12*time.Second)
 		if pollErr != nil {
 			consecutiveErrors++
 			if consecutiveErrors >= 5 {
