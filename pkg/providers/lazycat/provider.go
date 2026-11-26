@@ -282,14 +282,14 @@ func (p *LazyCatProvider) SyncEgress(ctx context.Context) error {
 		instID = "11433"
 	}
 
-	// 若尚未运行，则在后台以 setsid 启动，避免 100 秒级长命令被 WS 空闲或整点重启中断（[s] 防止 pgrep -f 自匹配 sh -c）
-	startCmd := "if pgrep -f 'python3 /opt/lazycat-multi-egress/[s]ync_egress.py' >/dev/null 2>&1; then echo 'ALREADY_RUNNING'; else setsid sh -c 'python3 /opt/lazycat-multi-egress/sync_egress.py >> /var/log/lazycat-cron.log 2>&1' </dev/null >/dev/null 2>&1 & echo 'STARTED'; fi"
+	// 若尚未运行，则在后台以 setsid + sleep 1 确认彻底脱离 PTY 后才关闭首条 WS（防止 PTY 立即关闭触发 SIGHUP）
+	startCmd := "if pgrep -f 'python3 /opt/lazycat-multi-egress/[s]ync_egress.py' >/dev/null 2>&1; then echo 'ALREADY_RUNNING'; else nohup setsid python3 /opt/lazycat-multi-egress/sync_egress.py >> /var/log/lazycat-cron.log 2>&1 </dev/null & sleep 1; pgrep -f 'python3 /opt/lazycat-multi-egress/[s]ync_egress.py' >/dev/null 2>&1 && echo 'STARTED' || echo 'START_FAILED'; fi"
 	startRes, err := p.client.ExecTerminalCommandWithResult(ctx, instID, startCmd, 15*time.Second)
 	if err != nil {
 		return fmt.Errorf("trigger sync egress failed: %w", err)
 	}
-	if startRes.ExitCode != 0 {
-		return fmt.Errorf("trigger sync egress exited with code %d: %s", startRes.ExitCode, startRes.Output)
+	if startRes.ExitCode != 0 || strings.Contains(startRes.Output, "START_FAILED") {
+		return fmt.Errorf("trigger sync egress failed (exit=%d): %s", startRes.ExitCode, startRes.Output)
 	}
 
 	// 短轮询确认容器内 sync_egress.py 完整结束（单次 WS 仅耗时 ~1s，可容忍偶发 WS 抖动）
