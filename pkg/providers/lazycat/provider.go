@@ -272,7 +272,7 @@ func (p *LazyCatProvider) DeletePortMapping(ctx context.Context, instanceID stri
 	return p.client.DeletePortMapping(ctx, instanceID, mappingID)
 }
 
-// SyncEgress 通过纯 Go 原生 WebSocket 终端触发小鸡家宽出口凭据巡检与 sing-box 热重载
+// SyncEgress 通过纯 Go 原生 WebSocket 终端触发小鸡家宽出口凭据巡检与 sing-box 热重载（后台 setsid + flock 防并发 + 短轮询抗 WS 抖动）
 func (p *LazyCatProvider) SyncEgress(ctx context.Context) error {
 	if p.client == nil || p.client.token == "" {
 		return fmt.Errorf("lazycat client not initialized")
@@ -281,15 +281,42 @@ func (p *LazyCatProvider) SyncEgress(ctx context.Context) error {
 	if instID == "" {
 		instID = "11433"
 	}
-	res, err := p.client.ExecTerminalCommandWithResult(ctx, instID, "python3 /opt/lazycat-multi-egress/sync_egress.py", 150*time.Second)
+
+	// 若尚未运行，则在后台以 setsid 启动，避免 100 秒级长命令被 WS 空闲或整点重启中断
+	startCmd := "if pgrep -f '/opt/lazycat-multi-egress/sync_egress.py' >/dev/null 2>&1; then echo 'ALREADY_RUNNING'; else setsid sh -c 'python3 /opt/lazycat-multi-egress/sync_egress.py >> /var/log/lazycat-cron.log 2>&1' </dev/null >/dev/null 2>&1 & echo 'STARTED'; fi"
+	startRes, err := p.client.ExecTerminalCommandWithResult(ctx, instID, startCmd, 15*time.Second)
 	if err != nil {
-		return fmt.Errorf("sync egress failed: %w", err)
+		return fmt.Errorf("trigger sync egress failed: %w", err)
 	}
-	if res.ExitCode != 0 {
-		return fmt.Errorf("sync egress exited with code %d: %s", res.ExitCode, res.Output)
+	if startRes.ExitCode != 0 {
+		return fmt.Errorf("trigger sync egress exited with code %d: %s", startRes.ExitCode, startRes.Output)
 	}
-	ClearEgressCache(instID)
-	return nil
+
+	// 短轮询确认容器内 sync_egress.py 完整结束（单次 WS 仅耗时 ~1s，可容忍偶发 WS 抖动）
+	deadline := time.Now().Add(165 * time.Second)
+	consecutiveErrors := 0
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(6 * time.Second):
+		}
+
+		pollRes, pollErr := p.client.ExecTerminalCommandWithResult(ctx, instID, "pgrep -f '/opt/lazycat-multi-egress/sync_egress.py' >/dev/null 2>&1 && echo RUNNING || echo IDLE", 12*time.Second)
+		if pollErr != nil {
+			consecutiveErrors++
+			if consecutiveErrors >= 5 {
+				return fmt.Errorf("sync egress poll failed repeatedly: %w", pollErr)
+			}
+			continue
+		}
+		consecutiveErrors = 0
+		if strings.Contains(pollRes.Output, "IDLE") {
+			ClearEgressCache(instID)
+			return nil
+		}
+	}
+	return fmt.Errorf("sync egress timed out waiting for container script completion")
 }
 
 // DoCheckin 执行懒猫云每日签到打卡并获取积分
