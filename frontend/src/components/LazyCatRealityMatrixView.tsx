@@ -58,22 +58,33 @@ export const LazyCatRealityMatrixView: React.FC<Props> = ({ instanceId }) => {
 
       const activePorts = portsRes.ports || []
 
-      // 联动匹配：将容器 nodes.json 与 NAT 端口映射动态联结
+      // 联动匹配：优先使用后端基于真实 credentials.json 构造的 vless_url，如后端未绑定则本地补充匹配
       const mappedNodes: EgressNode[] = (nodesRes.nodes || []).map((node: EgressNode) => {
         const privateP = node.private_port || 10000 + node.id
         const matched = activePorts.find((p: PortMapping) => p.private_port === privateP)
-        const publicP = matched ? matched.public_port : 0
+        const publicP = node.public_port && node.public_port > 0 ? node.public_port : (matched ? matched.public_port : 0)
 
-        let vlessUrl = ''
-        if (publicP > 0 && hostIp) {
-          const nodeTitle = `${node.flag_emoji || ''} ${node.name}`
-          vlessUrl = `vless://lazycat@${hostIp}:${publicP}?encryption=none&flow=${node.flow || 'xtls-rprx-vision'}&security=reality&sni=${node.sni || 'www.apple.com'}&fp=chrome&type=tcp#${encodeURIComponent(nodeTitle)}`
+        let vlessUrl = node.vless_url || ''
+        if (!vlessUrl && publicP > 0 && hostIp && node.uuid) {
+          const nodeTitle = `${node.flag_emoji || ''} ${node.name}`.trim()
+          const params = new URLSearchParams({
+            encryption: 'none',
+            flow: node.flow || 'xtls-rprx-vision',
+            security: 'reality',
+            sni: node.sni || 'www.apple.com',
+            fp: 'chrome',
+            type: 'tcp',
+          })
+          if (node.public_key) params.set('pbk', node.public_key)
+          if (node.short_id) params.set('sid', node.short_id)
+          vlessUrl = `vless://${node.uuid}@${hostIp}:${publicP}?${params.toString()}#${encodeURIComponent(nodeTitle)}`
         }
 
         return {
           ...node,
           private_port: privateP,
           public_port: publicP,
+          host_ip: node.host_ip || hostIp,
           vless_url: vlessUrl,
         }
       })
@@ -189,16 +200,35 @@ export const LazyCatRealityMatrixView: React.FC<Props> = ({ instanceId }) => {
             </Space>
           </div>
         }
-        description={
-          <div style={{ marginTop: 6, fontSize: 13, color: '#475569', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              母鸡宿主机公网 IPv4: <b style={{ fontFamily: 'monospace' }}>{hostPublicIp || '未检测到'}</b> · 
-              已联动 NAT 端口: <b>{mappedNodeCount} / {egressNodes.length}</b> 个出口 · 
-              私有端口规则: 容器内部对应 <Text code>10000 + ID</Text> 入站监听。
+            description={
+          <div style={{ marginTop: 6, fontSize: 13, color: '#475569', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                母鸡宿主机公网 IPv4: <b style={{ fontFamily: 'monospace' }}>{hostPublicIp || '未检测到'}</b> ·{' '}
+                已联动 NAT 端口: <b>{mappedNodeCount} / {egressNodes.length}</b> 个出口 ·{' '}
+                优先级排序: <Text code>US &gt; JP &gt; SG &gt; KR &gt; TW</Text>
+              </div>
+              <div style={{ fontSize: 12, color: '#64748b' }}>
+                <ClockCircleOutlined style={{ marginRight: 4 }} />
+                更新时间: <b>{lastRefreshedAt ? new Date(lastRefreshedAt).toLocaleTimeString('zh-CN', { hour12: false }) : '刚刚'}</b>
+              </div>
             </div>
-            <div style={{ fontSize: 12, color: '#64748b' }}>
-              <ClockCircleOutlined style={{ marginRight: 4 }} />
-              更新时间: <b>{lastRefreshedAt ? new Date(lastRefreshedAt).toLocaleTimeString('zh-CN', { hour12: false }) : '刚刚'}</b>
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, paddingTop: 4, borderTop: '1px dashed #e2e8f0' }}>
+              <span style={{ fontSize: 12, color: '#334155', fontWeight: 600 }}>鉴权订阅导出 API (Clash / Sub-Store / sing-box):</span>
+              {(['clash', 'base64', 'sing-box', 'uri'] as const).map((fmt) => {
+                const subUrl = `${window.location.origin}/api/lazycat/egress-subscriptions?instance_id=${instanceId}&format=${fmt}&token=<YOUR_TOKEN>`
+                const key = `sub-${fmt}`
+                return (
+                  <Button
+                    key={fmt}
+                    size="small"
+                    icon={copiedKey === key ? <CheckOutlined style={{ color: '#10b981' }} /> : <CopyOutlined />}
+                    onClick={() => copyToClipboard(subUrl, key)}
+                  >
+                    复制 {fmt.toUpperCase()} 订阅URL
+                  </Button>
+                )
+              })}
             </div>
           </div>
         }
@@ -441,11 +471,13 @@ export const LazyCatRealityMatrixView: React.FC<Props> = ({ instanceId }) => {
               </div>
             </div>
 
-            <div style={{ fontSize: 13, color: '#64748b' }}>
+            <div style={{ fontSize: 13, color: '#64748b', display: 'flex', flexDirection: 'column', gap: 4 }}>
               <div>公网 IP: <b style={{ color: '#0f172a' }}>{hostPublicIp}</b></div>
-              <div>公网映射端口: <b style={{ color: '#7c3aed' }}>{qrModalNode.public_port}</b></div>
-              <div>容器内部监听: <b style={{ color: '#0f172a' }}>{qrModalNode.private_port}</b></div>
-              <div>传输协议: <b>TCP + Reality (sing-box 原生兼容)</b></div>
+              <div>公网映射端口: <b style={{ color: '#7c3aed' }}>{qrModalNode.public_port}</b> (容器私有端口: <b style={{ color: '#0f172a' }}>{qrModalNode.private_port}</b>)</div>
+              <div>UUID: <Text code>{qrModalNode.uuid || '未读取到'}</Text></div>
+              <div>Reality PublicKey (pbk): <Text code>{qrModalNode.public_key || '未读取到'}</Text></div>
+              <div>Reality ShortID (sid): <Text code>{qrModalNode.short_id || '未读取到'}</Text> · SNI: <Text code>{qrModalNode.sni || 'www.apple.com'}</Text></div>
+              <div>传输协议: <b>VLESS + TCP + Reality ({qrModalNode.flow || 'xtls-rprx-vision'})</b></div>
             </div>
           </div>
         )}

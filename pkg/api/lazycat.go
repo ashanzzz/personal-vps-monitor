@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
@@ -285,16 +286,94 @@ func handleLazyCatEgressNodes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	forceRefresh := r.URL.Query().Get("refresh") == "true"
-	nodes, err := lz.GetContainerEgressNodes(r.Context(), instID, forceRefresh)
+	nodes, hostIP, err := lz.GetEnrichedEgressNodes(r.Context(), instID, forceRefresh)
 	if err != nil {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"total":        len(nodes),
-		"instance_id":  instID,
-		"nodes":        nodes,
-		"refreshed_at": time.Now().Format(time.RFC3339),
+		"total":          len(nodes),
+		"instance_id":    instID,
+		"host_public_ip": hostIP,
+		"priority_order": []string{"US", "JP", "SG", "KR", "TW", "HK", "PH"},
+		"nodes":          nodes,
+		"refreshed_at":   time.Now().Format(time.RFC3339),
 	})
+}
+
+// GET /api/lazycat/egress-subscriptions?instance_id={id}&format={json|uri|base64|clash|sing-box}&only_mapped=true&countries=US,JP&refresh=false
+func handleLazyCatEgressSubscriptions(w http.ResponseWriter, r *http.Request) {
+	lz, err := getLazyCatProvider()
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	q := r.URL.Query()
+	instID := strings.TrimSpace(q.Get("instance_id"))
+	if instID == "" {
+		instID = "11433"
+	}
+
+	format := strings.TrimSpace(q.Get("format"))
+	if format == "" {
+		format = "json"
+	}
+
+	onlyMapped := true
+	if rawOM := strings.TrimSpace(q.Get("only_mapped")); rawOM != "" {
+		onlyMapped = !(strings.EqualFold(rawOM, "false") || rawOM == "0")
+	}
+
+	var countries []string
+	if rawCC := strings.TrimSpace(q.Get("countries")); rawCC != "" {
+		for _, part := range strings.Split(rawCC, ",") {
+			if c := strings.TrimSpace(part); c != "" {
+				countries = append(countries, c)
+			}
+		}
+	}
+
+	bundle, err := lz.ExportEgressSubscriptions(r.Context(), lazycat.SubscriptionExportOptions{
+		InstanceID: instID,
+		Format:     format,
+		OnlyMapped: onlyMapped,
+		Countries:  countries,
+		GroupName:  strings.TrimSpace(q.Get("group_name")),
+		Refresh:    q.Get("refresh") == "true",
+	})
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	formatLower := strings.ToLower(format)
+	switch formatLower {
+	case "uri", "vless", "txt":
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Subscription-Userinfo", "upload=0; download=0; total=1610612736000; expire=1893456000")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(strings.Join(bundle.URILinks, "\n")))
+		return
+	case "base64", "sub":
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Subscription-Userinfo", "upload=0; download=0; total=1610612736000; expire=1893456000")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(bundle.Base64))
+		return
+	case "clash", "mihomo", "yaml":
+		w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+		w.Header().Set("Subscription-Userinfo", "upload=0; download=0; total=1610612736000; expire=1893456000")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(bundle.ClashYAML))
+		return
+	case "sing-box", "singbox":
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(bundle.SingBoxJSON))
+		return
+	default:
+		respondJSON(w, http.StatusOK, bundle)
+	}
 }

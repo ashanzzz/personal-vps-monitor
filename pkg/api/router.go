@@ -46,7 +46,7 @@ func NewRouter() http.Handler {
 	r.Use(SecurityMiddleware)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(timeoutExcept(30*time.Second, "/sse", "/message", "/api/lazycat/terminal/ws", "/api/lazycat/terminal/exec"))
+	r.Use(timeoutExcept(30*time.Second, "/sse", "/message", "/api/lazycat/terminal/ws", "/api/lazycat/terminal/exec", "/api/lazycat/sync"))
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -176,10 +176,11 @@ func NewRouter() http.Handler {
 			r.Post("/vendor/vault/bind", handleVaultBindCipher)
 			r.Post("/vendor/test-and-save", handleVendorTestAndSave)
 
-			// 懒猫云特化端点 (WebSocket 终端不施加 30s 短请求超时；exec 支持自定义长超时)
+			// 懒猫云特化端点 (WebSocket 终端不施加 30s 短请求超时；exec/sync 支持自定义长超时)
 			r.Route("/lazycat", func(r chi.Router) {
 				r.Get("/terminal/ws", handleLazyCatTerminalWS)
 				r.With(middleware.Timeout(120 * time.Second)).Post("/terminal/exec", handleLazyCatTerminalExec)
+				r.With(middleware.Timeout(180 * time.Second)).Post("/sync", handleLazyCatSync)
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.Timeout(30 * time.Second))
 					r.Get("/instances", handleLazyCatInstances)
@@ -189,7 +190,7 @@ func NewRouter() http.Handler {
 					r.Get("/detail", handleLazyCatInstanceDetail)
 					r.Get("/fleet-probe", handleLazyCatFleetProbe)
 					r.Get("/container/egress-nodes", handleLazyCatEgressNodes)
-					r.Post("/sync", handleLazyCatSync)
+					r.Get("/egress-subscriptions", handleLazyCatEgressSubscriptions)
 					r.Post("/checkin", handleLazyCatCheckin)
 				})
 			})

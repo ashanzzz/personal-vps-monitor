@@ -240,28 +240,10 @@ func GetChainProxyNodes(ctx context.Context, relayIDOrIP, format string) (*Chain
 		privToPubMap[pm.PrivatePort] = pm.PublicPort
 	}
 
-	// 3. 组装落地节点与链式组合
+	// 3. 组装落地节点与链式组合 (复用容器真实 VLESS Reality 凭证，不再硬编码假账号)
 	var landings []LandingNode
 	var chains []ChainNode
 	var uriLinks []string
-
-	credentials := map[int]struct {
-		user string
-		pass string
-	}{
-		1:  {"user1", "-n9U8PoHRK7uVb2zxcKpww"},
-		2:  {"user2", "WdzxeU1QBpTtVWZDpPdL6Q"},
-		3:  {"user3", "IY0K2hpQ0YZiln-JVSAitA"},
-		4:  {"user4", "TiLnxc9FkHZhXy5262l-bg"},
-		5:  {"user5", "i5uHEX9OhLbDhoDc3PfNLQ"},
-		6:  {"user6", "reE7bg2tQ1ffuM1XgaO8nA"},
-		7:  {"user7", "0P4RXF0Ls-4uVC7au3nyVA"},
-		8:  {"user8", "qRsTuVwXyZ012345678901"},
-		9:  {"user9", "PsIxaCMrlN5j_E22pEW1Ng"},
-		10: {"user10", "_OAOs1xN1J5oASQkN-fXUA"},
-		11: {"user11", "beS062EIVtiJBD5mujofIA"},
-		12: {"user12", "uVwXyZ0123456789012345"},
-	}
 
 	for _, en := range egressNodes {
 		pubPort := privToPubMap[en.PrivatePort]
@@ -269,10 +251,17 @@ func GetChainProxyNodes(ctx context.Context, relayIDOrIP, format string) (*Chain
 			pubPort = en.PrivatePort + 30000
 		}
 
-		cred := credentials[en.ID]
-		landingProto := "socks"
+		landingProto := "vless"
 		if en.Protocol != "" {
 			landingProto = en.Protocol
+		}
+		nodeUUID := en.UUID
+		if nodeUUID == "" {
+			nodeUUID = fmt.Sprintf("lazycat-out-%d", en.ID)
+		}
+		nodeSNI := en.SNI
+		if nodeSNI == "" {
+			nodeSNI = "www.apple.com"
 		}
 
 		lNode := LandingNode{
@@ -284,9 +273,10 @@ func GetChainProxyNodes(ctx context.Context, relayIDOrIP, format string) (*Chain
 			PrivatePort: en.PrivatePort,
 			PublicPort:  pubPort,
 			Protocol:    landingProto,
-			Username:    cred.user,
-			Password:    cred.pass,
-			SNI:         en.SNI,
+			SNI:         nodeSNI,
+			UUID:        nodeUUID,
+			PublicKey:   en.PublicKey,
+			ShortID:     en.ShortID,
 		}
 		landings = append(landings, lNode)
 
@@ -338,20 +328,34 @@ func GetChainProxyNodes(ctx context.Context, relayIDOrIP, format string) (*Chain
 			Server:      lazycatHostIP,
 			Port:        pubPort,
 			Protocol:    landingProto,
-			Username:    cred.user,
-			Password:    cred.pass,
-			SNI:         en.SNI,
+			SNI:         nodeSNI,
+			UUID:        nodeUUID,
+			PublicKey:   en.PublicKey,
+			ShortID:     en.ShortID,
 		}
 		chains = append(chains, cNode)
 
-		// Sub-Store 兼容 URI 格式 (携带 ?dialerProxy=)
-		uri := fmt.Sprintf("socks5://%s:%s@%s:%d?dialerProxy=%s#%s",
-			url.QueryEscape(cred.user),
-			url.QueryEscape(cred.pass),
+		// Sub-Store 兼容 VLESS Reality URI 格式 (携带 ?dialerProxy=)
+		params := url.Values{}
+		params.Set("encryption", "none")
+		params.Set("flow", "xtls-rprx-vision")
+		params.Set("security", "reality")
+		params.Set("sni", nodeSNI)
+		params.Set("fp", "chrome")
+		params.Set("type", "tcp")
+		if en.PublicKey != "" {
+			params.Set("pbk", en.PublicKey)
+		}
+		if en.ShortID != "" {
+			params.Set("sid", en.ShortID)
+		}
+		params.Set("dialerProxy", chosenRelay.Name)
+		uri := fmt.Sprintf("vless://%s@%s:%d?%s#%s",
+			nodeUUID,
 			lazycatHostIP,
 			pubPort,
-			url.QueryEscape(chosenRelay.Name),
-			url.QueryEscape(chainNodeName),
+			params.Encode(),
+			url.PathEscape(chainNodeName),
 		)
 		uriLinks = append(uriLinks, uri)
 	}
@@ -444,11 +448,30 @@ func generateClashConfig(relays []RelayNode, chains []ChainNode) string {
 		sb.WriteString(fmt.Sprintf("    type: %s\n", proto))
 		sb.WriteString(fmt.Sprintf("    server: %s\n", c.Server))
 		sb.WriteString(fmt.Sprintf("    port: %d\n", c.Port))
-		if c.Username != "" {
-			sb.WriteString(fmt.Sprintf("    username: %q\n", c.Username))
-			sb.WriteString(fmt.Sprintf("    password: %q\n", c.Password))
+		if proto == "vless" {
+			sb.WriteString(fmt.Sprintf("    uuid: %s\n", c.UUID))
+			sb.WriteString("    network: tcp\n")
+			sb.WriteString("    tls: true\n")
+			sb.WriteString("    udp: true\n")
+			sb.WriteString("    flow: xtls-rprx-vision\n")
+			if c.SNI != "" {
+				sb.WriteString(fmt.Sprintf("    servername: %s\n", c.SNI))
+			}
+			if c.PublicKey != "" {
+				sb.WriteString("    reality-opts:\n")
+				sb.WriteString(fmt.Sprintf("      public-key: %s\n", c.PublicKey))
+				if c.ShortID != "" {
+					sb.WriteString(fmt.Sprintf("      short-id: %s\n", c.ShortID))
+				}
+			}
+			sb.WriteString("    client-fingerprint: chrome\n")
+		} else {
+			if c.Username != "" {
+				sb.WriteString(fmt.Sprintf("    username: %q\n", c.Username))
+				sb.WriteString(fmt.Sprintf("    password: %q\n", c.Password))
+			}
+			sb.WriteString("    udp: true\n")
 		}
-		sb.WriteString("    udp: true\n")
 		sb.WriteString(fmt.Sprintf("    dialer-proxy: %q\n\n", c.DialerProxy))
 	}
 
@@ -499,7 +522,26 @@ func generateSingBoxConfig(relays []RelayNode, chains []ChainNode) string {
 			"server_port": c.Port,
 			"detour":      c.Detour, // 注入中继 Detour
 		}
-		if c.Username != "" {
+		if c.Protocol == "vless" {
+			landingOutbound["uuid"] = c.UUID
+			landingOutbound["flow"] = "xtls-rprx-vision"
+			realityCfg := map[string]interface{}{
+				"enabled":    true,
+				"public_key": c.PublicKey,
+			}
+			if c.ShortID != "" {
+				realityCfg["short_id"] = c.ShortID
+			}
+			landingOutbound["tls"] = map[string]interface{}{
+				"enabled":     true,
+				"server_name": c.SNI,
+				"reality":     realityCfg,
+				"utls": map[string]interface{}{
+					"enabled":     true,
+					"fingerprint": "chrome",
+				},
+			}
+		} else if c.Username != "" {
 			landingOutbound["username"] = c.Username
 			landingOutbound["password"] = c.Password
 		}

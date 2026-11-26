@@ -146,16 +146,40 @@ export interface FleetNode {
 
 export interface EgressNode {
   id: number
+  priority?: number
   name: string
   country_code: string
   flag_emoji: string
   private_port: number
+  public_port?: number
+  mapped?: boolean
+  host_ip?: string
   outbound_tag: string
   protocol: string
   flow: string
   sni: string
-  public_port?: number
+  uuid?: string
+  public_key?: string
+  short_id?: string
   vless_url?: string
+}
+
+export interface EgressSubscriptionBundle {
+  instance_id: string
+  host_public_ip: string
+  priority_order: string[]
+  total_nodes: number
+  mapped_nodes: number
+  exported_nodes: number
+  reality_public_key?: string
+  reality_short_id?: string
+  reality_sni?: string
+  refreshed_at: string
+  nodes: EgressNode[]
+  uri_links: string[]
+  base64?: string
+  clash_yaml?: string
+  singbox_json?: string
 }
 
 export interface MarketItem {
@@ -462,8 +486,10 @@ export const api = {
   lazycatGetFleetProbe: (refresh?: boolean) =>
     http.get<{ total: number; nodes: FleetNode[]; refreshed_at: string }>('/api/lazycat/fleet-probe', { params: { refresh: refresh ? 'true' : 'false' } }).then(r => r.data),
   lazycatGetEgressNodes: (instanceId: string, refresh?: boolean) =>
-    http.get<{ total: number; instance_id: string; nodes: EgressNode[]; refreshed_at: string }>('/api/lazycat/container/egress-nodes', { params: { instance_id: instanceId, refresh: refresh ? 'true' : undefined } }).then(r => r.data),
-  syncLazyCatEgress: () => http.post<{ status: string; message: string }>('/api/lazycat/sync').then(r => r.data),
+    http.get<{ total: number; instance_id: string; host_public_ip?: string; priority_order?: string[]; nodes: EgressNode[]; refreshed_at: string }>('/api/lazycat/container/egress-nodes', { params: { instance_id: instanceId, refresh: refresh ? 'true' : undefined } }).then(r => r.data),
+  lazycatGetEgressSubscriptions: (instanceId: string, format = 'json', refresh?: boolean) =>
+    http.get<EgressSubscriptionBundle>('/api/lazycat/egress-subscriptions', { params: { instance_id: instanceId, format, refresh: refresh ? 'true' : undefined } }).then(r => r.data),
+  syncLazyCatEgress: () => http.post<{ status: string; message: string }>('/api/lazycat/sync', {}, { timeout: 180000 }).then(r => r.data),
 
   // 网关联动 (Sing-box / OpenClash)
   getGatewayProxies: () => http.get<any>('/api/gateway/proxies').then(r => r.data),

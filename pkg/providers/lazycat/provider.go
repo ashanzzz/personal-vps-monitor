@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -87,6 +86,22 @@ func (p *LazyCatProvider) ListInstances(ctx context.Context) ([]providers.Instan
 				autoRenew = billing.Billing.AutoRenew
 			}
 
+			portCount := 0
+			portLimit := item.PortLimit
+			if detail, dErr := p.client.GetInstanceDetail(ctx, strconv.Itoa(item.ID)); dErr == nil && detail != nil {
+				portCount = len(detail.PortMappings)
+				if portLimit == 0 && detail.PortLimit > 0 {
+					portLimit = detail.PortLimit
+				}
+				if ip == "" {
+					if detail.HostPublicIP != "" {
+						ip = detail.HostPublicIP
+					} else if detail.NatPublicIP != "" {
+						ip = detail.NatPublicIP
+					}
+				}
+			}
+
 			out = append(out, providers.Instance{
 				ProviderID:        p.ID(),
 				ID:                strconv.Itoa(item.ID),
@@ -111,7 +126,8 @@ func (p *LazyCatProvider) ListInstances(ctx context.Context) ([]providers.Instan
 				CycleName:         "月付",
 				MonthlyPrice:      renewPrice,
 				AutoRenew:         autoRenew,
-				PortLimit:         item.PortLimit,
+				PortCount:         portCount,
+				PortLimit:         portLimit,
 				ExpireDate:        item.ExpiresAt,
 			})
 		}
@@ -256,13 +272,23 @@ func (p *LazyCatProvider) DeletePortMapping(ctx context.Context, instanceID stri
 	return p.client.DeletePortMapping(ctx, instanceID, mappingID)
 }
 
-// SyncEgress 触发小鸡 12 家宽出口轮询凭据自愈与 sing-box 热重载
+// SyncEgress 通过纯 Go 原生 WebSocket 终端触发小鸡家宽出口凭据巡检与 sing-box 热重载
 func (p *LazyCatProvider) SyncEgress(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "python3", "/opt/data/scripts/_ssh_lazycat.py", "python3 /opt/lazycat-multi-egress/sync_egress.py")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("sync egress failed: %v, out: %s", err, string(out))
+	if p.client == nil || p.client.token == "" {
+		return fmt.Errorf("lazycat client not initialized")
 	}
+	instID := p.defaultInst
+	if instID == "" {
+		instID = "11433"
+	}
+	res, err := p.client.ExecTerminalCommandWithResult(ctx, instID, "python3 /opt/lazycat-multi-egress/sync_egress.py", 150*time.Second)
+	if err != nil {
+		return fmt.Errorf("sync egress failed: %w", err)
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("sync egress exited with code %d: %s", res.ExitCode, res.Output)
+	}
+	ClearEgressCache(instID)
 	return nil
 }
 
@@ -606,6 +632,20 @@ func (p *LazyCatProvider) GetContainerEgressNodes(ctx context.Context, instanceI
 		return nil, fmt.Errorf("lazycat client not initialized")
 	}
 	return p.client.GetContainerEgressNodes(ctx, instanceID, forceRefresh)
+}
+
+func (p *LazyCatProvider) GetEnrichedEgressNodes(ctx context.Context, instanceID string, forceRefresh bool) ([]EgressNode, string, error) {
+	if p.client == nil {
+		return nil, "", fmt.Errorf("lazycat client not initialized")
+	}
+	return p.client.GetEnrichedEgressNodes(ctx, instanceID, forceRefresh)
+}
+
+func (p *LazyCatProvider) ExportEgressSubscriptions(ctx context.Context, opts SubscriptionExportOptions) (*EgressSubscriptionBundle, error) {
+	if p.client == nil {
+		return nil, fmt.Errorf("lazycat client not initialized")
+	}
+	return p.client.ExportEgressSubscriptions(ctx, opts)
 }
 
 func (p *LazyCatProvider) GetInstanceDetail(ctx context.Context, instanceID string) (*InstanceDetailResponse, error) {
