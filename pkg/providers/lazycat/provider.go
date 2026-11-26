@@ -282,8 +282,9 @@ func (p *LazyCatProvider) SyncEgress(ctx context.Context) error {
 		instID = "11433"
 	}
 
-	// 若尚未运行，则在后台以 setsid + sleep 1 确认彻底脱离 PTY 后才关闭首条 WS（防止 PTY 立即关闭触发 SIGHUP）
-	startCmd := "if pgrep -f 'python3 /opt/lazycat-multi-egress/[s]ync_egress.py' >/dev/null 2>&1; then echo 'ALREADY_RUNNING'; else nohup setsid python3 /opt/lazycat-multi-egress/sync_egress.py >> /var/log/lazycat-cron.log 2>&1 </dev/null & sleep 1; pgrep -f 'python3 /opt/lazycat-multi-egress/[s]ync_egress.py' >/dev/null 2>&1 && echo 'STARTED' || echo 'START_FAILED'; fi"
+	// 若尚未运行，则在后台以 setsid + sleep 1 确认彻底脱离 PTY 后才关闭首条 WS；使用 ^ 锚点防止 pgrep -f 自匹配 sh -c
+	const syncPattern = `^python3 /opt/lazycat-multi-egress/sync_egress\.py`
+	startCmd := "if pgrep -f '" + syncPattern + "' >/dev/null 2>&1; then echo 'ALREADY_RUNNING'; else nohup setsid python3 /opt/lazycat-multi-egress/sync_egress.py >> /var/log/lazycat-cron.log 2>&1 </dev/null & sleep 1; pgrep -f '" + syncPattern + "' >/dev/null 2>&1 && echo 'STARTED' || echo 'START_FAILED'; fi"
 	startRes, err := p.client.ExecTerminalCommandWithResult(ctx, instID, startCmd, 15*time.Second)
 	if err != nil {
 		return fmt.Errorf("trigger sync egress failed: %w", err)
@@ -302,7 +303,7 @@ func (p *LazyCatProvider) SyncEgress(ctx context.Context) error {
 		case <-time.After(6 * time.Second):
 		}
 
-		pollRes, pollErr := p.client.ExecTerminalCommandWithResult(ctx, instID, "pgrep -f 'python3 /opt/lazycat-multi-egress/[s]ync_egress.py' >/dev/null 2>&1 && echo RUNNING || echo IDLE", 12*time.Second)
+		pollRes, pollErr := p.client.ExecTerminalCommandWithResult(ctx, instID, "pgrep -f '"+syncPattern+"' >/dev/null 2>&1 && echo RUNNING || echo IDLE", 12*time.Second)
 		if pollErr != nil {
 			consecutiveErrors++
 			if consecutiveErrors >= 5 {
