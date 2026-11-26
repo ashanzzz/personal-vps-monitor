@@ -189,7 +189,18 @@ func handleLazyCatLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, need2FA, msg, err := lzProvider.Login(r.Context(), req.Username, req.Password, req.GACode)
+	gaCode := req.GACode
+	if gaCode == "" {
+		creds := config.LoadSavedCredentials()
+		if creds.LazyCat != nil && creds.LazyCat.TOTPSecret != "" {
+			if autoCode, err := vault.GenerateTOTP(creds.LazyCat.TOTPSecret); err == nil && autoCode != "" {
+				gaCode = autoCode
+				log.Printf("[LazyCatLogin] 自动基于 Vaultwarden/凭据库 TOTP 密钥生成 2FA 动态码: %s", autoCode)
+			}
+		}
+	}
+
+	token, need2FA, msg, err := lzProvider.Login(r.Context(), req.Username, req.Password, gaCode)
 	if need2FA {
 		respondJSON(w, http.StatusOK, map[string]interface{}{
 			"need_2fa": true,
@@ -487,7 +498,15 @@ func handleVendorQuickLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 
-		tok, need2FA, msg, err := lzProvider.Login(r.Context(), creds.LazyCat.Username, creds.LazyCat.Password, body.GACode)
+		gaCode := body.GACode
+		if gaCode == "" && creds.LazyCat.TOTPSecret != "" {
+			if autoCode, err := vault.GenerateTOTP(creds.LazyCat.TOTPSecret); err == nil && autoCode != "" {
+				gaCode = autoCode
+				log.Printf("[QuickLogin] 自动基于 Vaultwarden/凭据库 TOTP 密钥生成 LazyCat 2FA 动态码: %s", autoCode)
+			}
+		}
+
+		tok, need2FA, msg, err := lzProvider.Login(r.Context(), creds.LazyCat.Username, creds.LazyCat.Password, gaCode)
 		if need2FA {
 			respondJSON(w, http.StatusOK, map[string]interface{}{
 				"need_2fa": true,
@@ -881,9 +900,11 @@ func executeProviderLoginTest(ctx context.Context, provider string, p providers.
 		}
 		gaCode := ""
 		if totpSecret != "" {
-			if code, err := vault.GenerateTOTP(totpSecret); err == nil {
-				gaCode = code
+			code, err := vault.GenerateTOTP(totpSecret)
+			if err != nil {
+				return "", "", fmt.Errorf("2FA 原始代码计算动态码失败: %w", err)
 			}
+			gaCode = code
 		}
 		tok, need2FA, msg, err := lz.Login(ctx, username, password, gaCode)
 		if need2FA {

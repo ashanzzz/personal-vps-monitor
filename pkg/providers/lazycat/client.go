@@ -46,6 +46,15 @@ func NewClient(token, proxyURL string) *Client {
 
 func (c *Client) SetProxyURL(proxyURL string) {
 	c.proxyURL = proxyURL
+	if transport, ok := c.httpClient.Transport.(*http.Transport); ok {
+		if proxyURL != "" {
+			if u, err := url.Parse(proxyURL); err == nil {
+				transport.Proxy = http.ProxyURL(u)
+				return
+			}
+		}
+		transport.Proxy = http.ProxyFromEnvironment
+	}
 }
 
 func (c *Client) doRequest(ctx context.Context, method, path string, body interface{}) ([]byte, error) {
@@ -80,7 +89,14 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("lazycat api error %d: %s", resp.StatusCode, string(respBody))
+		bodyStr := string(respBody)
+		if resp.StatusCode == http.StatusForbidden &&
+			(strings.Contains(bodyStr, "Access Restricted by Region") ||
+				strings.Contains(bodyStr, "Blocked by WAF") ||
+				strings.Contains(bodyStr, "暂不支持当前区域访问")) {
+			return nil, fmt.Errorf("lazycat api error 403: Cloudflare WAF 区域拦截 (proxy=%s 出站可能走了直连或受限地区)", c.proxyURL)
+		}
+		return nil, fmt.Errorf("lazycat api error %d: %s", resp.StatusCode, bodyStr)
 	}
 
 	return respBody, nil
@@ -99,12 +115,8 @@ type LazyCatLoginResponse struct {
 // Login 使用账号密码 (可选 2FA TOTP 动态码) 登录懒猫云
 func (c *Client) Login(ctx context.Context, username, password, totpCode string) (token string, need2FA bool, msg string, err error) {
 	payload := map[string]interface{}{
-		"username":          username,
-		"password":          password,
-		"totpCode":          nil,
-		"recoveryCode":      nil,
-		"turnstileToken":    nil,
-		"deviceFingerprint": "",
+		"username": username,
+		"password": password,
 	}
 	if strings.TrimSpace(totpCode) != "" {
 		payload["totpCode"] = strings.TrimSpace(totpCode)
@@ -113,7 +125,7 @@ func (c *Client) Login(ctx context.Context, username, password, totpCode string)
 	data, err := c.doRequest(ctx, "POST", "/auth/login", payload)
 	if err != nil {
 		errStr := strings.ToLower(err.Error())
-		if strings.TrimSpace(totpCode) == "" && (strings.Contains(errStr, "totp") || strings.Contains(errStr, "2fa") || strings.Contains(errStr, "二次验证") || strings.Contains(errStr, "动态码")) {
+		if strings.TrimSpace(totpCode) == "" && (strings.Contains(errStr, "totp") || strings.Contains(errStr, "2fa") || strings.Contains(errStr, "二次验证") || strings.Contains(errStr, "动态码") || strings.Contains(errStr, "two-factor") || strings.Contains(errStr, "two_fa")) {
 			return "", true, "该账号已开启 2FA 二次验证，请输入验证器 6 位动态码", nil
 		}
 		return "", false, "", err
@@ -186,26 +198,115 @@ func (c *Client) GetInstances(ctx context.Context) ([]InstanceListItem, error) {
 	return res.Data, nil
 }
 
+type InstanceDetailInner struct {
+	ID             int               `json:"id"`
+	Name           string            `json:"name"`
+	Status         string            `json:"status"`
+	PackageName    string            `json:"packageName"`
+	PlanName       string            `json:"planName"`
+	HostPublicIP   string            `json:"host_public_ip"`
+	HostPublicIPCC string            `json:"hostPublicIp"`
+	NatPublicIP    string            `json:"nat_public_ip"`
+	NatPublicIPCC  string            `json:"natPublicIp"`
+	PortLimit      int               `json:"port_limit"`
+	PortLimitCC    int               `json:"portLimit"`
+	PortMappings   []PortMappingItem `json:"port_mappings"`
+	PortMappingsCC []PortMappingItem `json:"portMappings"`
+	ExpiresAt      string            `json:"expires_at"`
+	ExpiresAtCC    string            `json:"expiresAt"`
+}
+
 type InstanceDetailResponse struct {
-	ID           int               `json:"id"`
-	Name         string            `json:"name"`
-	Status       string            `json:"status"`
-	PackageName  string            `json:"packageName"`
-	PlanName     string            `json:"planName"`
-	HostPublicIP string            `json:"host_public_ip"`
-	NatPublicIP  string            `json:"nat_public_ip"`
-	PortLimit    int               `json:"port_limit"`
-	PortMappings []PortMappingItem `json:"port_mappings"`
-	ExpiresAt    string            `json:"expires_at"`
+	ID             int               `json:"id"`
+	Name           string            `json:"name"`
+	Status         string            `json:"status"`
+	PackageName    string            `json:"packageName"`
+	PlanName       string            `json:"planName"`
+	HostPublicIP   string            `json:"host_public_ip"`
+	HostPublicIPCC string            `json:"hostPublicIp"`
+	NatPublicIP    string            `json:"nat_public_ip"`
+	NatPublicIPCC  string            `json:"natPublicIp"`
+	PortLimit      int               `json:"port_limit"`
+	PortLimitCC    int               `json:"portLimit"`
+	PortMappings   []PortMappingItem `json:"port_mappings"`
+	PortMappingsCC []PortMappingItem `json:"portMappings"`
+	ExpiresAt      string            `json:"expires_at"`
+	ExpiresAtCC    string            `json:"expiresAt"`
 
 	// 兼容某些返回包装在 instance 内部的情况
-	Instance *struct {
-		ID           int               `json:"id"`
-		Name         string            `json:"name"`
-		Status       string            `json:"status"`
-		HostPublicIP string            `json:"host_public_ip"`
-		PortMappings []PortMappingItem `json:"port_mappings"`
-	} `json:"instance,omitempty"`
+	Instance *InstanceDetailInner `json:"instance,omitempty"`
+}
+
+func normalizeInstanceDetail(res *InstanceDetailResponse) {
+	if res.HostPublicIP == "" {
+		res.HostPublicIP = res.HostPublicIPCC
+	}
+	if res.NatPublicIP == "" {
+		res.NatPublicIP = res.NatPublicIPCC
+	}
+	if res.PortLimit == 0 {
+		res.PortLimit = res.PortLimitCC
+	}
+	if len(res.PortMappings) == 0 {
+		res.PortMappings = res.PortMappingsCC
+	}
+	if res.ExpiresAt == "" {
+		res.ExpiresAt = res.ExpiresAtCC
+	}
+
+	if res.Instance != nil {
+		in := res.Instance
+		if res.ID == 0 {
+			res.ID = in.ID
+		}
+		if res.Name == "" {
+			res.Name = in.Name
+		}
+		if res.Status == "" {
+			res.Status = in.Status
+		}
+		if res.PackageName == "" {
+			res.PackageName = in.PackageName
+		}
+		if res.PlanName == "" {
+			res.PlanName = in.PlanName
+		}
+		if res.HostPublicIP == "" {
+			if in.HostPublicIP != "" {
+				res.HostPublicIP = in.HostPublicIP
+			} else {
+				res.HostPublicIP = in.HostPublicIPCC
+			}
+		}
+		if res.NatPublicIP == "" {
+			if in.NatPublicIP != "" {
+				res.NatPublicIP = in.NatPublicIP
+			} else {
+				res.NatPublicIP = in.NatPublicIPCC
+			}
+		}
+		if res.PortLimit == 0 {
+			if in.PortLimit > 0 {
+				res.PortLimit = in.PortLimit
+			} else {
+				res.PortLimit = in.PortLimitCC
+			}
+		}
+		if len(res.PortMappings) == 0 {
+			if len(in.PortMappings) > 0 {
+				res.PortMappings = in.PortMappings
+			} else {
+				res.PortMappings = in.PortMappingsCC
+			}
+		}
+		if res.ExpiresAt == "" {
+			if in.ExpiresAt != "" {
+				res.ExpiresAt = in.ExpiresAt
+			} else {
+				res.ExpiresAt = in.ExpiresAtCC
+			}
+		}
+	}
 }
 
 func (c *Client) GetInstanceDetail(ctx context.Context, instanceID string) (*InstanceDetailResponse, error) {
@@ -220,15 +321,7 @@ func (c *Client) GetInstanceDetail(ctx context.Context, instanceID string) (*Ins
 		return nil, fmt.Errorf("json unmarshal failed: %w", err)
 	}
 
-	// 如果外层没有，提取内层
-	if res.ID == 0 && res.Instance != nil {
-		res.ID = res.Instance.ID
-		res.Name = res.Instance.Name
-		res.Status = res.Instance.Status
-		res.HostPublicIP = res.Instance.HostPublicIP
-		res.PortMappings = res.Instance.PortMappings
-	}
-
+	normalizeInstanceDetail(&res)
 	return &res, nil
 }
 

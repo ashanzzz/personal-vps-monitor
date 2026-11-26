@@ -65,11 +65,23 @@ func handleLazyCatPorts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	portLimit := detail.PortLimit
+	if portLimit == 0 {
+		if list, listErr := lz.Client().GetInstances(r.Context()); listErr == nil {
+			for _, item := range list {
+				if strconv.Itoa(item.ID) == instID && item.PortLimit > 0 {
+					portLimit = item.PortLimit
+					break
+				}
+			}
+		}
+	}
+
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"total":          len(detail.PortMappings),
 		"host_public_ip": detail.HostPublicIP,
 		"ssh_port":       sshPort,
-		"port_limit":     detail.PortLimit,
+		"port_limit":     portLimit,
 		"ports":          detail.PortMappings,
 	})
 }
@@ -217,16 +229,23 @@ func handleLazyCatTerminalExec(w http.ResponseWriter, r *http.Request) {
 		timeout = time.Duration(req.TimeoutSec) * time.Second
 	}
 
-	out, err := lz.ExecTerminalCommand(r.Context(), req.InstanceID, req.Command, timeout)
+	res, err := lz.ExecTerminalCommandWithResult(r.Context(), req.InstanceID, req.Command, timeout)
 	if err != nil {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
+	status := "success"
+	if res.ExitCode != 0 {
+		status = "failed"
+	}
+
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"status":      "success",
+		"status":      status,
 		"instance_id": req.InstanceID,
-		"output":      out,
+		"output":      res.Output,
+		"exit_code":   res.ExitCode,
+		"duration_ms": res.DurationMs,
 	})
 }
 

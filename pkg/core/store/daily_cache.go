@@ -247,11 +247,17 @@ func TryAutoRecoverProvider(ctx context.Context, providerID string) bool {
 	case "lazycat":
 		if lz, isLz := p.(*lazycat.LazyCatProvider); isLz {
 			if creds.LazyCat != nil && creds.LazyCat.Username != "" && creds.LazyCat.Password != "" {
-				if tok, need2FA, _, err := lz.Login(ctx, creds.LazyCat.Username, creds.LazyCat.Password, ""); err == nil && tok != "" && !need2FA {
+				totpCode := ""
+				if creds.LazyCat.TOTPSecret != "" {
+					if code, err := vault.GenerateTOTP(creds.LazyCat.TOTPSecret); err == nil && code != "" {
+						totpCode = code
+					}
+				}
+				if tok, need2FA, _, err := lz.Login(ctx, creds.LazyCat.Username, creds.LazyCat.Password, totpCode); err == nil && tok != "" && !need2FA {
 					_ = config.SaveTokens("", "", tok, "")
 					config.Global.LazyCatToken = tok
 					lz.SetToken(tok)
-					audit.Record("security", "lazycat.auto_relogin", "lazycat", map[string]interface{}{"username": creds.LazyCat.Username}, "SUCCESS", "检测到懒猫云 Token 掉线，已自动依据凭据库免密重新登录并恢复！", 0)
+					audit.Record("security", "lazycat.auto_relogin", "lazycat", map[string]interface{}{"username": creds.LazyCat.Username, "auto_totp": totpCode != ""}, "SUCCESS", "检测到懒猫云 Token 掉线，已自动依据凭据库(及实时TOTP)免密重新登录并恢复！", 0)
 					log.Printf("[AutoRecover] 懒猫云自动免密重新登录成功，Token 已更新")
 					return true
 				}

@@ -22,7 +22,8 @@ type Config struct {
 	ACCKToken string `json:"acck_token"`
 
 	// 网络代理配置 (避免境内直连 Cloudflare 403)
-	ProxyURL string `json:"proxy_url"`
+	ProxyURL        string `json:"proxy_url"`
+	LazyCatProxyURL string `json:"lazycat_proxy_url"`
 
 	// 通知凭证
 	TelegramBotToken string `json:"telegram_bot_token"`
@@ -38,10 +39,21 @@ type Config struct {
 }
 
 type SavedTokens struct {
-	AkileToken   string `json:"akile_token"`
-	ACCKToken    string `json:"acck_token"`
-	LazyCatToken string `json:"lazycat_token"`
-	ProxyURL     string `json:"proxy_url,omitempty"`
+	AkileToken      string `json:"akile_token"`
+	ACCKToken       string `json:"acck_token"`
+	LazyCatToken    string `json:"lazycat_token"`
+	ProxyURL        string `json:"proxy_url,omitempty"`
+	LazyCatProxyURL string `json:"lazycat_proxy_url,omitempty"`
+}
+
+func (c *Config) EffectiveLazyCatProxyURL() string {
+	if c != nil && strings.TrimSpace(c.LazyCatProxyURL) != "" {
+		return strings.TrimSpace(c.LazyCatProxyURL)
+	}
+	if c != nil {
+		return strings.TrimSpace(c.ProxyURL)
+	}
+	return ""
 }
 
 var Global = &Config{}
@@ -79,6 +91,11 @@ func LoadSavedTokens() *SavedTokens {
 }
 
 func SaveTokens(akile, acck, lazycat, proxy string) error {
+	return SaveTokensWithLazyCatProxy(akile, acck, lazycat, proxy, nil)
+}
+
+// SaveTokensWithLazyCatProxy 持久化保存各厂商 Token 与代理设置；lazycatProxy 为非 nil 时按传入值覆盖（支持传入空字符串清除专用代理）
+func SaveTokensWithLazyCatProxy(akile, acck, lazycat, proxy string, lazycatProxy *string) error {
 	target := getTokensWritePath()
 	_ = os.MkdirAll(filepath.Dir(target), 0755)
 
@@ -98,6 +115,11 @@ func SaveTokens(akile, acck, lazycat, proxy string) error {
 	if proxy != "" {
 		st.ProxyURL = proxy
 		Global.ProxyURL = proxy
+	}
+	if lazycatProxy != nil {
+		cleaned := strings.TrimSpace(*lazycatProxy)
+		st.LazyCatProxyURL = cleaned
+		Global.LazyCatProxyURL = cleaned
 	}
 
 	data, err := json.MarshalIndent(st, "", "  ")
@@ -132,8 +154,9 @@ func Load() *Config {
 		LazyCatInstance:  getEnv("LAZY_INSTANCE", "11433"),
 		AkileToken:       getEnv("AKILE_TOKEN", ""),
 		ACCKToken:        getEnv("ACCK_TOKEN", ""),
-		ProxyURL:         getEnv("PROXY_URL", getEnv("HTTPS_PROXY", getEnv("HTTP_PROXY", "http://192.168.8.11:7890"))),
-		TelegramBotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
+		ProxyURL:           getEnv("PROXY_URL", getEnv("HTTPS_PROXY", getEnv("HTTP_PROXY", "http://192.168.8.11:7890"))),
+		LazyCatProxyURL:    getEnv("LAZYCAT_PROXY_URL", ""),
+		TelegramBotToken:   getEnv("TELEGRAM_BOT_TOKEN", ""),
 		TelegramChatID:   getEnv("TELEGRAM_CHAT_ID", ""),
 		HTTPPort:           getEnv("VPS_HUB_HTTP_PORT", "3338"),
 		MCPPort:            getEnv("VPS_HUB_MCP_PORT", "3337"),
@@ -154,6 +177,9 @@ func Load() *Config {
 	}
 	if st.ProxyURL != "" {
 		Global.ProxyURL = st.ProxyURL
+	}
+	if st.LazyCatProxyURL != "" {
+		Global.LazyCatProxyURL = st.LazyCatProxyURL
 	}
 
 	if Global.LazyCatToken == "" {

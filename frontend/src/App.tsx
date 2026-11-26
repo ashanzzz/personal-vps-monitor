@@ -25,6 +25,7 @@ import type {
 } from './api'
 import { LazyCatControlCenterModal } from './components/LazyCatControlCenterModal'
 import { ProviderLoginModal } from './components/ProviderLoginModal'
+import { fmtBytes } from './lib/format'
 import './App.css'
 
 const { Header, Sider, Content } = Layout
@@ -277,6 +278,23 @@ export default function App() {
   // VPS 详情 Drawer
   const [detailDrawerOpen, setDetailDrawerOpen] = useState(false)
   const [selectedVps, setSelectedVps] = useState<Instance | null>(null)
+
+  // 三家服务商二手集市独立搜索关键字
+  const [akMarketSearch, setAkMarketSearch] = useState('')
+  const [acMarketSearch, setAcMarketSearch] = useState('')
+  const [lzMarketSearch, setLzMarketSearch] = useState('')
+
+  // 二手检索过滤通用函数 (大小写不敏感，匹配标题/机器名、节点代码、配置描述与备注)
+  const matchMarketSearch = (item: MarketItem, keyword: string) => {
+    if (!keyword || !keyword.trim()) return true
+    const kw = keyword.trim().toLowerCase()
+    const name = (item.name || '').toLowerCase()
+    const nodeName = (item.node_name || '').toLowerCase()
+    const configDesc = (item.config_desc || '').toLowerCase()
+    const bargainTag = (item.bargain_tag || '').toLowerCase()
+    const detail = (item.detail || '').toLowerCase()
+    return name.includes(kw) || nodeName.includes(kw) || configDesc.includes(kw) || bargainTag.includes(kw) || detail.includes(kw)
+  }
 
   // 懒猫云端口状态
   const [ports, setPorts] = useState<PortMapping[]>([])
@@ -2486,6 +2504,7 @@ export default function App() {
       case 'akile': {
         const akInstances = instances.filter(i => i.provider_id === 'akile')
         const akMarket = marketItems.filter(i => i.provider_id === 'akile')
+        const filteredAkMarket = akMarket.filter(i => matchMarketSearch(i, akMarketSearch))
         const akStore = storeProducts.filter(i => i.provider_id === 'akile')
 
         return (
@@ -2849,18 +2868,26 @@ export default function App() {
                   },
                   {
                     key: '3',
-                    label: `二手转让集市 (${akMarket.length})`,
+                    label: `二手转让集市 (${akMarketSearch.trim() ? `${filteredAkMarket.length}/${akMarket.length}` : `${akMarket.length}`})`,
                     children: (
                       <Card
                         size="small"
                         title={
                           <Space>
                             <SwapOutlined style={{ color: '#2563eb' }} />
-                            <Text strong>Akile PushShop 二手集市在售挂单 ({akMarket.length} 台)</Text>
+                            <Text strong>Akile PushShop 二手集市在售挂单 ({akMarketSearch.trim() ? `已筛选 ${filteredAkMarket.length} / 共 ${akMarket.length}` : `${akMarket.length}`} 台)</Text>
                           </Space>
                         }
                         extra={
                           <Space size={12}>
+                            <Input.Search
+                              placeholder="搜索挂单标题 / 节点 / 备注..."
+                              allowClear
+                              size="small"
+                              style={{ width: 220 }}
+                              value={akMarketSearch}
+                              onChange={e => setAkMarketSearch(e.target.value)}
+                            />
                             <Text type="secondary" style={{ fontSize: 13 }}>
                               <ClockCircleOutlined style={{ marginRight: 4 }} />
                               更新时间: {formatTime(refreshTimes['market:akile'])}
@@ -2874,7 +2901,7 @@ export default function App() {
                       >
                         <Table
                           size="small"
-                          dataSource={akMarket}
+                          dataSource={filteredAkMarket}
                           rowKey="id"
                           pagination={{
                             defaultPageSize: 50,
@@ -3084,6 +3111,7 @@ export default function App() {
       case 'acck': {
         const acInstances = instances.filter(i => i.provider_id === 'acck')
         const acMarket = marketItems.filter(i => i.provider_id === 'acck')
+        const filteredAcMarket = acMarket.filter(i => matchMarketSearch(i, acMarketSearch))
         const acStore = storeProducts.filter(i => i.provider_id === 'acck')
 
         return (
@@ -3428,18 +3456,26 @@ export default function App() {
                   },
                   {
                     key: '3',
-                    label: `二手转让集市 (${acMarket.length})`,
+                    label: `二手转让集市 (${acMarketSearch.trim() ? `${filteredAcMarket.length}/${acMarket.length}` : `${acMarket.length}`})`,
                     children: (
                       <Card
                         size="small"
                         title={
                           <Space>
                             <SwapOutlined style={{ color: '#2563eb' }} />
-                            <Text strong>ACCK 官方二手集市在售挂单 ({acMarket.length} 台)</Text>
+                            <Text strong>ACCK 官方二手集市在售挂单 ({acMarketSearch.trim() ? `已筛选 ${filteredAcMarket.length} / 共 ${acMarket.length}` : `${acMarket.length}`} 台)</Text>
                           </Space>
                         }
                         extra={
                           <Space size={12}>
+                            <Input.Search
+                              placeholder="搜索挂单标题 / 节点 / 备注..."
+                              allowClear
+                              size="small"
+                              style={{ width: 220 }}
+                              value={acMarketSearch}
+                              onChange={e => setAcMarketSearch(e.target.value)}
+                            />
                             <Text type="secondary" style={{ fontSize: 13 }}>
                               <ClockCircleOutlined style={{ marginRight: 4 }} />
                               更新时间: {formatTime(refreshTimes['market:acck'])}
@@ -3453,7 +3489,7 @@ export default function App() {
                       >
                         <Table
                           size="small"
-                          dataSource={acMarket}
+                          dataSource={filteredAcMarket}
                           rowKey="id"
                           pagination={{
                             defaultPageSize: 50,
@@ -3647,6 +3683,7 @@ export default function App() {
       case 'lazycat': {
         const lzInstances = instances.filter(i => i.provider_id === 'lazycat')
         const lzMarket = marketItems.filter(i => i.provider_id === 'lazycat')
+        const filteredLzMarket = lzMarket.filter(i => matchMarketSearch(i, lzMarketSearch))
         const lzStore = storeProducts.filter(i => i.provider_id === 'lazycat')
 
         return (
@@ -4014,18 +4051,26 @@ export default function App() {
                   },
                   {
                     key: '3',
-                    label: `二手转让集市 (${lzMarket.length})`,
+                    label: `二手转让集市 (${lzMarketSearch.trim() ? `${filteredLzMarket.length}/${lzMarket.length}` : `${lzMarket.length}`})`,
                     children: (
                       <Card
                         size="small"
                         title={
                           <Space>
                             <SwapOutlined style={{ color: '#7c3aed' }} />
-                            <Text strong>LazyCat 官方二手集市在售挂单 ({lzMarket.length} 台)</Text>
+                            <Text strong>LazyCat 官方二手集市在售挂单 ({lzMarketSearch.trim() ? `已筛选 ${filteredLzMarket.length} / 共 ${lzMarket.length}` : `${lzMarket.length}`} 台)</Text>
                           </Space>
                         }
                         extra={
                           <Space size={12}>
+                            <Input.Search
+                              placeholder="搜索挂单标题 / 节点 / 备注..."
+                              allowClear
+                              size="small"
+                              style={{ width: 220 }}
+                              value={lzMarketSearch}
+                              onChange={e => setLzMarketSearch(e.target.value)}
+                            />
                             <Text type="secondary" style={{ fontSize: 13 }}>
                               <ClockCircleOutlined style={{ marginRight: 4 }} />
                               更新时间: {formatTime(refreshTimes['market:lazycat'])}
@@ -4039,7 +4084,7 @@ export default function App() {
                       >
                         <Table
                           size="small"
-                          dataSource={lzMarket}
+                          dataSource={filteredLzMarket}
                           rowKey="id"
                           pagination={{
                             defaultPageSize: 50,
@@ -4093,25 +4138,31 @@ export default function App() {
                               key: 'network',
                               width: 155,
                               sorter: (a, b) => (parseInt(a.bandwidth || '0') || 0) - (parseInt(b.bandwidth || '0') || 0),
-                              render: (_, r) => (
-                                <div>
-                                  <div style={{ color: '#059669', fontWeight: 600, fontSize: 12 }}>
-                                    {r.bandwidth || '800 Mbps'}
-                                  </div>
-                                  <div style={{ fontSize: 11, color: '#64748b' }}>
-                                    {r.flow_used ? (
-                                      <span>已用: {r.flow_used}</span>
-                                    ) : r.traffic_total ? (
-                                      <span>月流量: {r.traffic_total}</span>
-                                    ) : null}
-                                  </div>
-                                  {r.reset_price !== undefined && r.reset_price > 0 && (
-                                    <div style={{ fontSize: 10, color: '#d97706' }}>
-                                      重置: ¥{r.reset_price.toFixed(2)}/次
+                              render: (_, r) => {
+                                let flowDisplay = r.flow_used
+                                if (flowDisplay && /^\d+$/.test(flowDisplay)) {
+                                  flowDisplay = fmtBytes(flowDisplay)
+                                }
+                                return (
+                                  <div>
+                                    <div style={{ color: '#059669', fontWeight: 600, fontSize: 12 }}>
+                                      {r.bandwidth || '1000 Mbps'}
                                     </div>
-                                  )}
-                                </div>
-                              )
+                                    <div style={{ fontSize: 11, color: '#64748b' }}>
+                                      {flowDisplay ? (
+                                        <span>已用: {flowDisplay}</span>
+                                      ) : r.traffic_total ? (
+                                        <span>月流量: {r.traffic_total}</span>
+                                      ) : null}
+                                    </div>
+                                    {r.provider_id !== 'lazycat' && r.reset_price !== undefined && r.reset_price > 0 && (
+                                      <div style={{ fontSize: 10, color: '#d97706' }}>
+                                        重置: ¥{r.reset_price.toFixed(2)}/次
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              }
                             },
                             {
                               title: '转让标价',
@@ -4474,6 +4525,15 @@ export default function App() {
                       extra="建议配置本地 Clash/Sing-box HTTP 代理 (如 http://192.168.8.11:7890)，防止国内直连 Cloudflare WAF 403 封禁"
                     >
                       <Input placeholder="http://192.168.8.11:7890" />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} md={12}>
+                    <Form.Item
+                      name="lazycat_proxy_url"
+                      label="懒猫云专用代理 (LazyCat Proxy URL)"
+                      extra="可选：为懒猫云 API 与 WebShell PTY 单独指定独立稳定代理 (如 http://192.168.8.11:33001)，留空则继承全局代理"
+                    >
+                      <Input allowClear placeholder={tokensConfig?.lazycat_effective_proxy_url ? `留空继承全局: ${tokensConfig.lazycat_effective_proxy_url}` : '留空继承全局代理，例如 http://192.168.8.11:33001'} />
                     </Form.Item>
                   </Col>
                 </Row>

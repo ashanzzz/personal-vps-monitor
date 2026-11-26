@@ -19,6 +19,22 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
+func timeoutExcept(d time.Duration, skipPrefixes ...string) func(http.Handler) http.Handler {
+	timeoutMW := middleware.Timeout(d)
+	return func(next http.Handler) http.Handler {
+		wrapped := timeoutMW(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			for _, prefix := range skipPrefixes {
+				if strings.HasPrefix(r.URL.Path, prefix) {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			wrapped.ServeHTTP(w, r)
+		})
+	}
+}
+
 func NewRouter() http.Handler {
 	// 初始化后台智能巡检调度器
 	scheduler.Init()
@@ -30,7 +46,7 @@ func NewRouter() http.Handler {
 	r.Use(SecurityMiddleware)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(30 * time.Second))
+	r.Use(timeoutExcept(30*time.Second, "/sse", "/message", "/api/lazycat/terminal/ws", "/api/lazycat/terminal/exec"))
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -160,19 +176,22 @@ func NewRouter() http.Handler {
 			r.Post("/vendor/vault/bind", handleVaultBindCipher)
 			r.Post("/vendor/test-and-save", handleVendorTestAndSave)
 
-			// 懒猫云特化端点
+			// 懒猫云特化端点 (WebSocket 终端不施加 30s 短请求超时；exec 支持自定义长超时)
 			r.Route("/lazycat", func(r chi.Router) {
-				r.Get("/instances", handleLazyCatInstances)
-				r.Get("/ports", handleLazyCatPorts)
-				r.Post("/ports", handleLazyCatAddPort)
-				r.Delete("/ports/{id}", handleLazyCatDeletePort)
-				r.Get("/detail", handleLazyCatInstanceDetail)
 				r.Get("/terminal/ws", handleLazyCatTerminalWS)
-				r.Post("/terminal/exec", handleLazyCatTerminalExec)
-				r.Get("/fleet-probe", handleLazyCatFleetProbe)
-				r.Get("/container/egress-nodes", handleLazyCatEgressNodes)
-				r.Post("/sync", handleLazyCatSync)
-				r.Post("/checkin", handleLazyCatCheckin)
+				r.With(middleware.Timeout(120 * time.Second)).Post("/terminal/exec", handleLazyCatTerminalExec)
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.Timeout(30 * time.Second))
+					r.Get("/instances", handleLazyCatInstances)
+					r.Get("/ports", handleLazyCatPorts)
+					r.Post("/ports", handleLazyCatAddPort)
+					r.Delete("/ports/{id}", handleLazyCatDeletePort)
+					r.Get("/detail", handleLazyCatInstanceDetail)
+					r.Get("/fleet-probe", handleLazyCatFleetProbe)
+					r.Get("/container/egress-nodes", handleLazyCatEgressNodes)
+					r.Post("/sync", handleLazyCatSync)
+					r.Post("/checkin", handleLazyCatCheckin)
+				})
 			})
 
 			// 普通独立主机代理生命周期管理与 SSH 执行引擎 (REST API & 链式代理导出)
@@ -646,6 +665,14 @@ func handleGetTokens(w http.ResponseWriter, r *http.Request) {
 	if proxy == "" {
 		proxy = config.Global.ProxyURL
 	}
+	lzProxy := st.LazyCatProxyURL
+	if lzProxy == "" {
+		lzProxy = config.Global.LazyCatProxyURL
+	}
+	lzEffectiveProxy := lzProxy
+	if lzEffectiveProxy == "" {
+		lzEffectiveProxy = proxy
+	}
 
 	// 解析 Akile Token 状态与到期时间
 	_, akileExp, akileHasExp := ParseJWTExp(akile)
@@ -707,15 +734,18 @@ func handleGetTokens(w http.ResponseWriter, r *http.Request) {
 		"lazycat_has_credentials": creds.LazyCat != nil && creds.LazyCat.Username != "",
 		"lazycat_auto_refresh":    creds.LazyCat != nil && creds.LazyCat.AutoRefresh,
 
-		"proxy_url":               proxy,
+		"proxy_url":                   proxy,
+		"lazycat_proxy_url":           lzProxy,
+		"lazycat_effective_proxy_url": lzEffectiveProxy,
 	})
 }
 
 type SaveTokensRequest struct {
-	AkileToken   string `json:"akile_token"`
-	ACCKToken    string `json:"acck_token"`
-	LazyCatToken string `json:"lazycat_token"`
-	ProxyURL     string `json:"proxy_url"`
+	AkileToken      string  `json:"akile_token"`
+	ACCKToken       string  `json:"acck_token"`
+	LazyCatToken    string  `json:"lazycat_token"`
+	ProxyURL        string  `json:"proxy_url"`
+	LazyCatProxyURL *string `json:"lazycat_proxy_url"`
 }
 
 func handleSaveTokens(w http.ResponseWriter, r *http.Request) {
@@ -726,7 +756,7 @@ func handleSaveTokens(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	if err := config.SaveTokens(req.AkileToken, req.ACCKToken, req.LazyCatToken, req.ProxyURL); err != nil {
+	if err := config.SaveTokensWithLazyCatProxy(req.AkileToken, req.ACCKToken, req.LazyCatToken, req.ProxyURL, req.LazyCatProxyURL); err != nil {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "保存 Token 失败: " + err.Error()})
 		return
 	}

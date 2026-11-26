@@ -381,6 +381,8 @@ export interface TokensConfig {
   lazycat_auto_refresh?: boolean
 
   proxy_url: string
+  lazycat_proxy_url?: string
+  lazycat_effective_proxy_url?: string
 }
 
 // ==================== API 客户端方法 ====================
@@ -395,7 +397,7 @@ export const api = {
 
   // 厂商 API 凭证与 Token 配置
   getTokens: () => http.get<TokensConfig>('/api/settings/tokens').then(r => r.data),
-  saveTokens: (payload: { akile_token?: string; acck_token?: string; lazycat_token?: string; proxy_url?: string }) =>
+  saveTokens: (payload: { akile_token?: string; acck_token?: string; lazycat_token?: string; proxy_url?: string; lazycat_proxy_url?: string }) =>
     http.post<{ status: string; message: string }>('/api/settings/tokens', payload).then(r => r.data),
 
   // 厂商交互式一键登录与免密自动续期

@@ -10,6 +10,7 @@ import (
 
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/audit"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/config"
+	"github.com/ashanzzz/personal-vps-monitor/pkg/core/vault"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers/akile"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers/lazycat"
@@ -69,6 +70,18 @@ func StartTokenLifecycleRefresher(ctx context.Context) {
 	}
 }
 
+func generateTOTPCode(secret string) string {
+	if strings.TrimSpace(secret) == "" {
+		return ""
+	}
+	code, err := vault.GenerateTOTP(secret)
+	if err != nil {
+		log.Printf("[TokenRefresher] 生成 2FA 动态码失败: %v", err)
+		return ""
+	}
+	return code
+}
+
 func checkAndRefreshTokens(ctx context.Context) {
 	st := config.LoadSavedTokens()
 	creds := config.LoadSavedCredentials()
@@ -101,15 +114,18 @@ func checkAndRefreshTokens(ctx context.Context) {
 						}
 					}
 
-					// 场景 B: Token 已过期 (timeUntilExp <= 0)，若配置了保存凭据且开启自动重登 -> 自动登录
+					// 场景 B: Token 已过期 (timeUntilExp <= 0)，若配置了保存凭据且开启自动重登 -> 自动登录 (含 2FA TOTP)
 					if timeUntilExp <= 0 && creds.Akile != nil && creds.Akile.Username != "" && creds.Akile.Password != "" && creds.Akile.AutoRefresh {
 						log.Printf("[TokenRefresher] Akile Token 已过期，尝试使用已保存凭据免密重新登录...")
-						if newTok, need2FA, _, err := akProvider.Login(ctx, creds.Akile.Username, creds.Akile.Password, ""); err == nil && !need2FA && newTok != "" {
+						gaCode := generateTOTPCode(creds.Akile.TOTPSecret)
+						if newTok, need2FA, _, err := akProvider.Login(ctx, creds.Akile.Username, creds.Akile.Password, gaCode); err == nil && !need2FA && newTok != "" {
 							_ = config.SaveTokens(newTok, "", "", "")
 							config.Global.AkileToken = newTok
 							akProvider.SetToken(newTok)
-							audit.Record("daemon", "token.auto_relogin", "akile", nil, "SUCCESS", "Akile Token 已过期，后台使用已保存的账号密码免密自动重新登录成功", 0)
+							audit.Record("daemon", "token.auto_relogin", "akile", nil, "SUCCESS", "Akile Token 已过期，后台使用已保存的账号密码(及2FA)免密自动重新登录成功", 0)
 							log.Printf("[TokenRefresher] Akile 后台免密重新登录成功，新 Token 已生效！")
+						} else if err != nil {
+							log.Printf("[TokenRefresher] Akile 后台免密重新登录失败: %v", err)
 						}
 					}
 				}
@@ -120,7 +136,8 @@ func checkAndRefreshTokens(ctx context.Context) {
 		p, ok := providers.Get("akile")
 		if ok {
 			if akProvider, isAk := p.(*akile.AkileProvider); isAk {
-				if newTok, need2FA, _, err := akProvider.Login(ctx, creds.Akile.Username, creds.Akile.Password, ""); err == nil && !need2FA && newTok != "" {
+				gaCode := generateTOTPCode(creds.Akile.TOTPSecret)
+				if newTok, need2FA, _, err := akProvider.Login(ctx, creds.Akile.Username, creds.Akile.Password, gaCode); err == nil && !need2FA && newTok != "" {
 					_ = config.SaveTokens(newTok, "", "", "")
 					config.Global.AkileToken = newTok
 					akProvider.SetToken(newTok)
@@ -130,7 +147,7 @@ func checkAndRefreshTokens(ctx context.Context) {
 		}
 	}
 
-	// 2. 懒猫云 (LazyCat) 自动免密重新登录
+	// 2. 懒猫云 (LazyCat) 主动提前续签 (< 12 小时) 与到期免密重登 (含 2FA TOTP)
 	lzTok := st.LazyCatToken
 	if lzTok == "" {
 		lzTok = config.Global.LazyCatToken
@@ -138,15 +155,23 @@ func checkAndRefreshTokens(ctx context.Context) {
 
 	if lzTok != "" {
 		expTime, hasExp := parseJWTExpiration(lzTok)
-		if hasExp && time.Until(expTime) <= 0 && creds.LazyCat != nil && creds.LazyCat.Username != "" && creds.LazyCat.Password != "" && creds.LazyCat.AutoRefresh {
+		if hasExp && time.Until(expTime) < 12*time.Hour && creds.LazyCat != nil && creds.LazyCat.Username != "" && creds.LazyCat.Password != "" && creds.LazyCat.AutoRefresh {
 			p, ok := providers.Get("lazycat")
 			if ok {
 				if lzProvider, isLz := p.(*lazycat.LazyCatProvider); isLz {
-					if newTok, need2FA, _, err := lzProvider.Login(ctx, creds.LazyCat.Username, creds.LazyCat.Password, ""); err == nil && !need2FA && newTok != "" {
+					hoursLeft := time.Until(expTime).Hours()
+					log.Printf("[TokenRefresher] 懒猫云 Token 临期/过期 (剩余 %.1f 小时)，正在自动免密续签...", hoursLeft)
+					totpCode := generateTOTPCode(creds.LazyCat.TOTPSecret)
+					if newTok, need2FA, _, err := lzProvider.Login(ctx, creds.LazyCat.Username, creds.LazyCat.Password, totpCode); err == nil && !need2FA && newTok != "" {
 						_ = config.SaveTokens("", "", newTok, "")
 						config.Global.LazyCatToken = newTok
 						lzProvider.SetToken(newTok)
-						audit.Record("daemon", "token.auto_relogin", "lazycat", nil, "SUCCESS", "懒猫云 Token 已过期，后台使用已保存账号密码自动重新登录成功", 0)
+						audit.Record("daemon", "token.auto_relogin", "lazycat", nil, "SUCCESS", "懒猫云 Token 临期/过期，后台自动免密续签成功", 0)
+						log.Printf("[TokenRefresher] 懒猫云自动免密续签成功，新 Token 已生效！")
+					} else if err != nil {
+						log.Printf("[TokenRefresher] 懒猫云自动免密续签失败: %v", err)
+					} else if need2FA {
+						log.Printf("[TokenRefresher] 懒猫云自动续签需要 2FA 动态码，但未配置有效 TOTP 密钥")
 					}
 				}
 			}
@@ -155,7 +180,8 @@ func checkAndRefreshTokens(ctx context.Context) {
 		p, ok := providers.Get("lazycat")
 		if ok {
 			if lzProvider, isLz := p.(*lazycat.LazyCatProvider); isLz {
-				if newTok, need2FA, _, err := lzProvider.Login(ctx, creds.LazyCat.Username, creds.LazyCat.Password, ""); err == nil && !need2FA && newTok != "" {
+				totpCode := generateTOTPCode(creds.LazyCat.TOTPSecret)
+				if newTok, need2FA, _, err := lzProvider.Login(ctx, creds.LazyCat.Username, creds.LazyCat.Password, totpCode); err == nil && !need2FA && newTok != "" {
 					_ = config.SaveTokens("", "", newTok, "")
 					config.Global.LazyCatToken = newTok
 					lzProvider.SetToken(newTok)

@@ -46,5 +46,7 @@
 
   <Config Name="HTTPS_PROXY" Target="HTTPS_PROXY" Default="http://192.168.8.11:7890" Mode="" Description="出境 HTTPS 代理" Type="Variable" Display="advanced" Required="false" Mask="false">http://192.168.8.11:7890</Config>
 
+  <Config Name="LAZYCAT_PROXY_URL" Target="LAZYCAT_PROXY_URL" Default="" Mode="" Description="懒猫云专用代理（可选，留空则继承全局代理，防止全局切换节点导致懒猫云 403）" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+
   <Config Name="NO_PROXY" Target="NO_PROXY" Default="127.0.0.1,localhost,192.168.8.11,172.17.0.0/16" Mode="" Description="代理白名单穿透" Type="Variable" Display="advanced" Required="false" Mask="false">127.0.0.1,localhost,192.168.8.11,172.17.0.0/16</Config>
 </Container>

@@ -32,7 +32,7 @@ func (p *LazyCatProvider) Name() string {
 }
 
 func (p *LazyCatProvider) Init(ctx context.Context, cfg *config.Config) error {
-	p.client = NewClient(cfg.LazyCatToken, cfg.ProxyURL)
+	p.client = NewClient(cfg.LazyCatToken, cfg.EffectiveLazyCatProxyURL())
 	p.defaultInst = cfg.LazyCatInstance
 	return nil
 }
@@ -305,6 +305,37 @@ func (p *LazyCatProvider) DoCheckin(ctx context.Context) (*providers.CheckinResu
 	}, nil
 }
 
+func formatTrafficBytes(bytes int64) string {
+	if bytes <= 0 {
+		return "0 B"
+	}
+	const (
+		KB = int64(1024)
+		MB = int64(1024 * 1024)
+		GB = int64(1024 * 1024 * 1024)
+		TB = int64(1024 * 1024 * 1024 * 1024)
+	)
+	fb := float64(bytes)
+	switch {
+	case bytes >= TB && bytes%TB == 0:
+		return fmt.Sprintf("%d TB", bytes/TB)
+	case bytes >= TB:
+		return fmt.Sprintf("%.2f TB", fb/float64(TB))
+	case bytes >= GB && bytes%GB == 0:
+		return fmt.Sprintf("%d GB", bytes/GB)
+	case bytes >= GB:
+		return fmt.Sprintf("%.2f GB", fb/float64(GB))
+	case bytes >= MB && bytes%MB == 0:
+		return fmt.Sprintf("%d MB", bytes/MB)
+	case bytes >= MB:
+		return fmt.Sprintf("%.2f MB", fb/float64(MB))
+	case bytes >= KB:
+		return fmt.Sprintf("%.1f KB", fb/float64(KB))
+	default:
+		return fmt.Sprintf("%d B", bytes)
+	}
+}
+
 // ListMarketItems 实现 providers.MarketLister 接口，动态全量分页获取懒猫云二手市场在售挂单
 func (p *LazyCatProvider) ListMarketItems(ctx context.Context) ([]providers.MarketItem, error) {
 	if p.client == nil || p.client.token == "" {
@@ -380,7 +411,21 @@ func (p *LazyCatProvider) ListMarketItems(ctx context.Context) ([]providers.Mark
 		if it.Snapshot.Disk > 0 {
 			diskStr = fmt.Sprintf("%dG", it.Snapshot.Disk)
 		}
+		usedBytes, _ := strconv.ParseInt(it.Snapshot.MonthlyTrafficUsed, 10, 64)
+		limitBytes, _ := strconv.ParseInt(it.Snapshot.MonthlyTrafficLimit, 10, 64)
+
 		flowTotalStr := it.Snapshot.MonthlyTrafficLimit
+		if limitBytes > 0 {
+			flowTotalStr = formatTrafficBytes(limitBytes)
+		}
+
+		flowUsedStr := ""
+		if limitBytes > 0 && usedBytes >= 0 {
+			flowUsedStr = fmt.Sprintf("%s / %s", formatTrafficBytes(usedBytes), formatTrafficBytes(limitBytes))
+		} else if usedBytes > 0 {
+			flowUsedStr = formatTrafficBytes(usedBytes)
+		}
+
 		cycleMonths, cycleName, monthlyPrice := providers.FormatCycle(it.Snapshot.BillingCycle, it.Snapshot.RenewalPrice)
 
 		items = append(items, providers.MarketItem{
@@ -393,8 +438,8 @@ func (p *LazyCatProvider) ListMarketItems(ctx context.Context) ([]providers.Mark
 			Cycle:           cycleMonths,
 			CycleName:       cycleName,
 			DiscountPercent: it.Snapshot.RenewalDiscountPercent,
-			ResetPrice:      it.Snapshot.RenewalPrice,
-			FlowUsed:        it.Snapshot.MonthlyTrafficUsed,
+			ResetPrice:      0,
+			FlowUsed:        flowUsedStr,
 			SellerUsername:  it.SellerUsername,
 			SellerUserID:    it.SellerUserID,
 			Location:        loc,
@@ -542,6 +587,13 @@ func (p *LazyCatProvider) ExecTerminalCommand(ctx context.Context, instanceID, c
 	return p.client.ExecTerminalCommand(ctx, instanceID, cmd, timeout)
 }
 
+func (p *LazyCatProvider) ExecTerminalCommandWithResult(ctx context.Context, instanceID, cmd string, timeout time.Duration) (*TerminalExecResult, error) {
+	if p.client == nil {
+		return nil, fmt.Errorf("lazycat client not initialized")
+	}
+	return p.client.ExecTerminalCommandWithResult(ctx, instanceID, cmd, timeout)
+}
+
 func (p *LazyCatProvider) FetchFleetTelemetry(ctx context.Context, forceRefresh bool) ([]FleetNode, error) {
 	if p.client == nil {
 		return nil, fmt.Errorf("lazycat client not initialized")
@@ -565,14 +617,14 @@ func (p *LazyCatProvider) GetInstanceDetail(ctx context.Context, instanceID stri
 
 func (p *LazyCatProvider) Login(ctx context.Context, username, password, totpCode string) (token string, need2FA bool, msg string, err error) {
 	if p.client == nil {
-		p.client = NewClient("", config.Global.ProxyURL)
+		p.client = NewClient("", config.Global.EffectiveLazyCatProxyURL())
 	}
 	return p.client.Login(ctx, username, password, totpCode)
 }
 
 func (p *LazyCatProvider) SetToken(token string) {
 	if p.client == nil {
-		p.client = NewClient(token, config.Global.ProxyURL)
+		p.client = NewClient(token, config.Global.EffectiveLazyCatProxyURL())
 	} else {
 		p.client.token = token
 	}

@@ -235,6 +235,12 @@ async def lifespan(app: FastAPI):
     set_level(settings.get("log_level", "INFO"))
     logger.info("app.start version=%s", __version__)
 
+    disable_pollers = os.getenv("DISABLE_BACKGROUND_POLLERS", "").strip().lower() in ("1", "true", "yes")
+    if disable_pollers:
+        logger.info("Background Python pollers disabled (DISABLE_BACKGROUND_POLLERS=true; handled by Go vps-hub)")
+        yield
+        return
+
     # Per-page pollers (each with its own independent interval). These also
     # drive auto-buy.
     _reschedule_page_jobs(settings)
