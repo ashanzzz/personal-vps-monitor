@@ -114,7 +114,7 @@ var (
 
 func getDataDir() string {
 	if runtime.GOOS == "linux" {
-		for _, p := range []string{"/app/data", "/mnt/user/appdata/akile-monitor"} {
+		for _, p := range []string{"/app/data", "/mnt/user/appdata/personal-vps-monitor"} {
 			if fi, err := os.Stat(p); err == nil && fi.IsDir() {
 				return p
 			}

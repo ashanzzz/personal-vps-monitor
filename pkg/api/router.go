@@ -47,7 +47,7 @@ func NewRouter() http.Handler {
 	r.Use(SecurityMiddleware)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(timeoutExcept(30*time.Second, "/sse", "/message", "/api/lazycat/terminal/ws", "/api/lazycat/terminal/exec", "/api/lazycat/sync"))
+	r.Use(timeoutExcept(45*time.Second, "/sse", "/message", "/api/lazycat/terminal/ws", "/api/lazycat/terminal/exec", "/api/lazycat/sync"))
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -452,7 +452,7 @@ func handleGetRefreshTimes(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleUnifiedCheckin(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
 	defer cancel()
 
 	all := providers.GetAll()
@@ -462,6 +462,12 @@ func handleUnifiedCheckin(w http.ResponseWriter, r *http.Request) {
 		if ac, ok := p.(providers.AutoCheckin); ok {
 			start := time.Now()
 			res, err := ac.DoCheckin(ctx)
+			if err != nil && isAuthError(err) {
+				log.Printf("[Checkin] provider %s encountered auth error: %v, triggering auto-relogin...", id, err)
+				if store.TryAutoRecoverProvider(ctx, id) {
+					res, err = ac.DoCheckin(ctx)
+				}
+			}
 			dur := time.Since(start).Milliseconds()
 			if err != nil {
 				results[id] = &providers.CheckinResult{
@@ -494,11 +500,17 @@ func handleSingleCheckin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
 	defer cancel()
 
 	start := time.Now()
 	res, err := ac.DoCheckin(ctx)
+	if err != nil && isAuthError(err) {
+		log.Printf("[Checkin] single provider %s encountered auth error: %v, triggering auto-relogin...", id, err)
+		if store.TryAutoRecoverProvider(ctx, id) {
+			res, err = ac.DoCheckin(ctx)
+		}
+	}
 	dur := time.Since(start).Milliseconds()
 	if err != nil {
 		scheduler.GetCheckinManager().RecordResult(id, nil, err)
@@ -668,15 +680,15 @@ func handleGetTokens(w http.ResponseWriter, r *http.Request) {
 
 	akile := st.AkileToken
 	if akile == "" {
-		akile = config.Global.AkileToken
+		akile = config.GetProviderToken("akile")
 	}
 	acck := st.ACCKToken
 	if acck == "" {
-		acck = config.Global.ACCKToken
+		acck = config.GetProviderToken("acck")
 	}
 	lazycat := st.LazyCatToken
 	if lazycat == "" {
-		lazycat = config.Global.LazyCatToken
+		lazycat = config.GetProviderToken("lazycat")
 	}
 	proxy := st.ProxyURL
 	if proxy == "" {
@@ -742,6 +754,7 @@ func handleGetTokens(w http.ResponseWriter, r *http.Request) {
 		"acck_is_expired":         acckExpired,
 		"acck_seconds_left":       acckSecLeft,
 		"acck_has_credentials":    creds.ACCK != nil && creds.ACCK.Username != "",
+		"acck_auto_refresh":       creds.ACCK != nil && creds.ACCK.AutoRefresh,
 
 		"lazycat_configured":      lazycat != "",
 		"lazycat_token_masked":    maskToken(lazycat),

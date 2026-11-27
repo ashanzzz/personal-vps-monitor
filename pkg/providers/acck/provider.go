@@ -42,6 +42,18 @@ func (p *ACCKProvider) SetToken(token string) {
 	}
 }
 
+func (p *ACCKProvider) GetToken() string {
+	if p.client == nil {
+		return ""
+	}
+	return p.client.GetToken()
+}
+
+// SetClientForTest 供单元测试注入自定义 mock 客户端
+func (p *ACCKProvider) SetClientForTest(cli *Client) {
+	p.client = cli
+}
+
 func (p *ACCKProvider) VerifyToken(ctx context.Context) error {
 	if p.client == nil {
 		return fmt.Errorf("acck client not initialized")
@@ -49,9 +61,28 @@ func (p *ACCKProvider) VerifyToken(ctx context.Context) error {
 	return p.client.VerifyToken(ctx)
 }
 
+// Login 使用账号密码（及可选 6 位动态码）登录 ACCK
+func (p *ACCKProvider) Login(ctx context.Context, email, password, gaCode string) (token string, need2FA bool, msg string, err error) {
+	if p.client == nil {
+		p.client = NewClient("", config.Global.ProxyURL)
+	}
+	return p.client.Login(ctx, email, password, gaCode)
+}
+
+// LoginWithTOTPProvider 使用账号密码与实时 TOTP 回调函数登录 ACCK
+func (p *ACCKProvider) LoginWithTOTPProvider(ctx context.Context, email, password string, totpFn func() (string, error), isBackgroundAuto bool) (token string, need2FA bool, msg string, err error) {
+	if p.client == nil {
+		p.client = NewClient("", config.Global.ProxyURL)
+	}
+	return p.client.LoginWithOptions(ctx, email, password, totpFn, isBackgroundAuto)
+}
+
 // ListInstances 实例查询
 func (p *ACCKProvider) ListInstances(ctx context.Context) ([]providers.Instance, error) {
-	if p.client == nil || p.client.token == "" {
+	if p.client == nil || p.client.GetToken() == "" {
+		if creds := config.LoadSavedCredentials(); creds != nil && creds.ACCK != nil && creds.ACCK.Password != "" {
+			return nil, fmt.Errorf("acck token missing (401): awaiting auto relogin")
+		}
 		return []providers.Instance{}, nil
 	}
 

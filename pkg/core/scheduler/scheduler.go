@@ -15,6 +15,14 @@ import (
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
 )
 
+func isAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "401") || strings.Contains(s, "token") || strings.Contains(s, "unauthorized") || strings.Contains(s, "token无效")
+}
+
 type StatusReport struct {
 	Mode                  string `json:"mode"`                    // "idle", "steady", "burst"
 	ActivePlansCount      int    `json:"active_plans_count"`
@@ -114,6 +122,12 @@ func (s *Scheduler) pollAndMatch(ctx context.Context) {
 	for _, p := range all {
 		if ml, ok := p.(providers.MarketLister); ok {
 			items, err := ml.ListMarketItems(ctx)
+			if err != nil && isAuthError(err) {
+				log.Printf("[Scheduler] provider %s 集市巡检遇到鉴权失效: %v，触发免密重登...", p.ID(), err)
+				if store.TryAutoRecoverProvider(ctx, p.ID()) {
+					items, err = ml.ListMarketItems(ctx)
+				}
+			}
 			if err == nil {
 				fullItems = append(fullItems, items...)
 				for _, it := range items {

@@ -9,16 +9,23 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
 type Client struct {
 	baseURL    string
+	mu         sync.RWMutex
 	token      string
+	proxyURL   string
 	httpClient *http.Client
 }
 
 func NewClient(token, proxyURL string) *Client {
+	return NewClientWithBaseURL("https://acck.io/api", token, proxyURL)
+}
+
+func NewClientWithBaseURL(baseURL, token, proxyURL string) *Client {
 	transport := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		TLSHandshakeTimeout:   5 * time.Second,
@@ -32,9 +39,15 @@ func NewClient(token, proxyURL string) *Client {
 		}
 	}
 
+	cleanedBase := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if cleanedBase == "" {
+		cleanedBase = "https://acck.io/api"
+	}
+
 	return &Client{
-		baseURL: "https://acck.io/api",
-		token:   cleanToken(token),
+		baseURL:  cleanedBase,
+		token:    cleanToken(token),
+		proxyURL: strings.TrimSpace(proxyURL),
 		httpClient: &http.Client{
 			Transport: transport,
 			Timeout:   8 * time.Second,
@@ -51,7 +64,16 @@ func cleanToken(t string) string {
 }
 
 func (c *Client) SetToken(token string) {
+	c.mu.Lock()
 	c.token = cleanToken(token)
+	c.mu.Unlock()
+}
+
+func (c *Client) GetToken() string {
+	c.mu.RLock()
+	tok := c.token
+	c.mu.RUnlock()
+	return tok
 }
 
 // VerifyToken 校验当前 Token 是否有效
@@ -87,8 +109,8 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 			return nil, err
 		}
 
-		if c.token != "" {
-			req.Header.Set("Authorization", "Bearer "+c.token)
+		if tok := c.GetToken(); tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
 		}
 		req.Header.Set("Origin", "https://acck.io")
 		req.Header.Set("Referer", "https://acck.io/")

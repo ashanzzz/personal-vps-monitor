@@ -1317,10 +1317,10 @@ export default function App() {
                         </Button>
                         <Button
                           size="small"
-                          icon={<KeyOutlined />}
+                          icon={<LoginOutlined />}
                           onClick={() => { setLoginTargetProvider('acck'); setLoginModalOpen(true); }}
                         >
-                          录入 ACCK Token
+                          登录 ACCK (免密/2FA)
                         </Button>
                         <Button size="small" onClick={() => setPage('settings')}>
                           凭据与代理高级设置
@@ -3149,7 +3149,7 @@ export default function App() {
                                   style={{ padding: 0, height: 'auto', fontSize: 12 }}
                                   onClick={() => { setLoginTargetProvider('acck'); setLoginModalOpen(true); }}
                                 >
-                                  更新 Token
+                                  凭据 / 免密登录
                                 </Button>
                               </div>
                               <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -4412,10 +4412,10 @@ export default function App() {
                   </Button>
                   <Button
                     size="small"
-                    icon={<KeyOutlined />}
+                    icon={<LoginOutlined />}
                     onClick={() => { setLoginTargetProvider('acck'); setLoginModalOpen(true); }}
                   >
-                    ACCK Token 录入
+                    ACCK 一键登录
                   </Button>
                 </Space>
               }
@@ -4480,6 +4480,9 @@ export default function App() {
                               {tokensConfig.acck_is_expired ? '已过期' : '已配置'}
                             </Tag>
                           )}
+                          {tokensConfig?.acck_auto_refresh && (
+                            <Tag color="blue">自动续期中</Tag>
+                          )}
                         </Space>
                       }
                       extra={
@@ -4494,11 +4497,11 @@ export default function App() {
                             <Button
                               type="link"
                               size="small"
-                              icon={<KeyOutlined />}
+                              icon={<LoginOutlined />}
                               style={{ padding: 0, marginTop: 2 }}
                               onClick={() => { setLoginTargetProvider('acck'); setLoginModalOpen(true); }}
                             >
-                              输入并在线校验 ACCK Token &gt;
+                              账号密码一键登录 / 2FA / 免密自动续期 &gt;
                             </Button>
                           </div>
                         </div>

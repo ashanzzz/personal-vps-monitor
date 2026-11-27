@@ -202,17 +202,20 @@ func (m *DailyCheckinManager) CheckinSingle(ctx context.Context, providerID stri
 	}
 
 	// 打卡前先尝试执行一次鉴权探活自愈，确保 Token 有效
-	pCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	pCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
 	defer cancel()
 
 	res, err := cp.DoCheckin(pCtx)
 	// 若遇到 401 掉线，尝试自动重登
-	if err != nil && (strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "token") || strings.Contains(err.Error(), "unauthorized")) {
-		log.Printf("[DailyCheckin] 服务商 %s 打卡检测到 Token 掉线，正在执行免密重登自愈...", providerID)
-		if store.TryAutoRecoverProvider(pCtx, providerID) {
-			pCtx2, cancel2 := context.WithTimeout(ctx, 25*time.Second)
-			res, err = cp.DoCheckin(pCtx2)
-			cancel2()
+	if err != nil {
+		errLower := strings.ToLower(err.Error())
+		if strings.Contains(errLower, "401") || strings.Contains(errLower, "token") || strings.Contains(errLower, "unauthorized") {
+			log.Printf("[DailyCheckin] 服务商 %s 打卡检测到 Token 掉线，正在执行免密重登自愈...", providerID)
+			if store.TryAutoRecoverProvider(pCtx, providerID) {
+				pCtx2, cancel2 := context.WithTimeout(ctx, 35*time.Second)
+				res, err = cp.DoCheckin(pCtx2)
+				cancel2()
+			}
 		}
 	}
 

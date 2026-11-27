@@ -59,7 +59,7 @@ func init() {
 func getAuthFilePath() string {
 	paths := []string{"./data/admin.json"}
 	if runtime.GOOS == "linux" {
-		paths = append(paths, "/app/data/admin.json", "/mnt/user/appdata/akile-monitor/admin.json")
+		paths = append(paths, "/app/data/admin.json", "/mnt/user/appdata/personal-vps-monitor/admin.json")
 	}
 	for _, p := range paths {
 		dir := filepath.Dir(p)
@@ -75,7 +75,7 @@ func getAuthFilePath() string {
 func getSessionsFilePath() string {
 	paths := []string{"./data/sessions.json"}
 	if runtime.GOOS == "linux" {
-		paths = append(paths, "/app/data/sessions.json", "/mnt/user/appdata/akile-monitor/sessions.json")
+		paths = append(paths, "/app/data/sessions.json", "/mnt/user/appdata/personal-vps-monitor/sessions.json")
 	}
 	for _, p := range paths {
 		dir := filepath.Dir(p)

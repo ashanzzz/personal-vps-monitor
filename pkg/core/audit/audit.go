@@ -40,7 +40,7 @@ var (
 func GetLogDir() string {
 	candidates := []string{
 		"/app/data/logs",
-		"/mnt/user/appdata/akile-monitor/logs",
+		"/mnt/user/appdata/personal-vps-monitor/logs",
 		"./logs",
 	}
 

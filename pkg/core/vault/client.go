@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -175,12 +176,13 @@ func GenerateTOTP(secretOrURI string) (string, error) {
 
 // VaultItem 解密后的凭据项
 type VaultItem struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Username   string `json:"username"`
-	Password   string `json:"password"`
-	TOTPSecret string `json:"totp_secret,omitempty"`
-	Notes      string `json:"notes,omitempty"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Username     string `json:"username"`
+	Password     string `json:"password"`
+	TOTPSecret   string `json:"totp_secret,omitempty"`
+	Notes        string `json:"notes,omitempty"`
+	RevisionDate string `json:"revision_date,omitempty"`
 }
 
 // CipherSummary 密码条目摘要，用于前端安全展示与下拉选择（不含明文密码）
@@ -216,7 +218,10 @@ func DefaultVaultEmail() string {
 	if sc := config.LoadSavedCredentials(); sc != nil && sc.Vaultwarden != nil && sc.Vaultwarden.Username != "" {
 		return strings.TrimSpace(sc.Vaultwarden.Username)
 	}
-	return "ashanzzz1213@gmail.com"
+	if s := os.Getenv("DEFAULT_EMAIL"); s != "" {
+		return strings.TrimSpace(s)
+	}
+	return ""
 }
 
 // DefaultVaultPassword 默认主密码
@@ -224,7 +229,10 @@ func DefaultVaultPassword() string {
 	if s := os.Getenv("VAULT_PASSWORD"); s != "" {
 		return s
 	}
-	return "Woo@@@204317"
+	if s := os.Getenv("DEFAULT_COMMON_PASSWORD"); s != "" {
+		return s
+	}
+	return ""
 }
 
 // fetchAndDecryptVault 统一底层：连接 Vaultwarden、解密所有 Cipher 条目
@@ -235,8 +243,14 @@ func fetchAndDecryptVault(ctx context.Context, server, email, password string) (
 	if email == "" {
 		email = DefaultVaultEmail()
 	}
+	if email == "" {
+		return nil, errors.New("未配置 Vaultwarden 账号邮箱 (VAULT_EMAIL / DEFAULT_EMAIL)")
+	}
 	if password == "" {
 		password = DefaultVaultPassword()
+	}
+	if password == "" {
+		return nil, errors.New("未配置 Vaultwarden 主密码 (VAULT_PASSWORD / DEFAULT_COMMON_PASSWORD)")
 	}
 
 	server = strings.TrimRight(server, "/")
@@ -340,11 +354,13 @@ func fetchAndDecryptVault(ctx context.Context, server, email, password string) (
 			Key string `json:"key"`
 		} `json:"profile"`
 		Ciphers []struct {
-			ID    string `json:"id"`
-			Type  int    `json:"type"`
-			Name  string `json:"name"`
-			Notes string `json:"notes"`
-			Login *struct {
+			ID           string  `json:"id"`
+			Type         int     `json:"type"`
+			Name         string  `json:"name"`
+			Notes        string  `json:"notes"`
+			RevisionDate string  `json:"revisionDate"`
+			DeletedDate  *string `json:"deletedDate"`
+			Login        *struct {
 				Username string `json:"username"`
 				Password string `json:"password"`
 				Totp     string `json:"totp"`
@@ -372,9 +388,12 @@ func fetchAndDecryptVault(ctx context.Context, server, email, password string) (
 		}
 	}
 
-	// 7. 解密所有 Cipher
+	// 7. 解密所有有效 Cipher (跳过回收站已删除条目，按修订时间倒序排列)
 	var items []*VaultItem
 	for _, c := range syncResp.Ciphers {
+		if c.DeletedDate != nil && strings.TrimSpace(*c.DeletedDate) != "" {
+			continue
+		}
 		name := d.Text(c.Name)
 		var u, p, totp string
 		if c.Login != nil {
@@ -384,15 +403,20 @@ func fetchAndDecryptVault(ctx context.Context, server, email, password string) (
 		}
 
 		item := &VaultItem{
-			ID:         c.ID,
-			Name:       name,
-			Username:   u,
-			Password:   p,
-			TOTPSecret: totp,
-			Notes:      d.Text(c.Notes),
+			ID:           c.ID,
+			Name:         name,
+			Username:     u,
+			Password:     p,
+			TOTPSecret:   totp,
+			Notes:        d.Text(c.Notes),
+			RevisionDate: c.RevisionDate,
 		}
 		items = append(items, item)
 	}
+
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].RevisionDate > items[j].RevisionDate
+	})
 
 	return items, nil
 }
@@ -440,6 +464,39 @@ func GetVaultCipherByID(ctx context.Context, server, email, password, cipherID s
 	return nil, fmt.Errorf("未在密码库中找到 ID 为 %s 的条目", cipherID)
 }
 
+func isBetterVaultCandidate(cand, curr *VaultItem) bool {
+	if curr == nil {
+		return true
+	}
+	candTOTP := strings.TrimSpace(cand.TOTPSecret) != ""
+	currTOTP := strings.TrimSpace(curr.TOTPSecret) != ""
+	if candTOTP != currTOTP {
+		return candTOTP
+	}
+	return cand.RevisionDate > curr.RevisionDate
+}
+
+// SelectBestProviderItems 从有效条目中为每家服务商挑出最优的一条（优先带 TOTP 且 RevisionDate 最新）
+func SelectBestProviderItems(items []*VaultItem) map[string]*VaultItem {
+	best := make(map[string]*VaultItem)
+	for _, item := range items {
+		if item == nil || strings.TrimSpace(item.Password) == "" {
+			continue
+		}
+		nameLower := strings.ToLower(item.Name)
+		if strings.Contains(nameLower, "akile") && isBetterVaultCandidate(item, best["akile"]) {
+			best["akile"] = item
+		}
+		if (strings.Contains(nameLower, "lazycat") || strings.Contains(nameLower, "懒猫")) && isBetterVaultCandidate(item, best["lazycat"]) {
+			best["lazycat"] = item
+		}
+		if (strings.Contains(nameLower, "acck") || strings.Contains(nameLower, "acck.io")) && isBetterVaultCandidate(item, best["acck"]) {
+			best["acck"] = item
+		}
+	}
+	return best
+}
+
 // PullAndSyncFromVaultwarden 从 Vaultwarden 登录、同步、解密并自动存入监控系统凭据库
 func PullAndSyncFromVaultwarden(ctx context.Context, server, email, password string) ([]*VaultItem, error) {
 	vaultMu.Lock()
@@ -450,24 +507,11 @@ func PullAndSyncFromVaultwarden(ctx context.Context, server, email, password str
 		return nil, err
 	}
 
+	best := SelectBestProviderItems(items)
 	var matchedItems []*VaultItem
-	for _, item := range items {
-		nameLower := strings.ToLower(item.Name)
-		u := item.Username
-		p := item.Password
-		totp := item.TOTPSecret
-
-		// 智能识别并自动持久化回写至监控凭据库
-		if strings.Contains(nameLower, "akile") && p != "" {
-			_ = config.SaveProviderCredentialWithTOTP("akile", u, p, totp, true)
-			matchedItems = append(matchedItems, item)
-		}
-		if (strings.Contains(nameLower, "lazycat") || strings.Contains(nameLower, "懒猫")) && p != "" {
-			_ = config.SaveProviderCredentialWithTOTP("lazycat", u, p, totp, true)
-			matchedItems = append(matchedItems, item)
-		}
-		if (strings.Contains(nameLower, "acck") || strings.Contains(nameLower, "acck.io")) && p != "" {
-			_ = config.SaveProviderCredentialWithTOTP("acck", u, p, totp, true)
+	for _, prov := range []string{"akile", "lazycat", "acck"} {
+		if item := best[prov]; item != nil {
+			_ = config.SaveProviderCredentialWithTOTP(prov, item.Username, item.Password, item.TOTPSecret, true)
 			matchedItems = append(matchedItems, item)
 		}
 	}

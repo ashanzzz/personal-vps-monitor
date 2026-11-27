@@ -3,10 +3,12 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,8 +36,23 @@ type DailyInstancesCache struct {
 }
 
 var (
-	dailyCacheMu sync.RWMutex
+	dailyCacheMu      sync.RWMutex
+	recoverLocksMu    sync.Mutex
+	recoverLocks      = make(map[string]*sync.Mutex)
+	lastRecoveredAtMu sync.Mutex
+	lastRecoveredAt   = make(map[string]time.Time)
 )
+
+func getProviderRecoverLock(providerID string) *sync.Mutex {
+	recoverLocksMu.Lock()
+	defer recoverLocksMu.Unlock()
+	m, ok := recoverLocks[providerID]
+	if !ok {
+		m = &sync.Mutex{}
+		recoverLocks[providerID] = m
+	}
+	return m
+}
 
 func getDailyCacheFile() string {
 	return filepath.Join(getDataDir(), "instances_daily_cache.json")
@@ -146,13 +163,19 @@ func SyncAllInstancesDaily(ctx context.Context, force bool) (*DailyInstancesCach
 			LastAttemptAt: now.Format("2006-01-02 15:04:05"),
 		}
 
-		insts, err := im.ListInstances(ctx)
+		pCtx, pCancel := context.WithTimeout(ctx, 35*time.Second)
+		insts, err := im.ListInstances(pCtx)
+		pCancel()
 		if err != nil {
 			log.Printf("[DailySync] 服务商 %s 抓取失败: %v, 尝试自动续期/重登...", id, err)
 			// 尝试自动重登
-			recovered := TryAutoRecoverProvider(ctx, id)
+			rCtx, rCancel := context.WithTimeout(ctx, 35*time.Second)
+			recovered := TryAutoRecoverProvider(rCtx, id)
+			rCancel()
 			if recovered {
-				insts, err = im.ListInstances(ctx)
+				pCtx2, pCancel2 := context.WithTimeout(ctx, 35*time.Second)
+				insts, err = im.ListInstances(pCtx2)
+				pCancel2()
 			}
 		}
 
@@ -203,15 +226,36 @@ func SyncAllInstancesDaily(ctx context.Context, force bool) (*DailyInstancesCach
 
 // TryAutoRecoverProvider 尝试为失效的 Provider 自动续期或免密重登 (全流程自动自愈)
 func TryAutoRecoverProvider(ctx context.Context, providerID string) bool {
+	mu := getProviderRecoverLock(providerID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// 若刚刚在 30 秒内已由并发请求成功恢复过，直接复用，避免重复登录
+	lastRecoveredAtMu.Lock()
+	recentOK := time.Since(lastRecoveredAt[providerID]) < 30*time.Second
+	lastRecoveredAtMu.Unlock()
+	if recentOK {
+		return true
+	}
+
 	p, ok := providers.Get(providerID)
 	if !ok {
 		return false
 	}
 
 	creds := config.LoadSavedCredentials()
-	if creds.Akile == nil || creds.LazyCat == nil || creds.ACCK == nil {
+	missingForTarget := (providerID == "akile" && (creds.Akile == nil || creds.Akile.Password == "")) ||
+		(providerID == "lazycat" && (creds.LazyCat == nil || creds.LazyCat.Password == "")) ||
+		(providerID == "acck" && (creds.ACCK == nil || creds.ACCK.Password == ""))
+	if missingForTarget {
 		_, _ = vault.PullAndSyncFromVaultwarden(ctx, "", "", "")
 		creds = config.LoadSavedCredentials()
+	}
+
+	markRecovered := func() {
+		lastRecoveredAtMu.Lock()
+		lastRecoveredAt[providerID] = time.Now()
+		lastRecoveredAtMu.Unlock()
 	}
 
 	switch providerID {
@@ -224,6 +268,7 @@ func TryAutoRecoverProvider(ctx context.Context, providerID string) bool {
 				ak.SetToken(newTok)
 				audit.Record("security", "akile.auto_refresh", "akile", nil, "SUCCESS", "自动续期 Akile Token 成功", 0)
 				log.Printf("[AutoRecover] Akile Token 快速续期成功")
+				markRecovered()
 				return true
 			}
 			// 2. 续期失败 (如 401 完全过期)，尝试使用凭据库账号密码重新登录
@@ -240,6 +285,7 @@ func TryAutoRecoverProvider(ctx context.Context, providerID string) bool {
 					ak.SetToken(newTok)
 					audit.Record("security", "akile.auto_relogin", "akile", map[string]interface{}{"username": creds.Akile.Username}, "SUCCESS", "检测到 Akile Token 掉线，已自动依据凭据库(及实时TOTP)免密重新登录并恢复！", 0)
 					log.Printf("[AutoRecover] Akile 自动免密重新登录成功，Token 已更新")
+					markRecovered()
 					return true
 				}
 			}
@@ -259,26 +305,150 @@ func TryAutoRecoverProvider(ctx context.Context, providerID string) bool {
 					lz.SetToken(tok)
 					audit.Record("security", "lazycat.auto_relogin", "lazycat", map[string]interface{}{"username": creds.LazyCat.Username, "auto_totp": totpCode != ""}, "SUCCESS", "检测到懒猫云 Token 掉线，已自动依据凭据库(及实时TOTP)免密重新登录并恢复！", 0)
 					log.Printf("[AutoRecover] 懒猫云自动免密重新登录成功，Token 已更新")
+					markRecovered()
 					return true
 				}
 			}
 		}
 	case "acck":
-		// 如果 ACCK 凭据库配置了备用 Token
-		if acckP, isAcck := p.(*acck.ACCKProvider); isAcck {
-			if creds.ACCK != nil && creds.ACCK.Password != "" {
+		if acckP, isAcck := p.(*acck.ACCKProvider); isAcck && creds.ACCK != nil && creds.ACCK.Password != "" {
+			// 兼容手填 JWT 存入密码字段的场景
+			if strings.HasPrefix(creds.ACCK.Password, "ey") && strings.Count(creds.ACCK.Password, ".") == 2 {
 				acckP.SetToken(creds.ACCK.Password)
 				if err := acckP.VerifyToken(ctx); err == nil {
 					_ = config.SaveTokens("", creds.ACCK.Password, "", "")
 					config.Global.ACCKToken = creds.ACCK.Password
 					audit.Record("security", "acck.auto_relogin", "acck", nil, "SUCCESS", "检测到 ACCK 凭据掉线，已自动从凭据库恢复并校验通过", 0)
 					log.Printf("[AutoRecover] ACCK 凭据自动校验并恢复成功")
+					markRecovered()
 					return true
 				}
+			}
+
+			if creds.ACCK.Username != "" {
+				loginWithCred := func(c *config.ProviderCredential) (string, error) {
+					totpFn := func() (string, error) {
+						if strings.TrimSpace(c.TOTPSecret) == "" {
+							return "", nil
+						}
+						return vault.GenerateTOTP(c.TOTPSecret)
+					}
+					tok, need2FA, msg, err := acckP.LoginWithTOTPProvider(ctx, c.Username, c.Password, totpFn, true)
+					if err != nil {
+						return "", err
+					}
+					if need2FA || tok == "" {
+						return "", fmt.Errorf("acck auto login incomplete: need2FA=%v msg=%s", need2FA, msg)
+					}
+					return tok, nil
+				}
+
+				newTok, err := loginWithCred(creds.ACCK)
+				// 若因密码失效报错，尝试从 Vaultwarden 同步最新有效条目后重登一次
+				if err != nil && errors.Is(err, acck.ErrInvalidCredentials) {
+					log.Printf("[AutoRecover] ACCK 凭据被上游拒绝，尝试从 Vaultwarden 同步最新条目重登...")
+					oldUser, oldPass := creds.ACCK.Username, creds.ACCK.Password
+					if _, vErr := vault.PullAndSyncFromVaultwarden(ctx, "", "", ""); vErr == nil {
+						refreshed := config.LoadSavedCredentials()
+						if refreshed.ACCK != nil && refreshed.ACCK.Password != "" && (refreshed.ACCK.Username != oldUser || refreshed.ACCK.Password != oldPass) {
+							creds = refreshed
+							newTok, err = loginWithCred(creds.ACCK)
+						}
+					}
+				}
+
+				if err == nil && newTok != "" {
+					_ = config.SaveTokens("", newTok, "", "")
+					acckP.SetToken(newTok)
+					audit.Record("security", "acck.auto_relogin", "acck", map[string]interface{}{
+						"username":  config.MaskUsername(creds.ACCK.Username),
+						"auto_totp": strings.TrimSpace(creds.ACCK.TOTPSecret) != "",
+					}, "SUCCESS", "检测到 ACCK Token 掉线，已自动解算 Altcha 并依据凭据库(及实时TOTP)免密重登恢复！", 0)
+					log.Printf("[AutoRecover] ACCK 自动免密重新登录成功，新 Token 已更新")
+					markRecovered()
+					return true
+				}
+				log.Printf("[AutoRecover] ACCK 自动重登失败: %v", err)
 			}
 		}
 	}
 	return false
+}
+
+// ForceAutoLoginACCK 供后台生命周期调度器在 Token 临期 (<24h) 或缺失时主动安全重登（与 TryAutoRecoverProvider 共用并发锁与防重放机制）
+func ForceAutoLoginACCK(ctx context.Context) (bool, error) {
+	mu := getProviderRecoverLock("acck")
+	mu.Lock()
+	defer mu.Unlock()
+
+	lastRecoveredAtMu.Lock()
+	recentOK := time.Since(lastRecoveredAt["acck"]) < 30*time.Second
+	lastRecoveredAtMu.Unlock()
+	if recentOK {
+		return true, nil
+	}
+
+	p, ok := providers.Get("acck")
+	if !ok {
+		return false, fmt.Errorf("acck provider 未注册")
+	}
+	acckP, isAcck := p.(*acck.ACCKProvider)
+	if !isAcck {
+		return false, fmt.Errorf("acck provider 类型异常")
+	}
+
+	creds := config.LoadSavedCredentials()
+	if creds.ACCK == nil || creds.ACCK.Password == "" {
+		_, _ = vault.PullAndSyncFromVaultwarden(ctx, "", "", "")
+		creds = config.LoadSavedCredentials()
+	}
+	if creds.ACCK == nil || creds.ACCK.Username == "" || creds.ACCK.Password == "" {
+		return false, fmt.Errorf("未配置 ACCK 账号或密码")
+	}
+	if strings.HasPrefix(creds.ACCK.Password, "ey") && strings.Count(creds.ACCK.Password, ".") == 2 {
+		return false, fmt.Errorf("ACCK 凭据密码字段存的是静态 JWT，无法执行账号密码自动重登")
+	}
+
+	loginWithCred := func(c *config.ProviderCredential) (string, error) {
+		totpFn := func() (string, error) {
+			if strings.TrimSpace(c.TOTPSecret) == "" {
+				return "", nil
+			}
+			return vault.GenerateTOTP(c.TOTPSecret)
+		}
+		tok, need2FA, msg, err := acckP.LoginWithTOTPProvider(ctx, c.Username, c.Password, totpFn, true)
+		if err != nil {
+			return "", err
+		}
+		if need2FA || tok == "" {
+			return "", fmt.Errorf("需要 2FA 动态码或登录未返回 Token: %s", msg)
+		}
+		return tok, nil
+	}
+
+	newTok, err := loginWithCred(creds.ACCK)
+	if err != nil && errors.Is(err, acck.ErrInvalidCredentials) {
+		oldUser, oldPass := creds.ACCK.Username, creds.ACCK.Password
+		if _, vErr := vault.PullAndSyncFromVaultwarden(ctx, "", "", ""); vErr == nil {
+			refreshed := config.LoadSavedCredentials()
+			if refreshed.ACCK != nil && refreshed.ACCK.Password != "" && (refreshed.ACCK.Username != oldUser || refreshed.ACCK.Password != oldPass) {
+				creds = refreshed
+				newTok, err = loginWithCred(creds.ACCK)
+			}
+		}
+	}
+	if err != nil {
+		return false, err
+	}
+
+	_ = config.SaveTokens("", newTok, "", "")
+	acckP.SetToken(newTok)
+
+	lastRecoveredAtMu.Lock()
+	lastRecoveredAt["acck"] = time.Now()
+	lastRecoveredAtMu.Unlock()
+
+	return true, nil
 }
 
 // StartDailyCacheCron 启动后台每日定时同步守护协程 (每天 04:00 执行)

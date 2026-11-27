@@ -8,6 +8,7 @@ import (
 
 	"github.com/ashanzzz/personal-vps-monitor/pkg/api"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/config"
+	"github.com/ashanzzz/personal-vps-monitor/pkg/core/store"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/vault"
 	"github.com/spf13/cobra"
 )
@@ -26,11 +27,19 @@ var serverCmd = &cobra.Command{
 		handler := api.NewRouter()
 		log.Printf("[HTTP] Personal VPS Hub API listening on http://127.0.0.1%s", addr)
 
-		// 启动时在后台静默尝试从 Vaultwarden 自动解密同步一次最新凭据
+		// 启动时在后台静默尝试从 Vaultwarden 自动解密同步一次最新凭据，并在 ACCK Token 缺失或临期时补全登录
 		go func() {
 			time.Sleep(2 * time.Second)
 			if items, err := vault.PullAndSyncFromVaultwarden(context.Background(), "", "", ""); err == nil && len(items) > 0 {
 				log.Printf("[Startup] 成功从 Vaultwarden 自动解密提取并更新了 %d 个厂商凭据！", len(items))
+			}
+			// 若 ACCK Token 仍为空或已过期，在 Vaultwarden 同步后再触发一次自愈
+			if config.GetProviderToken("acck") == "" {
+				subCtx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+				defer cancel()
+				if ok, err := store.ForceAutoLoginACCK(subCtx); ok && err == nil {
+					log.Printf("[Startup] Vaultwarden 同步后已自动完成 ACCK 首次免密登录！")
+				}
 			}
 		}()
 

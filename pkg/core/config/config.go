@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/joho/godotenv"
 )
@@ -56,19 +57,57 @@ func (c *Config) EffectiveLazyCatProxyURL() string {
 	return ""
 }
 
-var Global = &Config{}
+var (
+	Global   = &Config{}
+	globalMu sync.RWMutex
+)
+
+// GetToken 安全读取内存配置中的服务商 Token
+func GetProviderToken(providerID string) string {
+	globalMu.RLock()
+	defer globalMu.RUnlock()
+	if Global == nil {
+		return ""
+	}
+	switch strings.ToLower(providerID) {
+	case "akile":
+		return Global.AkileToken
+	case "acck":
+		return Global.ACCKToken
+	case "lazycat":
+		return Global.LazyCatToken
+	}
+	return ""
+}
+
+// SetProviderToken 并发安全更新内存配置中的服务商 Token
+func SetProviderToken(providerID, token string) {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+	if Global == nil {
+		Global = &Config{}
+	}
+	switch strings.ToLower(providerID) {
+	case "akile":
+		Global.AkileToken = token
+	case "acck":
+		Global.ACCKToken = token
+	case "lazycat":
+		Global.LazyCatToken = token
+	}
+}
 
 func getTokensCandidatePaths() []string {
 	paths := []string{"./data/tokens.json"}
 	if runtime.GOOS == "linux" {
-		paths = append(paths, "/app/data/tokens.json", "/mnt/user/appdata/akile-monitor/tokens.json")
+		paths = append(paths, "/app/data/tokens.json", "/mnt/user/appdata/personal-vps-monitor/tokens.json")
 	}
 	return paths
 }
 
 func getTokensWritePath() string {
 	if runtime.GOOS == "linux" {
-		for _, p := range []string{"/app/data", "/mnt/user/appdata/akile-monitor"} {
+		for _, p := range []string{"/app/data", "/mnt/user/appdata/personal-vps-monitor"} {
 			if fi, err := os.Stat(p); err == nil && fi.IsDir() {
 				return filepath.Join(p, "tokens.json")
 			}
@@ -102,15 +141,15 @@ func SaveTokensWithLazyCatProxy(akile, acck, lazycat, proxy string, lazycatProxy
 	st := LoadSavedTokens()
 	if akile != "" {
 		st.AkileToken = akile
-		Global.AkileToken = akile
+		SetProviderToken("akile", akile)
 	}
 	if acck != "" {
 		st.ACCKToken = acck
-		Global.ACCKToken = acck
+		SetProviderToken("acck", acck)
 	}
 	if lazycat != "" {
 		st.LazyCatToken = lazycat
-		Global.LazyCatToken = lazycat
+		SetProviderToken("lazycat", lazycat)
 	}
 	if proxy != "" {
 		st.ProxyURL = proxy
@@ -132,7 +171,7 @@ func SaveTokensWithLazyCatProxy(akile, acck, lazycat, proxy string, lazycatProxy
 func Load() *Config {
 	candidates := []string{
 		"/app/data/.env",
-		"/mnt/user/appdata/akile-monitor/.env",
+		"/mnt/user/appdata/personal-vps-monitor/.env",
 		"/opt/data/.env",
 		".env",
 		filepath.Join(os.Getenv("HOME"), ".env"),
@@ -183,7 +222,7 @@ func Load() *Config {
 	}
 
 	if Global.LazyCatToken == "" {
-		for _, tf := range []string{"/app/data/lazycat_token.txt", "/mnt/user/appdata/akile-monitor/lazycat_token.txt"} {
+		for _, tf := range []string{"/app/data/lazycat_token.txt", "/mnt/user/appdata/personal-vps-monitor/lazycat_token.txt"} {
 			if b, err := os.ReadFile(tf); err == nil {
 				Global.LazyCatToken = strings.Trim(strings.TrimSpace(string(b)), "\"'")
 				if Global.LazyCatToken != "" {

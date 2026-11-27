@@ -66,10 +66,10 @@ export const ProviderLoginModal: React.FC<Props> = ({
       manualForm.resetFields()
       tokenForm.resetFields()
 
-      // 设置默认 Vaultwarden 地址与邮箱
+      // 设置默认 Vaultwarden 地址
       vaultForm.setFieldsValue({
         server: 'http://192.168.8.11:4743',
-        username: 'ashanzzz1213@gmail.com',
+        username: '',
         password: '',
       })
 
@@ -291,7 +291,7 @@ export const ProviderLoginModal: React.FC<Props> = ({
                     >
                       <Input
                         prefix={<MailOutlined style={{ color: '#94a3b8' }} />}
-                        placeholder="ashanzzz1213@gmail.com"
+                        placeholder="user@example.com"
                       />
                     </Form.Item>
 
@@ -471,9 +471,9 @@ export const ProviderLoginModal: React.FC<Props> = ({
               ),
               children: (
                 <div>
-                  <div style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>
-                    适用于受 Cloudflare 防护或已有浏览器已登录 Token 的场景，粘贴保存后立即生效：
-                  </div>
+                      <div style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>
+                        可直接粘贴浏览器已登录 Token 兜底（ACCK 现已支持「Vaultwarden 关联」与「手动账号密码 + 2FA」自动解算 Altcha 免密登录）：
+                      </div>
                   <Form form={tokenForm} layout="vertical" onFinish={handleTokenSubmit}>
                     <Form.Item
                       label="API Token (JWT)"

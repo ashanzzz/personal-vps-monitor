@@ -87,7 +87,7 @@ func ProbeUnraidContainers(ctx context.Context) AutoDiscoveryReport {
 		"/app/data/credentials.json",
 		"./data/credentials.json",
 		"/app/data/lazycat_token.txt",
-		"/mnt/user/appdata/akile-monitor/lazycat_token.txt",
+		"/mnt/user/appdata/personal-vps-monitor/lazycat_token.txt",
 		"/app/data/.env",
 		"/mnt/user/appdata/personal-vps-monitor/.env",
 		"./data/admin.json",
@@ -106,7 +106,7 @@ func ProbeUnraidContainers(ctx context.Context) AutoDiscoveryReport {
 func AutoSyncCredentialsFromVault(ctx context.Context) {
 	// 如果全局未配置懒猫云 Token，尝试从 token 文本自动读
 	if Global.LazyCatToken == "" {
-		for _, tf := range []string{"/app/data/lazycat_token.txt", "/mnt/user/appdata/akile-monitor/lazycat_token.txt"} {
+		for _, tf := range []string{"/app/data/lazycat_token.txt", "/mnt/user/appdata/personal-vps-monitor/lazycat_token.txt"} {
 			if b, err := os.ReadFile(tf); err == nil {
 				val := strings.Trim(strings.TrimSpace(string(b)), "\"'")
 				if val != "" {

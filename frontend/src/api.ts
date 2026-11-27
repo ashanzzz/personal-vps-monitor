@@ -395,6 +395,7 @@ export interface TokensConfig {
   acck_is_expired?: boolean
   acck_seconds_left?: number
   acck_has_credentials?: boolean
+  acck_auto_refresh?: boolean
 
   lazycat_configured: boolean
   lazycat_token_masked: string
@@ -431,8 +432,11 @@ export const api = {
     http.post<{ status: string; message: string; token: string; expires_at: string }>('/api/akile/refresh-token').then(r => r.data),
   lazycatLogin: (payload: { username: string; password: string; ga_code?: string; save_credentials?: boolean }) =>
     http.post<{ status: string; message: string; need_2fa?: boolean; token?: string; expires_at?: string }>('/api/lazycat/login', payload).then(r => r.data),
-  acckLogin: (token: string) =>
-    http.post<{ status: string; message: string; token: string; expires_at?: string }>('/api/acck/login', { token }).then(r => r.data),
+  acckLogin: (payload: string | { token?: string; username?: string; password?: string; ga_code?: string; totp_secret?: string; save_credentials?: boolean }) =>
+    http.post<{ status?: string; message?: string; need_2fa?: boolean; token?: string; expires_at?: string }>(
+      '/api/acck/login',
+      typeof payload === 'string' ? { token: payload } : payload
+    ).then(r => r.data),
 
   // 全网聚合资产与打卡
   getInstances: (provider?: string, refresh?: boolean) =>

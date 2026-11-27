@@ -237,16 +237,15 @@ func handleLazyCatLogin(w http.ResponseWriter, r *http.Request) {
 // POST /api/acck/login
 func handleAcckLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Token string `json:"token"`
+		Token           string `json:"token"`
+		Username        string `json:"username"`
+		Password        string `json:"password"`
+		GACode          string `json:"ga_code"`
+		TOTPSecret      string `json:"totp_secret"`
+		SaveCredentials bool   `json:"save_credentials"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "无效的请求体"})
-		return
-	}
-
-	tok := strings.Trim(strings.TrimSpace(req.Token), "\"'")
-	if tok == "" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "请输入有效的 ACCK Token"})
 		return
 	}
 
@@ -261,23 +260,91 @@ func handleAcckLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	acckProvider.SetToken(tok)
-	if err := acckProvider.VerifyToken(r.Context()); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "ACCK 凭据校验失败: " + err.Error()})
+	tok := strings.Trim(strings.TrimSpace(req.Token), "\"'")
+	username := strings.TrimSpace(req.Username)
+	password := req.Password
+
+	// 模式 1: 直接提交 JWT Token 校验并保存
+	if tok != "" && username == "" && password == "" {
+		acckProvider.SetToken(tok)
+		if err := acckProvider.VerifyToken(r.Context()); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "ACCK 凭据校验失败: " + err.Error()})
+			return
+		}
+
+		_ = config.SaveTokens("", tok, "", "")
+		config.Global.ACCKToken = tok
+
+		_, expTime, _ := ParseJWTExp(tok)
+		audit.Record("rest_api", "acck.login", "acck", nil, "SUCCESS", "用户手动验证并保存 ACCK Token 成功", 0)
+
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"status":     "success",
+			"message":    "ACCK 凭据校验通过并已成功保存",
+			"token":      tok,
+			"expires_at": expTime.Format("2006-01-02 15:04:05"),
+		})
 		return
 	}
 
-	// 校验通过，持久化保存
-	_ = config.SaveTokens("", tok, "", "")
-	config.Global.ACCKToken = tok
+	// 模式 2: 账号密码 + 2FA 自动解算 Altcha 登录
+	if username == "" || password == "" {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "请输入有效的 ACCK 账号密码或 Token"})
+		return
+	}
 
-	_, expTime, _ := ParseJWTExp(tok)
-	audit.Record("rest_api", "acck.login", "acck", nil, "SUCCESS", "用户手动验证并保存 ACCK Token 成功", 0)
+	creds := config.LoadSavedCredentials()
+	gaCode := strings.TrimSpace(req.GACode)
+	totpSecret := strings.TrimSpace(req.TOTPSecret)
+	if totpSecret == "" && creds.ACCK != nil && strings.EqualFold(strings.TrimSpace(creds.ACCK.Username), username) {
+		totpSecret = strings.TrimSpace(creds.ACCK.TOTPSecret)
+	}
+
+	totpFn := func() (string, error) {
+		if gaCode != "" {
+			return gaCode, nil
+		}
+		if totpSecret != "" {
+			code, err := vault.GenerateTOTP(totpSecret)
+			if err != nil {
+				return "", err
+			}
+			log.Printf("[AcckLogin] 自动基于 TOTP 密钥生成 2FA 动态码")
+			return code, nil
+		}
+		return "", nil
+	}
+
+	loginCtx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
+	defer cancel()
+
+	newTok, need2FA, msg, err := acckProvider.LoginWithTOTPProvider(loginCtx, username, password, totpFn, false)
+	if need2FA {
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"need_2fa": true,
+			"message":  msg,
+		})
+		return
+	}
+	if err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	_ = config.SaveTokens("", newTok, "", "")
+	acckProvider.SetToken(newTok)
+
+	if req.SaveCredentials {
+		_ = config.SaveProviderCredentialWithTOTP("acck", username, password, totpSecret, true)
+	}
+
+	_, expTime, _ := ParseJWTExp(newTok)
+	audit.Record("rest_api", "acck.login", "acck", map[string]interface{}{"username": config.MaskUsername(username)}, "SUCCESS", "用户登录 ACCK 成功并自动保存 Token", 0)
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"status":     "success",
-		"message":    "ACCK 凭据校验通过并已成功保存",
-		"token":      tok,
+		"message":    "ACCK 登录成功并已自动保存 Token",
+		"token":      newTok,
 		"expires_at": expTime.Format("2006-01-02 15:04:05"),
 	})
 }
@@ -305,7 +372,7 @@ func handleVendorHealthSummary(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().Unix()
 
 	// 1. Akile
-	akTok := config.Global.AkileToken
+	akTok := config.GetProviderToken("akile")
 	akHealth := ProviderHealth{
 		ProviderID:   "akile",
 		Configured:   akTok != "",
@@ -333,7 +400,7 @@ func handleVendorHealthSummary(w http.ResponseWriter, r *http.Request) {
 	summary["akile"] = akHealth
 
 	// 2. LazyCat
-	lzTok := config.Global.LazyCatToken
+	lzTok := config.GetProviderToken("lazycat")
 	lzHealth := ProviderHealth{
 		ProviderID:   "lazycat",
 		Configured:   lzTok != "",
@@ -361,7 +428,7 @@ func handleVendorHealthSummary(w http.ResponseWriter, r *http.Request) {
 	summary["lazycat"] = lzHealth
 
 	// 3. ACCK
-	acckTok := config.Global.ACCKToken
+	acckTok := config.GetProviderToken("acck")
 	acckHealth := ProviderHealth{
 		ProviderID:   "acck",
 		Configured:   acckTok != "",
@@ -534,9 +601,9 @@ func handleVendorQuickLogin(w http.ResponseWriter, r *http.Request) {
 		})
 
 	case "acck":
-		// 若 ACCK 未配置 Token，尝试从 Vaultwarden 获取
-		if (creds.ACCK == nil || creds.ACCK.Password == "") && config.Global.ACCKToken == "" {
-			log.Printf("[QuickLogin] 未找到 ACCK 凭据，正在尝试从 Vaultwarden 自动解密同步...")
+		// 若本地尚未保存账号密码，尝试先从 Vaultwarden 自动解密同步
+		if creds.ACCK == nil || creds.ACCK.Username == "" || creds.ACCK.Password == "" {
+			log.Printf("[QuickLogin] 本地凭据库未找到 ACCK 账密，正在尝试从 Vaultwarden 自动解密同步...")
 			_, _ = vault.PullAndSyncFromVaultwarden(r.Context(), "", "", "")
 			creds = config.LoadSavedCredentials()
 		}
@@ -548,31 +615,95 @@ func handleVendorQuickLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		acckProvider := p.(*acck.ACCKProvider)
 
-		targetTok := config.Global.ACCKToken
-		if targetTok == "" && creds.ACCK != nil && creds.ACCK.Password != "" {
-			targetTok = creds.ACCK.Password
+		// 若密码字段存的是直接 JWT Token (兼容旧式录入)，走 Token 校验分支
+		if creds.ACCK != nil && strings.HasPrefix(creds.ACCK.Password, "ey") && strings.Count(creds.ACCK.Password, ".") == 2 {
+			targetTok := creds.ACCK.Password
+			acckProvider.SetToken(targetTok)
+			if err := acckProvider.VerifyToken(r.Context()); err == nil {
+				_ = config.SaveTokens("", targetTok, "", "")
+				config.Global.ACCKToken = targetTok
+				_, expTime, _ := ParseJWTExp(targetTok)
+				audit.Record("rest_api", "acck.quick_login", "acck", nil, "SUCCESS", "用户触发 ACCK Token 快速校验通过", 0)
+				respondJSON(w, http.StatusOK, map[string]interface{}{
+					"status":     "success",
+					"message":    "ACCK Token 快速校验成功且状态有效",
+					"token":      targetTok,
+					"expires_at": expTime.Format("2006-01-02 15:04:05"),
+				})
+				return
+			}
 		}
-		if targetTok == "" {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "尚未配置 ACCK Token，请先录入"})
+
+		if creds.ACCK == nil || creds.ACCK.Username == "" || creds.ACCK.Password == "" {
+			respondJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "未能从 Vaultwarden 或本地凭据库获取 ACCK 账号密码，请先在凭据设置中输入并保存",
+			})
 			return
 		}
 
-		acckProvider.SetToken(targetTok)
-		if err := acckProvider.VerifyToken(r.Context()); err != nil {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "ACCK 凭据校验失败: " + err.Error()})
+		var body struct {
+			GACode string `json:"ga_code"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		manualGA := strings.TrimSpace(body.GACode)
+
+		loginWithCred := func(c *config.ProviderCredential) (string, bool, string, error) {
+			totpFn := func() (string, error) {
+				if manualGA != "" {
+					return manualGA, nil
+				}
+				if strings.TrimSpace(c.TOTPSecret) != "" {
+					code, err := vault.GenerateTOTP(c.TOTPSecret)
+					if err != nil {
+						return "", err
+					}
+					log.Printf("[QuickLogin] 自动基于 Vaultwarden TOTP 密钥生成 ACCK 2FA 动态码")
+					return code, nil
+				}
+				return "", nil
+			}
+			loginCtx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
+			defer cancel()
+			return acckProvider.LoginWithTOTPProvider(loginCtx, c.Username, c.Password, totpFn, false)
+		}
+
+		tok, need2FA, msg, err := loginWithCred(creds.ACCK)
+		if err != nil && errors.Is(err, acck.ErrInvalidCredentials) {
+			oldUser, oldPass := creds.ACCK.Username, creds.ACCK.Password
+			if _, vErr := vault.PullAndSyncFromVaultwarden(r.Context(), "", "", ""); vErr == nil {
+				refreshed := config.LoadSavedCredentials()
+				if refreshed.ACCK != nil && refreshed.ACCK.Password != "" && (refreshed.ACCK.Username != oldUser || refreshed.ACCK.Password != oldPass) {
+					creds = refreshed
+					tok, need2FA, msg, err = loginWithCred(creds.ACCK)
+				}
+			}
+		}
+
+		if need2FA {
+			respondJSON(w, http.StatusOK, map[string]interface{}{
+				"need_2fa": true,
+				"message":  msg,
+			})
+			return
+		}
+		if err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "一键登录失败: " + err.Error()})
 			return
 		}
 
-		_ = config.SaveTokens("", targetTok, "", "")
-		config.Global.ACCKToken = targetTok
+		_ = config.SaveTokens("", tok, "", "")
+		acckProvider.SetToken(tok)
 
-		_, expTime, _ := ParseJWTExp(targetTok)
-		audit.Record("rest_api", "acck.quick_login", "acck", nil, "SUCCESS", "用户触发 ACCK 凭据快速校验通过", 0)
+		_, expTime, _ := ParseJWTExp(tok)
+		audit.Record("rest_api", "acck.quick_login", "acck", map[string]interface{}{
+			"username":  config.MaskUsername(creds.ACCK.Username),
+			"auto_totp": manualGA != "" || strings.TrimSpace(creds.ACCK.TOTPSecret) != "",
+		}, "SUCCESS", "用户通过凭据库(及Vaultwarden)一键免密登录 ACCK 成功", 0)
 
 		respondJSON(w, http.StatusOK, map[string]interface{}{
 			"status":     "success",
-			"message":    "ACCK 凭据快速校验成功且状态有效",
-			"token":      targetTok,
+			"message":    "ACCK 免密登录成功！Token 已自动更新生效",
+			"token":      tok,
 			"expires_at": expTime.Format("2006-01-02 15:04:05"),
 		})
 
@@ -632,15 +763,15 @@ func handleVendorSingleSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	pCtx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
 	defer cancel()
 
 	insts, err := im.ListInstances(pCtx)
 	// 若遇到 401 掉线，尝试自动重登自愈
-	if err != nil && (strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "token") || strings.Contains(err.Error(), "unauthorized")) {
+	if err != nil && isAuthError(err) {
 		log.Printf("[SingleSync] 服务商 %s 同步遇到 401 掉线，尝试自动重登...", provider)
 		if store.TryAutoRecoverProvider(pCtx, provider) {
-			pCtx2, cancel2 := context.WithTimeout(r.Context(), 20*time.Second)
+			pCtx2, cancel2 := context.WithTimeout(r.Context(), 35*time.Second)
 			insts, err = im.ListInstances(pCtx2)
 			cancel2()
 		}
@@ -932,8 +1063,9 @@ func executeProviderLoginTest(ctx context.Context, provider string, p providers.
 		if !ok {
 			return "", "", errors.New("ACCK 驱动异常")
 		}
-		tok := password
-		if strings.HasPrefix(password, "ey") || len(password) > 30 {
+		// 若密码字段直接填入的是 JWT，兼容走校验保存
+		if strings.HasPrefix(password, "ey") && strings.Count(password, ".") == 2 {
+			tok := password
 			acckP.SetToken(tok)
 			if err := acckP.VerifyToken(ctx); err != nil {
 				return "", "", fmt.Errorf("ACCK Token 校验失败: %w", err)
@@ -946,7 +1078,40 @@ func executeProviderLoginTest(ctx context.Context, provider string, p providers.
 			}
 			return tok, expStr, nil
 		}
-		return "", "", errors.New("ACCK 控制台受到 Cloudflare 人机防护，请在密码库条目的密码字段中填入 JWT Token，或直接在 Token 选项卡中填入")
+
+		totpFn := func() (string, error) {
+			if strings.TrimSpace(totpSecret) == "" {
+				return "", nil
+			}
+			code, err := vault.GenerateTOTP(totpSecret)
+			if err != nil {
+				return "", fmt.Errorf("2FA 原始代码计算动态码失败: %w", err)
+			}
+			return code, nil
+		}
+		loginCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
+		defer cancel()
+
+		tok, need2FA, msg, err := acckP.LoginWithTOTPProvider(loginCtx, username, password, totpFn, false)
+		if need2FA {
+			return "", "", errors.New("该账号已开启两步验证，请在 2FA 原始代码框中填入密钥 (TOTP Secret) 进行绑定")
+		}
+		if err != nil {
+			return "", "", fmt.Errorf("ACCK 登录失败: %w", err)
+		}
+		if tok == "" {
+			return "", "", fmt.Errorf("登录未返回有效 Token: %s", msg)
+		}
+
+		_ = config.SaveTokens("", tok, "", "")
+		config.Global.ACCKToken = tok
+		acckP.SetToken(tok)
+
+		_, expTime, ok := ParseJWTExp(tok)
+		if ok && !expTime.IsZero() {
+			expStr = expTime.Format("2006-01-02 15:04:05")
+		}
+		return tok, expStr, nil
 	}
 
 	return "", "", fmt.Errorf("未知服务商: %s", provider)
