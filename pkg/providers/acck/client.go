@@ -3,6 +3,7 @@ package acck
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,10 +29,12 @@ func NewClient(token, proxyURL string) *Client {
 func NewClientWithBaseURL(baseURL, token, proxyURL string) *Client {
 	transport := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
-		TLSHandshakeTimeout:   5 * time.Second,
-		ResponseHeaderTimeout: 6 * time.Second,
-		IdleConnTimeout:       10 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+		IdleConnTimeout:       15 * time.Second,
 		DisableKeepAlives:     true,
+		ForceAttemptHTTP2:     false,
+		TLSNextProto:          make(map[string]func(authority string, c *tls.Conn) http.RoundTripper),
 	}
 	if proxyURL != "" {
 		if u, err := url.Parse(proxyURL); err == nil {
@@ -50,7 +53,7 @@ func NewClientWithBaseURL(baseURL, token, proxyURL string) *Client {
 		proxyURL: strings.TrimSpace(proxyURL),
 		httpClient: &http.Client{
 			Transport: transport,
-			Timeout:   8 * time.Second,
+			Timeout:   20 * time.Second,
 		},
 	}
 }
@@ -94,7 +97,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	var resp *http.Response
 	var lastErr error
 
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := 0; attempt < 3; attempt++ {
 		var bodyReader io.Reader
 		if body != nil {
 			data, err := json.Marshal(body)
@@ -114,7 +117,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		}
 		req.Header.Set("Origin", "https://acck.io")
 		req.Header.Set("Referer", "https://acck.io/")
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0 Safari/537.36")
+		req.Header.Set("User-Agent", acckDefaultUA)
 		req.Header.Set("Accept", "application/json, text/plain, */*")
 		if body != nil {
 			req.Header.Set("Content-Type", "application/json")
@@ -126,9 +129,11 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 			break
 		}
 		lastErr = err
-		// 如果遇到网络波动、EOF或重置，轻量退避后重试 1 次
-		if attempt == 0 && (strings.Contains(err.Error(), "EOF") || strings.Contains(err.Error(), "reset") || strings.Contains(err.Error(), "timeout")) {
-			time.Sleep(300 * time.Millisecond)
+		if attempt < 2 && isTransientNetworkError(ctx, err) {
+			backoff := time.Duration(350*(attempt+1)) * time.Millisecond
+			if sleepErr := sleepWithContext(ctx, backoff); sleepErr != nil {
+				return nil, lastErr
+			}
 			continue
 		}
 		return nil, err

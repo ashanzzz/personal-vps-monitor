@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -212,5 +213,66 @@ func TestBuildCDPPageWSURLAndWindowGuard(t *testing.T) {
 	}
 	if isSteelAutoWindowAllowed(time.Date(2026, 11, 27, 14, 0, 0, 0, time.Local)) {
 		t.Fatal("expected 14:00 to be outside early morning Steel window")
+	}
+}
+
+func TestClientLoginRetriesOnTransientEOF(t *testing.T) {
+	nonceHex := "0102030405060708090a0b0c"
+	saltHex := "a1a2a3a4a5a6a7a8a9aaabac"
+	nonceBuf, _ := hex.DecodeString(nonceHex)
+	saltBuf, _ := hex.DecodeString(saltHex)
+	pw := make([]byte, len(nonceBuf)+4)
+	copy(pw, nonceBuf)
+	binary.BigEndian.PutUint32(pw[len(nonceBuf):], 3)
+	dk := pbkdf2.Key(pw, saltBuf, 50, 32, sha256.New)
+
+	var twofaAttempts atomic.Int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/security/challenge", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"parameters": map[string]interface{}{
+				"algorithm": "PBKDF2/SHA-256",
+				"nonce":     nonceHex,
+				"salt":      saltHex,
+				"cost":      50,
+				"keyLength": 32,
+				"keyPrefix": hex.EncodeToString(dk[:12]),
+			},
+			"signature": "sig-eof-test",
+		})
+	})
+	mux.HandleFunc("/api/user/login", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"requires_2fa": true,
+			"mfa_token":    "mfa-eof-retry",
+		})
+	})
+	mux.HandleFunc("/api/user/login/2fa", func(w http.ResponseWriter, r *http.Request) {
+		if twofaAttempts.Add(1) == 1 {
+			if hj, ok := w.(http.Hijacker); ok {
+				if conn, _, err := hj.Hijack(); err == nil {
+					_ = conn.Close()
+					return
+				}
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"token": "eyJhbG.eofrecovered.sig",
+		})
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	cli := NewClientWithBaseURL(srv.URL+"/api", "", "")
+	tok, need2FA, _, err := cli.Login(context.Background(), "user@example.com", "secret123", "112233")
+	if err != nil || need2FA {
+		t.Fatalf("expected EOF retry success, got need2FA=%v err=%v", need2FA, err)
+	}
+	if tok != "eyJhbG.eofrecovered.sig" {
+		t.Fatalf("unexpected token: %q", tok)
+	}
+	if twofaAttempts.Load() != 2 {
+		t.Fatalf("expected 2 attempts on 2FA endpoint, got %d", twofaAttempts.Load())
 	}
 }

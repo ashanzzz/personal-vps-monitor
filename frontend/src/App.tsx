@@ -320,14 +320,38 @@ export default function App() {
   const [quickLogging, setQuickLogging] = useState<string | null>(null)
   const [vaultSyncing, setVaultSyncing] = useState(false)
 
+  const syncVendorCheckinFromHealth = useCallback((res: VendorHealthSummary | null) => {
+    if (!res?.providers) return
+    setVendorCheckinStatus(prev => {
+      const next = { ...prev }
+      Object.entries(res.providers).forEach(([pid, detail]) => {
+        const st = detail.today_checkin?.status
+        if (st === 'success' || st === 'already_signed') {
+          next[pid] = true
+        }
+      })
+      return next
+    })
+    setVendorCheckinMsg(prev => {
+      const next = { ...prev }
+      Object.entries(res.providers).forEach(([pid, detail]) => {
+        if (detail.today_checkin?.message) {
+          next[pid] = detail.today_checkin.message
+        }
+      })
+      return next
+    })
+  }, [])
+
   const loadVendorHealth = useCallback(async () => {
     try {
       const res = await api.getVendorHealthSummary()
       setVendorHealth(res)
+      syncVendorCheckinFromHealth(res)
     } catch {
       // 容错不阻断
     }
-  }, [])
+  }, [syncVendorCheckinFromHealth])
 
   const handleGlobalVaultSync = async () => {
     try {
@@ -387,7 +411,7 @@ export default function App() {
 
     const isValid = health?.token_valid && !health?.is_expired
     const checkin = health?.today_checkin
-    const checkinSuccess = checkin?.status === 'success'
+    const checkinSuccess = checkin?.status === 'success' || checkin?.status === 'already_signed'
     const checkinRetrying = checkin?.status === 'retrying' || (checkin?.next_retry_at && checkin?.next_retry_at !== '0001-01-01 00:00:00' && checkin?.next_retry_at !== '')
     const checkinNextRetry = checkin?.next_retry_at
     const checkinErr = checkin?.message
@@ -561,7 +585,10 @@ export default function App() {
         api.getVendorHealthSummary().catch(() => null),
       ])
 
-      if (vendorHealthRes) setVendorHealth(vendorHealthRes)
+      if (vendorHealthRes) {
+        setVendorHealth(vendorHealthRes)
+        syncVendorCheckinFromHealth(vendorHealthRes)
+      }
 
       setInstances(instRes.instances || [])
       setMarketItems(marketRes.items || [])
@@ -601,7 +628,7 @@ export default function App() {
     } finally {
       setLoading(false)
     }
-  }, [tokensForm])
+  }, [tokensForm, syncVendorCheckinFromHealth])
 
   // 单厂商二手市场局部刷新
   const handleRefreshMarket = async (vendor: string) => {

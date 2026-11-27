@@ -427,15 +427,16 @@ export const api = {
 
   // 厂商交互式一键登录与免密自动续期
   akileLogin: (payload: { username: string; password: string; ga_code?: string; save_credentials?: boolean }) =>
-    http.post<{ status: string; message: string; need_2fa?: boolean; token?: string; expires_at?: string }>('/api/akile/login', payload).then(r => r.data),
+    http.post<{ status: string; message: string; need_2fa?: boolean; token?: string; expires_at?: string }>('/api/akile/login', payload, { timeout: 45000 }).then(r => r.data),
   akileRefreshToken: () =>
-    http.post<{ status: string; message: string; token: string; expires_at: string }>('/api/akile/refresh-token').then(r => r.data),
+    http.post<{ status: string; message: string; token: string; expires_at: string }>('/api/akile/refresh-token', {}, { timeout: 45000 }).then(r => r.data),
   lazycatLogin: (payload: { username: string; password: string; ga_code?: string; save_credentials?: boolean }) =>
-    http.post<{ status: string; message: string; need_2fa?: boolean; token?: string; expires_at?: string }>('/api/lazycat/login', payload).then(r => r.data),
+    http.post<{ status: string; message: string; need_2fa?: boolean; token?: string; expires_at?: string }>('/api/lazycat/login', payload, { timeout: 45000 }).then(r => r.data),
   acckLogin: (payload: string | { token?: string; username?: string; password?: string; ga_code?: string; totp_secret?: string; save_credentials?: boolean }) =>
     http.post<{ status?: string; message?: string; need_2fa?: boolean; token?: string; expires_at?: string }>(
       '/api/acck/login',
-      typeof payload === 'string' ? { token: payload } : payload
+      typeof payload === 'string' ? { token: payload } : payload,
+      { timeout: 45000 }
     ).then(r => r.data),
 
   // 全网聚合资产与打卡
@@ -449,10 +450,10 @@ export const api = {
       refreshed_at?: string
       provider_refresh_times?: Record<string, string>
       provider_errors?: Record<string, string>
-    }>('/api/instances', { params: { provider, refresh: refresh ? 'true' : undefined } }).then(r => r.data),
+    }>('/api/instances', { params: { provider, refresh: refresh ? 'true' : undefined }, timeout: refresh ? 45000 : 15000 }).then(r => r.data),
   getProviders: () => http.get<Array<{ id: string; name: string }>>('/api/providers').then(r => r.data),
-  checkinAll: () => http.post<Record<string, CheckinResult>>('/api/checkin').then(r => r.data),
-  checkinProvider: (providerId: string) => http.post<CheckinResult>(`/api/checkin/${providerId}`).then(r => r.data),
+  checkinAll: () => http.post<Record<string, CheckinResult>>('/api/checkin', {}, { timeout: 45000 }).then(r => r.data),
+  checkinProvider: (providerId: string) => http.post<CheckinResult>(`/api/checkin/${providerId}`, {}, { timeout: 45000 }).then(r => r.data),
 
   // 二手与新机集市
   getMarket: (provider?: string) =>
@@ -512,17 +513,17 @@ export const api = {
   // 极速秒级鉴权健康与各服务独立状态
   getVendorHealthSummary: () => http.get<VendorHealthSummary>('/api/vendor/health-summary').then(r => r.data),
   vendorQuickLogin: (provider: string, gaCode?: string) =>
-    http.post<{ status: string; message: string; need_2fa?: boolean; token?: string; expires_at?: string }>(`/api/vendor/quick-login/${provider}`, { ga_code: gaCode }).then(r => r.data),
+    http.post<{ status: string; message: string; need_2fa?: boolean; token?: string; expires_at?: string }>(`/api/vendor/quick-login/${provider}`, { ga_code: gaCode }, { timeout: 45000 }).then(r => r.data),
   vendorSingleSync: (provider: string) =>
-    http.post<{ status: string; provider_id: string; instances: Instance[]; count: number; last_synced_at: string }>(`/api/vendor/sync/${provider}`).then(r => r.data),
+    http.post<{ status: string; provider_id: string; instances: Instance[]; count: number; last_synced_at: string }>(`/api/vendor/sync/${provider}`, {}, { timeout: 45000 }).then(r => r.data),
   saveVendorCredentials: (data: { provider: string; username: string; password: string; auto_refresh: boolean }) =>
     http.post<{ status: string; message: string }>('/api/vendor/credentials/save', data).then(r => r.data),
   vendorVaultSync: () =>
-    http.post<{ status: string; message: string; matched_count: number; items: any[]; credentials: any }>('/api/vendor/vault/sync').then(r => r.data),
+    http.post<{ status: string; message: string; matched_count: number; items: any[]; credentials: any }>('/api/vendor/vault/sync', {}, { timeout: 45000 }).then(r => r.data),
   vendorVaultListCiphers: (data?: { server?: string; username?: string; password?: string }) =>
-    http.post<{ status: string; ciphers: VaultCipherSummary[]; count: number }>('/api/vendor/vault/ciphers', data || {}).then(r => r.data),
+    http.post<{ status: string; ciphers: VaultCipherSummary[]; count: number }>('/api/vendor/vault/ciphers', data || {}, { timeout: 30000 }).then(r => r.data),
   vendorVaultBind: (data: { provider: string; cipher_id: string; server?: string; username?: string; password?: string }) =>
-    http.post<{ status: string; message: string; token: string; expires_at: string; username_masked: string }>('/api/vendor/vault/bind', data).then(r => r.data),
+    http.post<{ status: string; message: string; token: string; expires_at: string; username_masked: string }>('/api/vendor/vault/bind', data, { timeout: 45000 }).then(r => r.data),
   vendorTestAndSave: (data: { provider: string; username: string; password: string; totp_secret?: string; auto_refresh?: boolean }) =>
-    http.post<{ status: string; message: string; token: string; expires_at: string; username_masked: string }>('/api/vendor/test-and-save', data).then(r => r.data),
+    http.post<{ status: string; message: string; token: string; expires_at: string; username_masked: string }>('/api/vendor/test-and-save', data, { timeout: 45000 }).then(r => r.data),
 }

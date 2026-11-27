@@ -317,7 +317,7 @@ func TryAutoRecoverProvider(ctx context.Context, providerID string) bool {
 				acckP.SetToken(creds.ACCK.Password)
 				if err := acckP.VerifyToken(ctx); err == nil {
 					_ = config.SaveTokens("", creds.ACCK.Password, "", "")
-					config.Global.ACCKToken = creds.ACCK.Password
+					config.SetProviderToken("acck", creds.ACCK.Password)
 					audit.Record("security", "acck.auto_relogin", "acck", nil, "SUCCESS", "检测到 ACCK 凭据掉线，已自动从凭据库恢复并校验通过", 0)
 					log.Printf("[AutoRecover] ACCK 凭据自动校验并恢复成功")
 					markRecovered()

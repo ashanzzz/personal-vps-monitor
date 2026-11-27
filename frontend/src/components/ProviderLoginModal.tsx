@@ -58,11 +58,17 @@ export const ProviderLoginModal: React.FC<Props> = ({
 
   // 快捷免密状态
   const [quickLogging, setQuickLogging] = useState(false)
+  const [quickNeed2FA, setQuickNeed2FA] = useState(false)
+  const [quick2FAMessage, setQuick2FAMessage] = useState('')
+  const [quickGaCode, setQuickGaCode] = useState('')
 
   useEffect(() => {
     if (open) {
       setCiphers([])
       setSelectedCipherId('')
+      setQuickNeed2FA(false)
+      setQuick2FAMessage('')
+      setQuickGaCode('')
       manualForm.resetFields()
       tokenForm.resetFields()
 
@@ -203,11 +209,24 @@ export const ProviderLoginModal: React.FC<Props> = ({
   }
 
   // 一键快捷免密自愈重登
-  const handleQuickLogin = async () => {
+  const handleQuickLogin = async (useInlineCode = false) => {
+    const gaCode = useInlineCode ? quickGaCode.trim() : ''
+    if (useInlineCode && !gaCode) {
+      message.warning('请输入 6 位 2FA 动态验证码')
+      return
+    }
     try {
       setQuickLogging(true)
-      const res = await api.vendorQuickLogin(provider)
+      const res = await api.vendorQuickLogin(provider, gaCode || undefined)
+      if (res.need_2fa) {
+        setQuickNeed2FA(true)
+        setQuick2FAMessage(res.message || '该账号已开启 2FA 二次验证，请输入 6 位动态验证码')
+        message.info(res.message || '请输入 6 位 2FA 动态验证码')
+        return
+      }
       message.success(res.message || '免密登录成功，Token 已自动刷新生效')
+      setQuickNeed2FA(false)
+      setQuickGaCode('')
       onSuccess?.()
       onClose()
     } catch (err: any) {
@@ -238,7 +257,7 @@ export const ProviderLoginModal: React.FC<Props> = ({
             type="primary"
             icon={<ThunderboltOutlined />}
             loading={quickLogging}
-            onClick={handleQuickLogin}
+            onClick={() => handleQuickLogin(false)}
             block
             style={{
               background: '#059669',
@@ -249,6 +268,30 @@ export const ProviderLoginModal: React.FC<Props> = ({
           >
             使用已保存凭据一键免密登录 (自动计算2FA)
           </Button>
+          {quickNeed2FA && (
+            <div style={{ marginTop: 10, padding: 12, borderRadius: 8, background: '#f8fafc', border: '1px solid #cbd5e1' }}>
+              <div style={{ fontSize: 12, color: '#334155', marginBottom: 8 }}>
+                {quick2FAMessage}
+              </div>
+              <Space.Compact style={{ width: '100%' }}>
+                <Input
+                  value={quickGaCode}
+                  onChange={(e) => setQuickGaCode(e.target.value)}
+                  placeholder="请输入 6 位 2FA 动态码"
+                  maxLength={8}
+                  style={{ fontFamily: 'monospace' }}
+                  onPressEnter={() => handleQuickLogin(true)}
+                />
+                <Button
+                  type="primary"
+                  loading={quickLogging}
+                  onClick={() => handleQuickLogin(true)}
+                >
+                  提交动态码
+                </Button>
+              </Space.Compact>
+            </div>
+          )}
         </div>
 
         <Tabs

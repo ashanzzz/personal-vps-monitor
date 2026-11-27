@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/sha512"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -340,10 +341,12 @@ func (c *Client) newLoginHTTPClient() *http.Client {
 	jar, _ := cookiejar.New(nil)
 	transport := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
-		TLSHandshakeTimeout:   8 * time.Second,
-		ResponseHeaderTimeout: 12 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
 		IdleConnTimeout:       15 * time.Second,
 		DisableKeepAlives:     true,
+		ForceAttemptHTTP2:     false,
+		TLSNextProto:          make(map[string]func(authority string, c *tls.Conn) http.RoundTripper),
 	}
 	if c.proxyURL != "" {
 		if u, err := url.Parse(c.proxyURL); err == nil {
@@ -355,7 +358,60 @@ func (c *Client) newLoginHTTPClient() *http.Client {
 	return &http.Client{
 		Jar:       jar,
 		Transport: transport,
-		Timeout:   25 * time.Second,
+		Timeout:   30 * time.Second,
+	}
+}
+
+type transientNetworkError struct {
+	err error
+}
+
+func (e *transientNetworkError) Error() string {
+	return e.err.Error()
+}
+
+func (e *transientNetworkError) Unwrap() error {
+	return e.err
+}
+
+func isTransientNetworkError(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return false
+	}
+	var trErr *transientNetworkError
+	if errors.As(err, &trErr) {
+		return true
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "eof") ||
+		strings.Contains(lower, "connection reset") ||
+		strings.Contains(lower, "broken pipe") ||
+		strings.Contains(lower, "timeout") ||
+		strings.Contains(lower, "tls:") ||
+		strings.Contains(lower, "use of closed network connection")
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	if ctx == nil {
+		<-t.C
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
 	}
 }
 
@@ -399,26 +455,38 @@ func (c *Client) LoginWithOptions(ctx context.Context, email, password string, t
 	httpCli := c.newLoginHTTPClient()
 
 	tryAltchaLogin := func() (string, bool, string, error) {
-		// 1. 拉取 Altcha 挑战（携带 CookieJar 自动承接设备 Cookie）
-		chReq, reqErr := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/security/challenge?action=login", nil)
-		if reqErr != nil {
-			return "", false, "", reqErr
-		}
-		setACCKBrowserHeaders(chReq, origin, false)
+		// 1. 拉取 Altcha 挑战（携带 CookieJar 自动承接设备 Cookie；瞬时 EOF/超时最多尝试 3 次）
+		var chStatusCode int
+		var chBytes []byte
+		for attempt := 0; attempt < 3; attempt++ {
+			chReq, reqErr := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/security/challenge?action=login", nil)
+			if reqErr != nil {
+				return "", false, "", reqErr
+			}
+			setACCKBrowserHeaders(chReq, origin, false)
 
-		chResp, doErr := httpCli.Do(chReq)
-		if doErr != nil {
-			return "", false, "", fmt.Errorf("获取 ACCK 人机挑战失败: %w", doErr)
+			chResp, doErr := httpCli.Do(chReq)
+			if doErr != nil {
+				if attempt < 2 && isTransientNetworkError(ctx, doErr) {
+					if sleepErr := sleepWithContext(ctx, time.Duration(350*(attempt+1))*time.Millisecond); sleepErr != nil {
+						return "", false, "", fmt.Errorf("获取 ACCK 人机挑战失败: %w", doErr)
+					}
+					continue
+				}
+				return "", false, "", fmt.Errorf("获取 ACCK 人机挑战失败: %w", &transientNetworkError{err: doErr})
+			}
+			chStatusCode = chResp.StatusCode
+			chBytes, _ = io.ReadAll(chResp.Body)
+			chResp.Body.Close()
+			break
 		}
-		chBytes, _ := io.ReadAll(chResp.Body)
-		chResp.Body.Close()
 
-		if isCloudflareBlockResponse(chResp.StatusCode, chBytes) {
-			return "", false, "", fmt.Errorf("%w: Cloudflare WAF intercepted challenge (HTTP %d)", ErrCaptchaRequired, chResp.StatusCode)
+		if isCloudflareBlockResponse(chStatusCode, chBytes) {
+			return "", false, "", fmt.Errorf("%w: Cloudflare WAF intercepted challenge (HTTP %d)", ErrCaptchaRequired, chStatusCode)
 		}
 
 		turnstileToken := ""
-		if chResp.StatusCode == http.StatusOK {
+		if chStatusCode == http.StatusOK {
 			var ch AltchaChallenge
 			if unmErr := json.Unmarshal(chBytes, &ch); unmErr == nil && (ch.Parameters != nil || ch.Challenge != "") {
 				solved, solveErr := SolveAltchaChallenge(ctx, &ch)
@@ -427,8 +495,8 @@ func (c *Client) LoginWithOptions(ctx context.Context, email, password string, t
 				}
 				turnstileToken = solved
 			}
-		} else if chResp.StatusCode != http.StatusNotFound {
-			return "", false, "", fmt.Errorf("ACCK 人机挑战接口返回异常 (HTTP %d): %s", chResp.StatusCode, strings.TrimSpace(string(chBytes)))
+		} else if chStatusCode != http.StatusNotFound {
+			return "", false, "", fmt.Errorf("ACCK 人机挑战接口返回异常 (HTTP %d): %s", chStatusCode, strings.TrimSpace(string(chBytes)))
 		}
 
 		// 2. 提交账号密码登录
@@ -445,7 +513,7 @@ func (c *Client) LoginWithOptions(ctx context.Context, email, password string, t
 
 		loginResp, doErr := httpCli.Do(loginReq)
 		if doErr != nil {
-			return "", false, "", fmt.Errorf("ACCK 登录请求失败: %w", doErr)
+			return "", false, "", fmt.Errorf("ACCK 登录请求失败: %w", &transientNetworkError{err: doErr})
 		}
 		respBytes, _ := io.ReadAll(loginResp.Body)
 		loginResp.Body.Close()
@@ -485,7 +553,7 @@ func (c *Client) LoginWithOptions(ctx context.Context, email, password string, t
 			return "", false, res.Message, errors.New("ACCK 要求首次绑定 2FA 两步验证，请先在官网完成设置")
 		}
 
-		// 3. 如需 2FA，在拿到 mfa_token 的瞬间实时生成/读取 6 位动态码并提交
+		// 3. 如需 2FA，在拿到 mfa_token 的瞬间实时生成/读取 6 位动态码并提交（瞬时 EOF/超时时同一 mfa_token 原地重试）
 		if res.Requires2FA || res.MFAToken != "" {
 			code := ""
 			if totpProvider != nil {
@@ -503,22 +571,40 @@ func (c *Client) LoginWithOptions(ctx context.Context, email, password string, t
 				return "", true, hint, nil
 			}
 
-			mfaBody, _ := json.Marshal(map[string]string{
-				"mfa_token": res.MFAToken,
-				"code":      code,
-			})
-			mfaReq, reqErr := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/user/login/2fa", bytes.NewReader(mfaBody))
-			if reqErr != nil {
-				return "", false, "", reqErr
-			}
-			setACCKBrowserHeaders(mfaReq, origin, true)
+			var mfaStatusCode int
+			var mfaBytes []byte
+			for attempt := 0; attempt < 3; attempt++ {
+				curCode := code
+				if attempt > 0 && totpProvider != nil {
+					if cStr, cErr := totpProvider(); cErr == nil && strings.TrimSpace(cStr) != "" {
+						curCode = strings.TrimSpace(cStr)
+					}
+				}
+				mfaBody, _ := json.Marshal(map[string]string{
+					"mfa_token": res.MFAToken,
+					"code":      curCode,
+				})
+				mfaReq, reqErr := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/user/login/2fa", bytes.NewReader(mfaBody))
+				if reqErr != nil {
+					return "", false, "", reqErr
+				}
+				setACCKBrowserHeaders(mfaReq, origin, true)
 
-			mfaResp, doErr := httpCli.Do(mfaReq)
-			if doErr != nil {
-				return "", false, "", fmt.Errorf("ACCK 2FA 验证请求失败: %w", doErr)
+				mfaResp, doErr := httpCli.Do(mfaReq)
+				if doErr != nil {
+					if attempt < 2 && isTransientNetworkError(ctx, doErr) {
+						if sleepErr := sleepWithContext(ctx, time.Duration(350*(attempt+1))*time.Millisecond); sleepErr != nil {
+							return "", false, "", fmt.Errorf("ACCK 2FA 验证请求失败: %w", doErr)
+						}
+						continue
+					}
+					return "", false, "", fmt.Errorf("ACCK 2FA 验证请求失败: %w", doErr)
+				}
+				mfaStatusCode = mfaResp.StatusCode
+				mfaBytes, _ = io.ReadAll(mfaResp.Body)
+				mfaResp.Body.Close()
+				break
 			}
-			mfaBytes, _ := io.ReadAll(mfaResp.Body)
-			mfaResp.Body.Close()
 
 			var mfaRes struct {
 				Token   string `json:"token"`
@@ -526,7 +612,7 @@ func (c *Client) LoginWithOptions(ctx context.Context, email, password string, t
 				Error   string `json:"error"`
 			}
 			if jsonErr := json.Unmarshal(mfaBytes, &mfaRes); jsonErr != nil {
-				return "", false, "", fmt.Errorf("解析 ACCK 2FA 响应失败 (HTTP %d): %w", mfaResp.StatusCode, jsonErr)
+				return "", false, "", fmt.Errorf("解析 ACCK 2FA 响应失败 (HTTP %d): %w", mfaStatusCode, jsonErr)
 			}
 			if mfaRes.Error != "" {
 				return "", false, mfaRes.Error, fmt.Errorf("ACCK 2FA 验证失败: %s", mfaRes.Error)
@@ -548,9 +634,21 @@ func (c *Client) LoginWithOptions(ctx context.Context, email, password string, t
 		return tok, false, res.Message, nil
 	}
 
-	tok, need2FA, msg, err := tryAltchaLogin()
-	if err == nil || need2FA || errors.Is(err, ErrInvalidCredentials) {
-		return tok, need2FA, msg, err
+	for round := 0; round < 2; round++ {
+		var curTok string
+		curTok, need2FA, msg, err = tryAltchaLogin()
+		if err == nil || need2FA || errors.Is(err, ErrInvalidCredentials) {
+			return curTok, need2FA, msg, err
+		}
+		if round == 0 && isTransientNetworkError(ctx, err) {
+			log.Printf("[ACCKLogin] 登录遇到瞬时网络波动 (%v)，正在切换连接重建 Altcha 重试...", err)
+			httpCli = c.newLoginHTTPClient()
+			if sleepErr := sleepWithContext(ctx, 400*time.Millisecond); sleepErr != nil {
+				break
+			}
+			continue
+		}
+		break
 	}
 
 	// 若纯 Go 仅因人机挑战/Cloudflare 受阻，且显式配置了 STEEL_CDP_URL，按时间窗口规范可选走 Steel 兜底

@@ -273,7 +273,7 @@ func handleAcckLogin(w http.ResponseWriter, r *http.Request) {
 		}
 
 		_ = config.SaveTokens("", tok, "", "")
-		config.Global.ACCKToken = tok
+		config.SetProviderToken("acck", tok)
 
 		_, expTime, _ := ParseJWTExp(tok)
 		audit.Record("rest_api", "acck.login", "acck", nil, "SUCCESS", "用户手动验证并保存 ACCK Token 成功", 0)
@@ -621,7 +621,7 @@ func handleVendorQuickLogin(w http.ResponseWriter, r *http.Request) {
 			acckProvider.SetToken(targetTok)
 			if err := acckProvider.VerifyToken(r.Context()); err == nil {
 				_ = config.SaveTokens("", targetTok, "", "")
-				config.Global.ACCKToken = targetTok
+				config.SetProviderToken("acck", targetTok)
 				_, expTime, _ := ParseJWTExp(targetTok)
 				audit.Record("rest_api", "acck.quick_login", "acck", nil, "SUCCESS", "用户触发 ACCK Token 快速校验通过", 0)
 				respondJSON(w, http.StatusOK, map[string]interface{}{
@@ -1071,7 +1071,7 @@ func executeProviderLoginTest(ctx context.Context, provider string, p providers.
 				return "", "", fmt.Errorf("ACCK Token 校验失败: %w", err)
 			}
 			_ = config.SaveTokens("", tok, "", "")
-			config.Global.ACCKToken = tok
+			config.SetProviderToken("acck", tok)
 			_, expTime, ok := ParseJWTExp(tok)
 			if ok && !expTime.IsZero() {
 				expStr = expTime.Format("2006-01-02 15:04:05")
@@ -1104,7 +1104,7 @@ func executeProviderLoginTest(ctx context.Context, provider string, p providers.
 		}
 
 		_ = config.SaveTokens("", tok, "", "")
-		config.Global.ACCKToken = tok
+		config.SetProviderToken("acck", tok)
 		acckP.SetToken(tok)
 
 		_, expTime, ok := ParseJWTExp(tok)
