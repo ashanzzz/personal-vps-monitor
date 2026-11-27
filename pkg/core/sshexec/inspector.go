@@ -17,21 +17,22 @@ import (
 
 // ProxyInfo 结构化代理节点信息
 type ProxyInfo struct {
-	Port      int    `json:"port"`
-	Protocol  string `json:"protocol"`
-	Security  string `json:"security,omitempty"` // reality, tls, none
-	Network   string `json:"network,omitempty"`  // tcp, ws, grpc
-	SNI       string `json:"sni,omitempty"`
-	UUID      string `json:"uuid,omitempty"`
-	PublicKey string `json:"public_key,omitempty"`
-	ShortID   string `json:"short_id,omitempty"`
-	Path      string `json:"path,omitempty"`
-	Flow      string `json:"flow,omitempty"`
-	Remark    string `json:"remark,omitempty"`
-	Status    string `json:"status"` // "listening" or "stopped"
-	Method    string `json:"method,omitempty"`
-	Password  string `json:"password,omitempty"`
-	Link      string `json:"link,omitempty"`
+	Port       int    `json:"port"`
+	PublicPort int    `json:"public_port,omitempty"` // NAT 容器映射的公网端口
+	Protocol   string `json:"protocol"`
+	Security   string `json:"security,omitempty"` // reality, tls, none
+	Network    string `json:"network,omitempty"`  // tcp, ws, grpc
+	SNI        string `json:"sni,omitempty"`
+	UUID       string `json:"uuid,omitempty"`
+	PublicKey  string `json:"public_key,omitempty"`
+	ShortID    string `json:"short_id,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Flow       string `json:"flow,omitempty"`
+	Remark     string `json:"remark,omitempty"`
+	Status     string `json:"status"` // "listening" or "stopped"
+	Method     string `json:"method,omitempty"`
+	Password   string `json:"password,omitempty"`
+	Link       string `json:"link,omitempty"`
 }
 
 // InstanceProxiesResult 主机代理服务探查综合结果
@@ -99,7 +100,24 @@ done
 		return nil, fmt.Errorf("inspect command execution failed: %w", err)
 	}
 
-	result := parseInspectOutput(inst, res.Stdout)
+	var privToPub map[int]int
+	if p, ok := providers.Get(inst.ProviderID); ok {
+		if pm, isPM := p.(providers.PortMapper); isPM {
+			if mappings, mapErr := pm.ListPortMappings(ctx, inst.ID); mapErr == nil && len(mappings) > 0 {
+				privToPub = make(map[int]int, len(mappings))
+				for _, m := range mappings {
+					if m.PrivatePort > 0 && m.PublicPort > 0 {
+						// 优先记录 TCP 映射（若尚无记录则兜底写入）
+						if _, exists := privToPub[m.PrivatePort]; !exists || strings.EqualFold(m.Protocol, "tcp") {
+							privToPub[m.PrivatePort] = m.PublicPort
+						}
+					}
+				}
+			}
+		}
+	}
+
+	result := parseInspectOutputWithNAT(inst, res.Stdout, privToPub)
 	return result, nil
 }
 
@@ -136,6 +154,10 @@ func InspectProxiesWithAudit(ctx context.Context, source, idOrIP string) (*Insta
 }
 
 func parseInspectOutput(inst *providers.Instance, output string) *InstanceProxiesResult {
+	return parseInspectOutputWithNAT(inst, output, nil)
+}
+
+func parseInspectOutputWithNAT(inst *providers.Instance, output string, privToPub map[int]int) *InstanceProxiesResult {
 	sections := splitSections(output)
 
 	ssOutput := sections["SS_TULPN"]
@@ -204,9 +226,24 @@ func parseInspectOutput(inst *providers.Instance, output string) *InstanceProxie
 		}
 	}
 
-	// 5. 自动为每一个已解析代理生成标准分享链接
+	// 5. 自动为每一个已解析代理生成标准分享链接（NAT 容器自动转换为公网映射端口）
+	isNAT := inst.ProviderID == "lazycat"
 	for i := range result.Proxies {
-		result.Proxies[i].Link = GenerateProxyLink(&result.Proxies[i], inst.IP, inst.Name)
+		linkPort := result.Proxies[i].Port
+		if len(privToPub) > 0 {
+			if pubPort, ok := privToPub[result.Proxies[i].Port]; ok && pubPort > 0 {
+				result.Proxies[i].PublicPort = pubPort
+				linkPort = pubPort
+			} else if isNAT {
+				// NAT 容器内未映射公网端口的服务不生成不可达的私有端口分享链接
+				continue
+			}
+		} else if isNAT {
+			continue
+		}
+		tmp := result.Proxies[i]
+		tmp.Port = linkPort
+		result.Proxies[i].Link = GenerateProxyLink(&tmp, inst.IP, inst.Name)
 	}
 
 	return result

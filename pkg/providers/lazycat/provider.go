@@ -46,90 +46,7 @@ func (p *LazyCatProvider) ListInstances(ctx context.Context) ([]providers.Instan
 	if err == nil && len(rawList) > 0 {
 		out := make([]providers.Instance, 0, len(rawList))
 		for _, item := range rawList {
-			ip := item.HostPublicIP
-			if ip == "" {
-				ip = item.NatPublicIP
-			}
-			category := "固定出口"
-			if isResidential(item.PackageName, item.PlanName, item.Name) {
-				category = "全球家宽"
-			}
-
-			trafficUsed := ""
-			trafficTotal := ""
-			trafficPercent := 0.0
-			trafficResetDate := ""
-
-			if traffic, trErr := p.client.GetInstanceTraffic(ctx, item.ID); trErr == nil && traffic != nil {
-				trafficUsed = traffic.MonthlyUsedFormatted
-				trafficTotal = traffic.MonthlyLimitFormatted
-				trafficPercent = traffic.Percentage
-				trafficResetDate = traffic.PeriodEnd
-			}
-
-			trafficResetPrice := 0.0
-			userBalance := 0.0
-			if quote, qErr := p.client.GetTrafficResetQuote(ctx, item.ID); qErr == nil && quote != nil {
-				trafficResetPrice = quote.Price
-				userBalance = quote.Balance
-			}
-
-			rootPassword := ""
-			if pwd, pErr := p.client.GetInstancePassword(ctx, item.ID); pErr == nil && pwd != "" {
-				rootPassword = pwd
-			}
-
-			renewPrice := 0.0
-			autoRenew := false
-			if billing, bErr := p.client.GetInstanceBilling(ctx, item.ID); bErr == nil && billing != nil {
-				renewPrice = billing.Billing.Price
-				autoRenew = billing.Billing.AutoRenew
-			}
-
-			portCount := 0
-			portLimit := item.PortLimit
-			if detail, dErr := p.client.GetInstanceDetail(ctx, strconv.Itoa(item.ID)); dErr == nil && detail != nil {
-				portCount = len(detail.PortMappings)
-				if portLimit == 0 && detail.PortLimit > 0 {
-					portLimit = detail.PortLimit
-				}
-				if ip == "" {
-					if detail.HostPublicIP != "" {
-						ip = detail.HostPublicIP
-					} else if detail.NatPublicIP != "" {
-						ip = detail.NatPublicIP
-					}
-				}
-			}
-
-			out = append(out, providers.Instance{
-				ProviderID:        p.ID(),
-				ID:                strconv.Itoa(item.ID),
-				Name:              item.Name,
-				IP:                ip,
-				IPv4:              ip,
-				SSHUser:           "root",
-				SSHPassword:       rootPassword,
-				RootPassword:      rootPassword,
-				SSHPort:           22,
-				Status:            item.Status,
-				Region:            "Tokyo",
-				Category:          category,
-				TrafficUsed:       trafficUsed,
-				TrafficTotal:      trafficTotal,
-				TrafficPercent:    trafficPercent,
-				TrafficResetDate:  trafficResetDate,
-				TrafficResetPrice: trafficResetPrice,
-				UserBalance:       userBalance,
-				RenewPrice:        renewPrice,
-				Cycle:             1,
-				CycleName:         "月付",
-				MonthlyPrice:      renewPrice,
-				AutoRenew:         autoRenew,
-				PortCount:         portCount,
-				PortLimit:         portLimit,
-				ExpireDate:        item.ExpiresAt,
-			})
+			out = append(out, p.buildInstanceFromListItem(ctx, item))
 		}
 		return out, nil
 	}
@@ -143,13 +60,115 @@ func (p *LazyCatProvider) ListInstances(ctx context.Context) ([]providers.Instan
 		return nil, err
 	}
 
-	ip := detail.HostPublicIP
+	countryCode := ""
+	if detail.Host != nil {
+		countryCode = detail.Host.CountryCode
+	}
+	fallbackItem := InstanceListItem{
+		ID:           detail.ID,
+		Name:         detail.Name,
+		Status:       detail.Status,
+		PackageName:  detail.PackageName,
+		PlanName:     detail.PlanName,
+		CPUCores:     detail.CPUCores,
+		CPU:          detail.CPU,
+		Memory:       detail.Memory,
+		Disk:         detail.Disk,
+		Region:       detail.Region,
+		Host:         detail.Host,
+		PortLimit:    detail.PortLimit,
+		HostPublicIP: detail.HostPublicIP,
+		NatPublicIP:  detail.NatPublicIP,
+		ExpiresAt:    detail.ExpiresAt,
+	}
+	_ = countryCode
+	return []providers.Instance{p.enrichInstance(ctx, fallbackItem, detail)}, nil
+}
+
+func (p *LazyCatProvider) buildInstanceFromListItem(ctx context.Context, item InstanceListItem) providers.Instance {
+	detail, _ := p.client.GetInstanceDetail(ctx, strconv.Itoa(item.ID))
+	return p.enrichInstance(ctx, item, detail)
+}
+
+func (p *LazyCatProvider) enrichInstance(ctx context.Context, item InstanceListItem, detail *InstanceDetailResponse) providers.Instance {
+	ip := item.HostPublicIP
 	if ip == "" {
-		ip = detail.NatPublicIP
+		ip = item.NatPublicIP
 	}
 
+	pkgName := item.PackageName
+	planName := item.PlanName
+	rawRegion := item.Region
+	hostInfo := item.Host
+	portLimit := item.PortLimit
+	portCount := 0
+	sshPort := 0
+
+	cores := item.CPUCores
+	cpuRaw := item.CPU
+	memMB := item.Memory
+
+	if detail != nil {
+		if pkgName == "" {
+			pkgName = detail.PackageName
+		}
+		if planName == "" {
+			planName = detail.PlanName
+		}
+		if rawRegion == "" {
+			rawRegion = detail.Region
+		}
+		if hostInfo == nil {
+			hostInfo = detail.Host
+		}
+		if ip == "" {
+			if detail.HostPublicIP != "" {
+				ip = detail.HostPublicIP
+			} else if detail.NatPublicIP != "" {
+				ip = detail.NatPublicIP
+			}
+		}
+		portCount = len(detail.PortMappings)
+		if portLimit == 0 && detail.PortLimit > 0 {
+			portLimit = detail.PortLimit
+		}
+		for _, pm := range detail.PortMappings {
+			if pm.PrivatePort == 22 && pm.PublicPort > 0 && strings.EqualFold(pm.Protocol, "tcp") {
+				sshPort = pm.PublicPort
+				break
+			}
+		}
+		if cores <= 0 {
+			cores = detail.CPUCores
+		}
+		if cpuRaw <= 0 {
+			cpuRaw = detail.CPU
+		}
+		if memMB <= 0 {
+			memMB = detail.Memory
+		}
+	}
+
+	if cores <= 0 && cpuRaw >= 100 {
+		cores = cpuRaw / 100
+	}
+	cpuStr := ""
+	if cores > 0 {
+		cpuStr = fmt.Sprintf("%d核", cores)
+	}
+	memStr := ""
+	if memMB > 0 {
+		memStr = fmt.Sprintf("%d MB", memMB)
+	}
+
+	countryCode := ""
+	if hostInfo != nil {
+		countryCode = hostInfo.CountryCode
+	}
+	region := detectLazyCatRegion(countryCode, pkgName, planName, item.Name, rawRegion)
+
 	category := "固定出口"
-	if isResidential(detail.PackageName, detail.PlanName, detail.Name) {
+	if isResidential(pkgName, planName, item.Name) {
 		category = "全球家宽"
 	}
 
@@ -157,62 +176,98 @@ func (p *LazyCatProvider) ListInstances(ctx context.Context) ([]providers.Instan
 	trafficTotal := ""
 	trafficPercent := 0.0
 	trafficResetDate := ""
-	if traffic, trErr := p.client.GetInstanceTraffic(ctx, detail.ID); trErr == nil && traffic != nil {
-		trafficUsed = traffic.MonthlyUsedFormatted
-		trafficTotal = traffic.MonthlyLimitFormatted
-		trafficPercent = traffic.Percentage
-		trafficResetDate = traffic.PeriodEnd
-	}
-
 	trafficResetPrice := 0.0
 	userBalance := 0.0
-	if quote, qErr := p.client.GetTrafficResetQuote(ctx, detail.ID); qErr == nil && quote != nil {
-		trafficResetPrice = quote.Price
-		userBalance = quote.Balance
-	}
-
 	rootPassword := ""
-	if pwd, pErr := p.client.GetInstancePassword(ctx, detail.ID); pErr == nil && pwd != "" {
-		rootPassword = pwd
-	}
-
 	renewPrice := 0.0
 	autoRenew := false
-	if billing, bErr := p.client.GetInstanceBilling(ctx, detail.ID); bErr == nil && billing != nil {
-		renewPrice = billing.Billing.Price
-		autoRenew = billing.Billing.AutoRenew
-	}
+	billingCycle := 1
 
-	return []providers.Instance{
-		{
-			ProviderID:        p.ID(),
-			ID:                strconv.Itoa(detail.ID),
-			Name:              detail.Name,
-			IP:                ip,
-			IPv4:              ip,
-			SSHUser:           "root",
-			SSHPassword:       rootPassword,
-			RootPassword:      rootPassword,
-			SSHPort:           22,
-			Status:            detail.Status,
-			Region:            "Tokyo",
-			Category:          category,
-			TrafficUsed:       trafficUsed,
-			TrafficTotal:      trafficTotal,
-			TrafficPercent:    trafficPercent,
-			TrafficResetDate:  trafficResetDate,
-			TrafficResetPrice: trafficResetPrice,
-			UserBalance:       userBalance,
-			RenewPrice:        renewPrice,
-			Cycle:             1,
-			CycleName:         "月付",
-			MonthlyPrice:      renewPrice,
-			AutoRenew:         autoRenew,
-			PortLimit:         detail.PortLimit,
-			PortCount:         len(detail.PortMappings),
-			ExpireDate:        detail.ExpiresAt,
-		},
-	}, nil
+	if p.client != nil && p.client.token != "" {
+		if traffic, trErr := p.client.GetInstanceTraffic(ctx, item.ID); trErr == nil && traffic != nil {
+			trafficUsed = traffic.MonthlyUsedFormatted
+			trafficTotal = traffic.MonthlyLimitFormatted
+			trafficPercent = traffic.Percentage
+			trafficResetDate = traffic.PeriodEnd
+		}
+
+		if quote, qErr := p.client.GetTrafficResetQuote(ctx, item.ID); qErr == nil && quote != nil {
+			trafficResetPrice = quote.Price
+			userBalance = quote.Balance
+		}
+
+		if pwd, pErr := p.client.GetInstancePassword(ctx, item.ID); pErr == nil && pwd != "" {
+			rootPassword = pwd
+		}
+
+		if billing, bErr := p.client.GetInstanceBilling(ctx, item.ID); bErr == nil && billing != nil {
+			renewPrice = billing.Billing.Price
+			autoRenew = billing.Billing.AutoRenew
+			if billing.Billing.BillingCycle > 0 {
+				billingCycle = billing.Billing.BillingCycle
+			}
+		}
+	}
+	cycleMonths, cycleName, monthlyPrice := providers.FormatCycle(billingCycle, renewPrice)
+
+	return providers.Instance{
+		ProviderID:        p.ID(),
+		ID:                strconv.Itoa(item.ID),
+		Name:              item.Name,
+		IP:                ip,
+		IPv4:              ip,
+		SSHUser:           "root",
+		SSHPassword:       rootPassword,
+		RootPassword:      rootPassword,
+		SSHPort:           sshPort,
+		Status:            item.Status,
+		Region:            region,
+		Category:          category,
+		CPU:               cpuStr,
+		Memory:            memStr,
+		TrafficUsed:       trafficUsed,
+		TrafficTotal:      trafficTotal,
+		TrafficPercent:    trafficPercent,
+		TrafficResetDate:  trafficResetDate,
+		TrafficResetPrice: trafficResetPrice,
+		UserBalance:       userBalance,
+		RenewPrice:        renewPrice,
+		Cycle:             cycleMonths,
+		CycleName:         cycleName,
+		MonthlyPrice:      monthlyPrice,
+		AutoRenew:         autoRenew,
+		PortCount:         portCount,
+		PortLimit:         portLimit,
+		ExpireDate:        item.ExpiresAt,
+	}
+}
+
+func detectLazyCatRegion(countryCode, pkg, plan, name, rawRegion string) string {
+	combined := strings.ToUpper(strings.TrimSpace(countryCode + " " + pkg + " " + plan + " " + name + " " + rawRegion))
+	switch {
+	case strings.Contains(combined, "HKG") || strings.Contains(combined, "HKT") || strings.Contains(combined, "HK-") || strings.Contains(combined, "-HK") || strings.Contains(combined, "HONG KONG") || strings.Contains(combined, "香港") || strings.EqualFold(strings.TrimSpace(countryCode), "HK"):
+		return "香港"
+	case strings.Contains(combined, "TOKYO") || strings.Contains(combined, "JAPAN") || strings.Contains(combined, "JP-") || strings.Contains(combined, "-JP") || strings.Contains(combined, "日本") || strings.EqualFold(strings.TrimSpace(countryCode), "JP"):
+		return "日本"
+	case strings.Contains(combined, "SINGAPORE") || strings.Contains(combined, "SG-") || strings.Contains(combined, "-SG") || strings.Contains(combined, "新加坡") || strings.Contains(combined, "狮城") || strings.EqualFold(strings.TrimSpace(countryCode), "SG"):
+		return "新加坡"
+	case strings.Contains(combined, "TAIWAN") || strings.Contains(combined, "TW-") || strings.Contains(combined, "-TW") || strings.Contains(combined, "台湾") || strings.Contains(combined, "HINET") || strings.EqualFold(strings.TrimSpace(countryCode), "TW"):
+		return "台湾"
+	case strings.Contains(combined, "KOREA") || strings.Contains(combined, "KR-") || strings.Contains(combined, "-KR") || strings.Contains(combined, "韩国") || strings.EqualFold(strings.TrimSpace(countryCode), "KR"):
+		return "韩国"
+	case strings.Contains(combined, "UNITED STATES") || strings.Contains(combined, "US-") || strings.Contains(combined, "-US") || strings.Contains(combined, "美国") || strings.EqualFold(strings.TrimSpace(countryCode), "US"):
+		return "美国"
+	case strings.Contains(combined, "PHILIPPINES") || strings.Contains(combined, "PH-") || strings.Contains(combined, "-PH") || strings.Contains(combined, "菲律宾") || strings.EqualFold(strings.TrimSpace(countryCode), "PH"):
+		return "菲律宾"
+	case strings.TrimSpace(rawRegion) != "":
+		return strings.TrimSpace(rawRegion)
+	case strings.TrimSpace(countryCode) != "":
+		return strings.ToUpper(strings.TrimSpace(countryCode))
+	case isResidential(pkg, plan, name):
+		return "全球家宽"
+	default:
+		return "NAT节点"
+	}
 }
 
 func isResidential(pkg, plan, name string) bool {
@@ -274,10 +329,28 @@ func (p *LazyCatProvider) DeletePortMapping(ctx context.Context, instanceID stri
 
 // SyncEgress 通过纯 Go 原生 WebSocket 终端触发小鸡家宽出口凭据巡检与 sing-box 热重载（后台 setsid + flock 防并发 + 短轮询抗 WS 抖动）
 func (p *LazyCatProvider) SyncEgress(ctx context.Context) error {
+	return p.SyncEgressForInstance(ctx, "")
+}
+
+// SyncEgressForInstance 针对指定懒猫家宽实例触发出口巡检与 sing-box 热重载
+func (p *LazyCatProvider) SyncEgressForInstance(ctx context.Context, instanceID string) error {
 	if p.client == nil || p.client.token == "" {
 		return fmt.Errorf("lazycat client not initialized")
 	}
-	instID := p.defaultInst
+	instID := strings.TrimSpace(instanceID)
+	if instID == "" {
+		if rawList, err := p.client.GetInstances(ctx); err == nil {
+			for _, item := range rawList {
+				if isResidential(item.PackageName, item.PlanName, item.Name) {
+					instID = strconv.Itoa(item.ID)
+					break
+				}
+			}
+		}
+	}
+	if instID == "" {
+		instID = p.defaultInst
+	}
 	if instID == "" {
 		instID = "11433"
 	}
@@ -646,6 +719,22 @@ func (p *LazyCatProvider) ExecTerminalCommandWithResult(ctx context.Context, ins
 		return nil, fmt.Errorf("lazycat client not initialized")
 	}
 	return p.client.ExecTerminalCommandWithResult(ctx, instanceID, cmd, timeout)
+}
+
+// ExecInstanceCommand 实现 providers.TerminalExecutor 接口，供 sshexec 等核心引擎统一调度懒猫 NAT 容器命令
+func (p *LazyCatProvider) ExecInstanceCommand(ctx context.Context, instanceID, cmd string, timeout time.Duration) (*providers.TerminalExecResult, error) {
+	if p.client == nil {
+		return nil, fmt.Errorf("lazycat client not initialized")
+	}
+	res, err := p.client.ExecTerminalCommandWithResult(ctx, instanceID, cmd, timeout)
+	if err != nil {
+		return nil, err
+	}
+	return &providers.TerminalExecResult{
+		Output:     res.Output,
+		ExitCode:   res.ExitCode,
+		DurationMs: res.DurationMs,
+	}, nil
 }
 
 func (p *LazyCatProvider) FetchFleetTelemetry(ctx context.Context, forceRefresh bool) ([]FleetNode, error) {

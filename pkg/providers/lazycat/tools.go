@@ -128,5 +128,44 @@ func registerTools(s *server.MCPServer, p *LazyCatProvider) error {
 		return mcp.NewToolResultText(msg), nil
 	})
 
+	// 6. lazycat_exec
+	s.AddTool(mcp.NewTool("lazycat_exec",
+		mcp.WithDescription("通过懒猫云官方 WebSocket PTY 通道在指定 NAT 容器内免端口映射执行远程 Shell 命令（支持家宽与香港线路机等所有懒猫实例）"),
+		mcp.WithString("instance_id", mcp.Description("懒猫云实例 ID（例如 10674 或 11433），留空使用默认实例")),
+		mcp.WithString("command", mcp.Required(), mcp.Description("要在容器内执行的 Shell 命令")),
+		mcp.WithNumber("timeout_sec", mcp.Description("执行超时秒数（默认 15，最大 120）")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := request.GetArguments()
+		instID := ""
+		if v, ok := args["instance_id"].(string); ok {
+			instID = v
+		}
+		if instID == "" {
+			instID = p.defaultInst
+		}
+		cmd := ""
+		if v, ok := args["command"].(string); ok {
+			cmd = v
+		}
+		timeout := 15 * time.Second
+		if v, ok := args["timeout_sec"].(float64); ok && v > 0 {
+			if v > 120 {
+				v = 120
+			}
+			timeout = time.Duration(v) * time.Second
+		}
+
+		start := time.Now()
+		res, err := p.ExecTerminalCommandWithResult(ctx, instID, cmd, timeout)
+		dur := time.Since(start).Milliseconds()
+		if err != nil {
+			audit.Record("ai_mcp", "lazycat.terminal_exec", "lazycat", map[string]interface{}{"instance_id": instID, "command": cmd}, "FAILED", err.Error(), dur)
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		audit.Record("ai_mcp", "lazycat.terminal_exec", "lazycat", map[string]interface{}{"instance_id": instID, "command": cmd, "exit_code": res.ExitCode}, "SUCCESS", fmt.Sprintf("exit=%d", res.ExitCode), dur)
+		data, _ := json.MarshalIndent(res, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	})
+
 	return nil
 }

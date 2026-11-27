@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/config"
 	"github.com/mark3labs/mcp-go/server"
@@ -143,6 +144,18 @@ type MarketBuyer interface {
 // EgressSyncer 家宽出口轮询与同步能力特化接口
 type EgressSyncer interface {
 	SyncEgress(ctx context.Context) error
+}
+
+// TerminalExecResult 终端命令执行结果 (供 WebSocket PTY 等非 SSH 通道复用)
+type TerminalExecResult struct {
+	Output     string `json:"output"`
+	ExitCode   int    `json:"exit_code"`
+	DurationMs int64  `json:"duration_ms"`
+}
+
+// TerminalExecutor 实例级控制面终端执行接口 (适用于无公网 22 端口的 NAT 容器)
+type TerminalExecutor interface {
+	ExecInstanceCommand(ctx context.Context, instanceID, cmd string, timeout time.Duration) (*TerminalExecResult, error)
 }
 
 // StoreProduct 统一官方新机商城商品数据结构

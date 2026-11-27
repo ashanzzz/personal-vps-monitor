@@ -364,6 +364,7 @@ func (c *Client) ExecTerminalCommandWithResult(ctx context.Context, instanceID, 
 		}
 	}()
 
+	var motdBuf strings.Builder
 motdLoop:
 	for {
 		select {
@@ -387,6 +388,11 @@ motdLoop:
 				continue
 			}
 			if len(m.data) > 0 {
+				motdBuf.Write(m.data)
+				cleanedMOTD := stripANSI(motdBuf.String())
+				if strings.Contains(cleanedMOTD, "请输入 (Yes/No):") || strings.Contains(cleanedMOTD, "服务条款确认") {
+					return nil, fmt.Errorf("实例 %s 尚未完成首次登录服务条款确认，请先在 WebShell 中输入 Yes 确认后再执行自动化指令", instanceID)
+				}
 				resetSettle(350 * time.Millisecond)
 			}
 		}

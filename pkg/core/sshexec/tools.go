@@ -16,7 +16,7 @@ func RegisterTools(s *server.MCPServer) {
 	// 模块 1: vps_ssh_exec
 	// ==========================================
 	s.AddTool(mcp.NewTool("vps_ssh_exec",
-		mcp.WithDescription("在指定的普通独立 VPS (如 Akile / ACCK / 自建主机) 上免交互远程执行诊断与管理命令，自动记录平台审计。"),
+		mcp.WithDescription("在指定的 VPS 或懒猫云 NAT 容器（自动优先走 WebSocket PTY，无须占用 22 端口）上免交互远程执行诊断与管理命令，自动记录平台审计。"),
 		mcp.WithString("instance_id", mcp.Description("实例 ID (例如 13483，或与 ip 二选一)")),
 		mcp.WithString("ip", mcp.Description("目标主机 IP 地址 (与 instance_id 二选一)")),
 		mcp.WithString("command", mcp.Required(), mcp.Description("需要远程执行的 Shell 命令 (例如: 'ss -tulpn | grep 3x-ui')")),
@@ -59,7 +59,7 @@ func RegisterTools(s *server.MCPServer) {
 	// 模块 2: vps_inspect_proxies
 	// ==========================================
 	s.AddTool(mcp.NewTool("vps_inspect_proxies",
-		mcp.WithDescription("结构化探查普通主机实际运行的入站代理列表（自动识别 3x-ui SQLite / sing-box / xray 协议、UUID、Reality 公钥、SNI 与监听状态）"),
+		mcp.WithDescription("结构化探查主机实际运行的入站代理列表（自动识别 3x-ui / sing-box / xray 协议与监听状态，懒猫 NAT 容器自动将私有端口转换为映射公网端口）"),
 		mcp.WithString("instance_id", mcp.Description("实例 ID (例如 13483，或与 ip 二选一)")),
 		mcp.WithString("ip", mcp.Description("目标主机 IP 地址 (与 instance_id 二选一)")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

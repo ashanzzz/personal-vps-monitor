@@ -70,7 +70,7 @@ export const LazyCatControlCenterModal: React.FC<Props> = ({
   const handleSyncEgress = async () => {
     setSingboxSyncing(true)
     try {
-      const res = await api.syncLazyCatEgress()
+      const res = await api.syncLazyCatEgress(instance.id)
       message.success(res.message || '已成功触发出口凭据自愈与 sing-box 热重载')
       onRefresh?.()
     } catch (err: any) {
@@ -170,7 +170,11 @@ export const LazyCatControlCenterModal: React.FC<Props> = ({
             ) : (
               <Tag color="blue">标准 NAT 容器</Tag>
             )}
-            <Badge status="success" text="运行中 (Online)" style={{ fontSize: 13 }} />
+            <Badge
+              status={instance.status === 'running' ? 'success' : 'default'}
+              text={instance.status === 'running' ? '运行中 (Online)' : (instance.status || '未知状态')}
+              style={{ fontSize: 13 }}
+            />
             <Tag
               color="purple"
               style={{

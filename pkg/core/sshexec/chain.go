@@ -202,17 +202,33 @@ func GetChainProxyNodes(ctx context.Context, relayIDOrIP, format string) (*Chain
 		}
 	}
 
-	// 2. 提取懒猫云家宽出口节点与端口映射
+	// 2. 提取懒猫云家宽出口节点与端口映射（优先匹配 category == "全球家宽" 或 ID 11433，避免误选香港固定出口线路机）
 	var lazycatInst *providers.Instance
 	for _, inst := range cache.Instances {
-		if inst.ProviderID == "lazycat" {
+		if inst.ProviderID != "lazycat" {
+			continue
+		}
+		if inst.Category == "全球家宽" || inst.ID == "11433" {
 			cpy := inst
 			lazycatInst = &cpy
 			break
 		}
+		if lazycatInst == nil {
+			cpy := inst
+			lazycatInst = &cpy
+		}
 	}
 
-	lzClient := lazycat.NewClient("", "")
+	var lzClient *lazycat.Client
+	p, ok := providers.Get("lazycat")
+	if ok {
+		if lzProv, isLZ := p.(*lazycat.LazyCatProvider); isLZ && lzProv.Client() != nil {
+			lzClient = lzProv.Client()
+		}
+	}
+	if lzClient == nil {
+		lzClient = lazycat.NewClient("", "")
+	}
 	lazycatID := "11433"
 	lazycatHostIP := "167.104.167.151"
 	if lazycatInst != nil {
@@ -226,7 +242,6 @@ func GetChainProxyNodes(ctx context.Context, relayIDOrIP, format string) (*Chain
 
 	// 提取当前端口映射
 	var portMappings []providers.PortMapping
-	p, ok := providers.Get("lazycat")
 	if ok {
 		if pm, isPM := p.(providers.PortMapper); isPM {
 			if ports, err := pm.ListPortMappings(ctx, lazycatID); err == nil {

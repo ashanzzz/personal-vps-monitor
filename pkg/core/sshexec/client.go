@@ -32,10 +32,24 @@ type cachedSSHClient struct {
 }
 
 var (
-	poolMu   sync.Mutex
-	sshPool  = make(map[string]*cachedSSHClient)
-	cleanOnce sync.Once
+	poolMu            sync.Mutex
+	sshPool           = make(map[string]*cachedSSHClient)
+	cleanOnce         sync.Once
+	lazyCatExecutorFn = defaultLazyCatExecutor
 )
+
+func defaultLazyCatExecutor(ctx context.Context, instanceID, cmd string, timeout time.Duration) (*providers.TerminalExecResult, bool, error) {
+	p, ok := providers.Get("lazycat")
+	if !ok {
+		return nil, false, nil
+	}
+	te, isTE := p.(providers.TerminalExecutor)
+	if !isTE {
+		return nil, false, nil
+	}
+	res, err := te.ExecInstanceCommand(ctx, instanceID, cmd, timeout)
+	return res, true, err
+}
 
 func initCleaner() {
 	cleanOnce.Do(func() {
@@ -109,7 +123,7 @@ func FindInstance(idOrIP string) (*providers.Instance, error) {
 }
 
 func fillDefaults(inst *providers.Instance) {
-	if inst.SSHPort <= 0 {
+	if inst.SSHPort <= 0 && inst.ProviderID != "lazycat" {
 		inst.SSHPort = 22
 	}
 	if inst.SSHUser == "" {
@@ -212,21 +226,45 @@ func InvalidateClient(ip string, port int) {
 	}
 }
 
-// ExecuteCommand 在指定实例上执行免交互命令
+// ExecuteCommand 在指定实例上执行免交互命令（懒猫 NAT 容器优先走 WebSocket PTY，支持 22 端口映射兜底）
 func ExecuteCommand(ctx context.Context, inst *providers.Instance, command string, timeout time.Duration) (*ExecResult, error) {
 	fillDefaults(inst)
-	if inst.IP == "" {
-		return nil, errors.New("instance IP is empty")
-	}
-	if inst.SSHPassword == "" {
-		return nil, fmt.Errorf("instance %s (%s) has no SSH password/root password configured", inst.ID, inst.IP)
-	}
-
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
 	if timeout > 60*time.Second {
 		timeout = 60 * time.Second
+	}
+
+	// 懒猫云 NAT 容器：优先使用官方 WebSocket PTY 通道（不消耗宝贵的 NAT 端口配额）
+	if inst.ProviderID == "lazycat" {
+		res, available, err := lazyCatExecutorFn(ctx, inst.ID, command, timeout)
+		if available {
+			if err == nil {
+				return &ExecResult{
+					ExitCode:   res.ExitCode,
+					Stdout:     res.Output,
+					Stderr:     "",
+					DurationMs: res.DurationMs,
+				}, nil
+			}
+			// 若未映射公网 22 端口，直接返回 WebSocket PTY 错误，避免误拨 22 端口
+			if inst.SSHPort <= 0 || inst.SSHPassword == "" {
+				return nil, err
+			}
+		} else if inst.SSHPort <= 0 {
+			return nil, fmt.Errorf("lazycat provider unavailable and instance %s has no mapped SSH port", inst.ID)
+		}
+	}
+
+	if inst.IP == "" {
+		return nil, errors.New("instance IP is empty")
+	}
+	if inst.SSHPort <= 0 {
+		return nil, fmt.Errorf("instance %s (%s) has no mapped public SSH port", inst.ID, inst.IP)
+	}
+	if inst.SSHPassword == "" {
+		return nil, fmt.Errorf("instance %s (%s) has no SSH password/root password configured", inst.ID, inst.IP)
 	}
 
 	start := time.Now()

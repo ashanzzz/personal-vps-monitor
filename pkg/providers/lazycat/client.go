@@ -166,16 +166,27 @@ type PortMappingItem struct {
 	Remark      string `json:"remark"`
 }
 
+type InstanceHostInfo struct {
+	Name        string `json:"name"`
+	CountryCode string `json:"country_code"`
+}
+
 type InstanceListItem struct {
-	ID           int    `json:"id"`
-	Name         string `json:"name"`
-	Status       string `json:"status"`
-	PackageName  string `json:"packageName"`
-	PlanName     string `json:"planName"`
-	PortLimit    int    `json:"portLimit"`
-	HostPublicIP string `json:"hostPublicIp"`
-	NatPublicIP  string `json:"natPublicIp"`
-	ExpiresAt    string `json:"expiresAt"`
+	ID           int               `json:"id"`
+	Name         string            `json:"name"`
+	Status       string            `json:"status"`
+	PackageName  string            `json:"packageName"`
+	PlanName     string            `json:"planName"`
+	CPUCores     int               `json:"cpuCores"`
+	CPU          int               `json:"cpu"`
+	Memory       int               `json:"memory"`
+	Disk         int               `json:"disk"`
+	Region       string            `json:"region"`
+	Host         *InstanceHostInfo `json:"host,omitempty"`
+	PortLimit    int               `json:"portLimit"`
+	HostPublicIP string            `json:"hostPublicIp"`
+	NatPublicIP  string            `json:"natPublicIp"`
+	ExpiresAt    string            `json:"expiresAt"`
 }
 
 func (c *Client) GetInstances(ctx context.Context) ([]InstanceListItem, error) {
@@ -204,6 +215,12 @@ type InstanceDetailInner struct {
 	Status         string            `json:"status"`
 	PackageName    string            `json:"packageName"`
 	PlanName       string            `json:"planName"`
+	CPUCores       int               `json:"cpuCores"`
+	CPU            int               `json:"cpu"`
+	Memory         int               `json:"memory"`
+	Disk           int               `json:"disk"`
+	Region         string            `json:"region"`
+	Host           *InstanceHostInfo `json:"host,omitempty"`
 	HostPublicIP   string            `json:"host_public_ip"`
 	HostPublicIPCC string            `json:"hostPublicIp"`
 	NatPublicIP    string            `json:"nat_public_ip"`
@@ -222,6 +239,12 @@ type InstanceDetailResponse struct {
 	Status         string            `json:"status"`
 	PackageName    string            `json:"packageName"`
 	PlanName       string            `json:"planName"`
+	CPUCores       int               `json:"cpuCores"`
+	CPU            int               `json:"cpu"`
+	Memory         int               `json:"memory"`
+	Disk           int               `json:"disk"`
+	Region         string            `json:"region"`
+	Host           *InstanceHostInfo `json:"host,omitempty"`
 	HostPublicIP   string            `json:"host_public_ip"`
 	HostPublicIPCC string            `json:"hostPublicIp"`
 	NatPublicIP    string            `json:"nat_public_ip"`
@@ -305,6 +328,24 @@ func normalizeInstanceDetail(res *InstanceDetailResponse) {
 			} else {
 				res.ExpiresAt = in.ExpiresAtCC
 			}
+		}
+		if res.CPUCores == 0 {
+			res.CPUCores = in.CPUCores
+		}
+		if res.CPU == 0 {
+			res.CPU = in.CPU
+		}
+		if res.Memory == 0 {
+			res.Memory = in.Memory
+		}
+		if res.Disk == 0 {
+			res.Disk = in.Disk
+		}
+		if res.Region == "" {
+			res.Region = in.Region
+		}
+		if res.Host == nil {
+			res.Host = in.Host
 		}
 	}
 }

@@ -8,10 +8,39 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ashanzzz/personal-vps-monitor/pkg/core/config"
+	"github.com/ashanzzz/personal-vps-monitor/pkg/core/store"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers/lazycat"
 	"github.com/go-chi/chi/v5"
 )
+
+func resolveLazyCatInstanceID(requested string, preferResidential bool) string {
+	if trimmed := strings.TrimSpace(requested); trimmed != "" {
+		return trimmed
+	}
+	if cache, err := store.LoadDailyCache(); err == nil && cache != nil {
+		firstLZ := ""
+		for _, inst := range cache.Instances {
+			if inst.ProviderID != "lazycat" {
+				continue
+			}
+			if firstLZ == "" {
+				firstLZ = inst.ID
+			}
+			if preferResidential && (inst.Category == "全球家宽" || inst.ID == "11433") {
+				return inst.ID
+			}
+		}
+		if firstLZ != "" {
+			return firstLZ
+		}
+	}
+	if config.Global != nil && strings.TrimSpace(config.Global.LazyCatInstance) != "" {
+		return strings.TrimSpace(config.Global.LazyCatInstance)
+	}
+	return "11433"
+}
 
 func getLazyCatProvider() (*lazycat.LazyCatProvider, error) {
 	p, ok := providers.Get("lazycat")
@@ -33,10 +62,7 @@ func handleLazyCatPorts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	instID := r.URL.Query().Get("instance_id")
-	if instID == "" {
-		instID = "11433"
-	}
+	instID := resolveLazyCatInstanceID(r.URL.Query().Get("instance_id"), false)
 
 	detail, err := lz.GetInstanceDetail(r.Context(), instID)
 	if err != nil {
@@ -105,9 +131,7 @@ func handleLazyCatAddPort(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "无效的端口映射请求体"})
 		return
 	}
-	if req.InstanceID == "" {
-		req.InstanceID = "11433"
-	}
+	req.InstanceID = resolveLazyCatInstanceID(req.InstanceID, false)
 	if req.PrivatePort <= 0 || req.PrivatePort > 65535 {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "私有端口号必须在 1 ~ 65535 范围内"})
 		return
@@ -146,10 +170,7 @@ func handleLazyCatDeletePort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	instID := r.URL.Query().Get("instance_id")
-	if instID == "" {
-		instID = "11433"
-	}
+	instID := resolveLazyCatInstanceID(r.URL.Query().Get("instance_id"), false)
 
 	if err := lz.DeletePortMapping(r.Context(), instID, portID); err != nil {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "删除端口映射失败: " + err.Error()})
@@ -170,10 +191,7 @@ func handleLazyCatInstanceDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	instID := r.URL.Query().Get("instance_id")
-	if instID == "" {
-		instID = "11433"
-	}
+	instID := resolveLazyCatInstanceID(r.URL.Query().Get("instance_id"), false)
 
 	detail, err := lz.GetInstanceDetail(r.Context(), instID)
 	if err != nil {
@@ -192,10 +210,7 @@ func handleLazyCatTerminalWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	instID := r.URL.Query().Get("instance_id")
-	if instID == "" {
-		instID = "11433"
-	}
+	instID := resolveLazyCatInstanceID(r.URL.Query().Get("instance_id"), false)
 
 	_ = lz.ProxyTerminalWebSocket(w, r, instID)
 }
@@ -217,9 +232,7 @@ func handleLazyCatTerminalExec(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "无效的指令请求体"})
 		return
 	}
-	if req.InstanceID == "" {
-		req.InstanceID = "11433"
-	}
+	req.InstanceID = resolveLazyCatInstanceID(req.InstanceID, false)
 	if req.Command == "" {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "执行指令不可为空"})
 		return
@@ -280,10 +293,7 @@ func handleLazyCatEgressNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	instID := r.URL.Query().Get("instance_id")
-	if instID == "" {
-		instID = "11433"
-	}
+	instID := resolveLazyCatInstanceID(r.URL.Query().Get("instance_id"), true)
 
 	forceRefresh := r.URL.Query().Get("refresh") == "true"
 	nodes, hostIP, err := lz.GetEnrichedEgressNodes(r.Context(), instID, forceRefresh)
@@ -311,10 +321,7 @@ func handleLazyCatEgressSubscriptions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	q := r.URL.Query()
-	instID := strings.TrimSpace(q.Get("instance_id"))
-	if instID == "" {
-		instID = "11433"
-	}
+	instID := resolveLazyCatInstanceID(q.Get("instance_id"), true)
 
 	format := strings.TrimSpace(q.Get("format"))
 	if format == "" {

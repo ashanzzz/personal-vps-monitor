@@ -15,6 +15,7 @@ import (
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/store"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/mcp"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
+	"github.com/ashanzzz/personal-vps-monitor/pkg/providers/lazycat"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -595,21 +596,36 @@ func handleLazyCatSync(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusNotFound, map[string]string{"error": "lazycat provider not found"})
 		return
 	}
-	es, ok := p.(providers.EgressSyncer)
-	if !ok {
+	instID := strings.TrimSpace(r.URL.Query().Get("instance_id"))
+	if instID == "" && r.Body != nil {
+		var body struct {
+			InstanceID string `json:"instance_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+			instID = strings.TrimSpace(body.InstanceID)
+		}
+	}
+
+	start := time.Now()
+	var syncErr error
+	if lz, isLZ := p.(*lazycat.LazyCatProvider); isLZ {
+		syncErr = lz.SyncEgressForInstance(r.Context(), instID)
+	} else if es, isES := p.(providers.EgressSyncer); isES {
+		syncErr = es.SyncEgress(r.Context())
+	} else {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "provider does not support egress syncing"})
 		return
 	}
-	start := time.Now()
-	if err := es.SyncEgress(r.Context()); err != nil {
+
+	if syncErr != nil {
 		dur := time.Since(start).Milliseconds()
-		audit.Record("rest_api", "lazycat.egress_sync", "lazycat", nil, "FAILED", err.Error(), dur)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		audit.Record("rest_api", "lazycat.egress_sync", "lazycat", map[string]interface{}{"instance_id": instID}, "FAILED", syncErr.Error(), dur)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": syncErr.Error()})
 		return
 	}
 	dur := time.Since(start).Milliseconds()
-	audit.Record("rest_api", "lazycat.egress_sync", "lazycat", nil, "SUCCESS", "12家宽出口轮询与sing-box热重载完成", dur)
-	respondJSON(w, http.StatusOK, map[string]string{"status": "success", "message": "12家宽出口轮询与sing-box热重载完成"})
+	audit.Record("rest_api", "lazycat.egress_sync", "lazycat", map[string]interface{}{"instance_id": instID}, "SUCCESS", "家宽出口轮询与sing-box热重载完成", dur)
+	respondJSON(w, http.StatusOK, map[string]string{"status": "success", "message": "家宽出口轮询与sing-box热重载完成"})
 }
 
 func handleLazyCatCheckin(w http.ResponseWriter, r *http.Request) {

@@ -1,9 +1,13 @@
 package sshexec
 
 import (
+	"context"
 	"encoding/base64"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
 )
 
 // 测试 x25519 Reality 密钥生成是否符合 Xray 43 字符 RawURLEncoding 标准
@@ -158,5 +162,83 @@ func TestFindInstance(t *testing.T) {
 		if inst.SSHUser != "root" || inst.SSHPort != 22 {
 			t.Errorf("unexpected ssh defaults: %s@%d", inst.SSHUser, inst.SSHPort)
 		}
+	}
+}
+
+func TestParseInspectOutputWithNAT(t *testing.T) {
+	raw := `=== SS_TULPN ===
+LISTEN 0 128 0.0.0.0:443 0.0.0.0:*
+LISTEN 0 128 0.0.0.0:8443 0.0.0.0:*
+=== SING_BOX_CFG ===
+FILE:/etc/sing-box/config.json
+{
+  "inbounds": [
+    {
+      "type": "vless",
+      "tag": "vless-in",
+      "listen": "::",
+      "listen_port": 443,
+      "users": [{"uuid": "bbe1e489-a372-47f1-8f65-41aa93118bd5", "flow": "xtls-rprx-vision"}],
+      "tls": {"enabled": true, "server_name": "www.apple.com", "reality": {"enabled": true, "public_key": "pub123", "short_id": "sid1"}}
+    },
+    {
+      "type": "vless",
+      "tag": "unmapped-in",
+      "listen": "::",
+      "listen_port": 8443,
+      "users": [{"uuid": "11111111-1111-1111-1111-111111111111"}],
+      "tls": {"enabled": true, "server_name": "www.apple.com", "reality": {"enabled": true, "public_key": "pub456", "short_id": "sid2"}}
+    }
+  ]
+}
+`
+	inst := &providers.Instance{
+		ProviderID: "lazycat",
+		ID:         "10674",
+		Name:       "HKG 0.1折",
+		IP:         "216.236.60.76",
+	}
+	privToPub := map[int]int{443: 30021}
+	res := parseInspectOutputWithNAT(inst, raw, privToPub)
+	if len(res.Proxies) != 2 {
+		t.Fatalf("expected 2 proxies, got %d", len(res.Proxies))
+	}
+	if res.Proxies[0].PublicPort != 30021 {
+		t.Errorf("expected PublicPort=30021, got %d", res.Proxies[0].PublicPort)
+	}
+	if !strings.Contains(res.Proxies[0].Link, "216.236.60.76:30021") {
+		t.Errorf("expected NAT public port in link, got %q", res.Proxies[0].Link)
+	}
+	if res.Proxies[1].PublicPort != 0 || res.Proxies[1].Link != "" {
+		t.Errorf("unmapped NAT inbound must not emit private port link, got port=%d link=%q", res.Proxies[1].PublicPort, res.Proxies[1].Link)
+	}
+}
+
+func TestExecuteCommand_LazyCatUsesTerminalExecutor(t *testing.T) {
+	orig := lazyCatExecutorFn
+	defer func() { lazyCatExecutorFn = orig }()
+
+	var calledID, calledCmd string
+	lazyCatExecutorFn = func(ctx context.Context, instanceID, cmd string, timeout time.Duration) (*providers.TerminalExecResult, bool, error) {
+		calledID = instanceID
+		calledCmd = cmd
+		return &providers.TerminalExecResult{Output: "hkg3-95CL77", ExitCode: 0, DurationMs: 42}, true, nil
+	}
+
+	inst := &providers.Instance{
+		ProviderID: "lazycat",
+		ID:         "10674",
+		IP:         "216.236.60.76",
+		SSHPort:    0, // No port 22 mapped
+	}
+	res, err := ExecuteCommand(context.Background(), inst, "hostname", 5*time.Second)
+	if err != nil {
+		t.Fatalf("expected WebSocket PTY execution to succeed without SSHPort, got error: %v", err)
+	}
+	if calledID != "10674" || calledCmd != "hostname" {
+		t.Errorf("unexpected executor call: id=%q cmd=%q", calledID, calledCmd)
+	}
+	if res.Stdout != "hkg3-95CL77" || res.ExitCode != 0 {
+		t.Errorf("unexpected exec result: %+v", res)
 	}
 }

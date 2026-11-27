@@ -136,7 +136,7 @@ ss -tulpn | grep -E ':%d\b'
 MODIFIED=0
 if [ -f /etc/sing-box/config.json ]; then
   sed -i 's/"listen_port": {OLD_PORT}/"listen_port": {NEW_PORT}/g' /etc/sing-box/config.json
-  systemctl reload sing-box 2>/dev/null || systemctl restart sing-box 2>/dev/null || true
+  systemctl reload sing-box 2>/dev/null || systemctl restart sing-box 2>/dev/null || rc-service sing-box restart 2>/dev/null || true
   MODIFIED=1
 fi
 if [ -f /etc/v2ray-agent/docker/config.json ]; then
@@ -146,12 +146,12 @@ if [ -f /etc/v2ray-agent/docker/config.json ]; then
 fi
 if [ -f /usr/local/etc/xray/config.json ]; then
   sed -i 's/"port": {OLD_PORT}/"port": {NEW_PORT}/g' /usr/local/etc/xray/config.json
-  systemctl reload xray 2>/dev/null || systemctl restart xray 2>/dev/null || true
+  systemctl reload xray 2>/dev/null || systemctl restart xray 2>/dev/null || rc-service xray restart 2>/dev/null || true
   MODIFIED=1
 fi
 if [ -f /etc/xray/config.json ]; then
   sed -i 's/"port": {OLD_PORT}/"port": {NEW_PORT}/g' /etc/xray/config.json
-  systemctl reload xray 2>/dev/null || systemctl restart xray 2>/dev/null || true
+  systemctl reload xray 2>/dev/null || systemctl restart xray 2>/dev/null || rc-service xray restart 2>/dev/null || true
   MODIFIED=1
 fi
 ufw allow {NEW_PORT}/tcp 2>/dev/null || iptables -I INPUT -p tcp --dport {NEW_PORT} -j ACCEPT 2>/dev/null || true

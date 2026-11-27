@@ -994,7 +994,11 @@ export default function App() {
               </Col>
               <Col span={8}>
                 <Text type="secondary">SSH 端口:</Text>
-                <div style={{ fontFamily: 'monospace', fontWeight: 600 }}>{selectedVps.ssh_port || 22}</div>
+                <div style={{ fontFamily: 'monospace', fontWeight: 600 }}>
+                  {selectedVps.provider_id === 'lazycat' && !selectedVps.ssh_port
+                    ? <Tag color="purple">未映射 22 (走 WebShell)</Tag>
+                    : (selectedVps.ssh_port || 22)}
+                </div>
               </Col>
               <Col span={8}>
                 <Text type="secondary">初始 Root 密码:</Text>
@@ -1027,32 +1031,38 @@ export default function App() {
               {(selectedVps.ipv4 || selectedVps.ip) && (
                 <Col span={24}>
                   <Text type="secondary">一键终端连接命令:</Text>
-                  <div style={{
-                    background: '#1e293b',
-                    color: '#38bdf8',
-                    padding: '6px 12px',
-                    borderRadius: 6,
-                    fontFamily: 'monospace',
-                    fontSize: 12,
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginTop: 4
-                  }}>
-                    <span>ssh -p {selectedVps.ssh_port || 22} {selectedVps.ssh_user || 'root'}@{selectedVps.ipv4 || selectedVps.ip}</span>
-                    <Button
-                      size="small"
-                      type="link"
-                      style={{ color: '#38bdf8', padding: 0 }}
-                      onClick={() => {
-                        const cmd = `ssh -p ${selectedVps.ssh_port || 22} ${selectedVps.ssh_user || 'root'}@${selectedVps.ipv4 || selectedVps.ip}`
-                        navigator.clipboard.writeText(cmd)
-                        message.success('SSH 命令已复制')
-                      }}
-                    >
-                      复制命令
-                    </Button>
-                  </div>
+                  {selectedVps.provider_id === 'lazycat' && !selectedVps.ssh_port ? (
+                    <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+                      当前 NAT 容器未映射 22 端口，请点击「管理 / 终端」使用 WebShell PTY 免密进入；如需外部 SSH，请在「NAT 端口映射」中新增私有端口 22。
+                    </div>
+                  ) : (
+                    <div style={{
+                      background: '#1e293b',
+                      color: '#38bdf8',
+                      padding: '6px 12px',
+                      borderRadius: 6,
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginTop: 4
+                    }}>
+                      <span>ssh -p {selectedVps.ssh_port || 22} {selectedVps.ssh_user || 'root'}@{selectedVps.ipv4 || selectedVps.ip}</span>
+                      <Button
+                        size="small"
+                        type="link"
+                        style={{ color: '#38bdf8', padding: 0 }}
+                        onClick={() => {
+                          const cmd = `ssh -p ${selectedVps.ssh_port || 22} ${selectedVps.ssh_user || 'root'}@${selectedVps.ipv4 || selectedVps.ip}`
+                          navigator.clipboard.writeText(cmd)
+                          message.success('SSH 命令已复制')
+                        }}
+                      >
+                        复制命令
+                      </Button>
+                    </div>
+                  )}
                 </Col>
               )}
             </Row>
@@ -3745,7 +3755,7 @@ export default function App() {
                               <Statistic
                                 title={<span style={{ color: '#64748b', fontSize: 13 }}>容器实例与端口</span>}
                                 value={lzInstances.length}
-                                suffix={<span style={{ fontSize: 13, color: '#64748b' }}>容器 / {ports.length} 端口</span>}
+                                suffix={<span style={{ fontSize: 13, color: '#64748b' }}>容器 / {lzInstances.reduce((sum, item) => sum + (item.port_count || 0), 0) || ports.length} 端口</span>}
                                 valueStyle={{ color: '#0f172a', fontWeight: 700, fontSize: 22 }}
                               />
                               <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
@@ -3850,10 +3860,30 @@ export default function App() {
                                   </div>
                                 )
                               },
-                              { title: '区域机房', dataIndex: 'region', key: 'region', render: (reg) => <Tag color="purple">{reg || '国内家宽'}</Tag> },
+                              {
+                                title: '区域机房',
+                                dataIndex: 'region',
+                                key: 'region',
+                                render: (reg, r) => (
+                                  <Space size={4} wrap>
+                                    <Tag color="purple">{reg || 'NAT节点'}</Tag>
+                                    {r.category && (
+                                      <Tag color={r.category === '全球家宽' ? 'magenta' : 'blue'}>{r.category}</Tag>
+                                    )}
+                                  </Space>
+                                )
+                              },
                               { title: '内部映射出口', dataIndex: 'ip', key: 'ip', render: (ip) => <span style={{ fontFamily: 'monospace' }}>{ip || '动态内网IP'}</span> },
-                              { title: '硬件规格', key: 'spec', render: (_, r) => <span>{r.cpu} / {r.memory}</span> },
-                              { title: '端口配额', key: 'ports', render: (_, r) => <span>{r.port_count || 0} / {r.port_limit || 20} 个</span> },
+                              {
+                                title: '硬件规格',
+                                key: 'spec',
+                                render: (_, r) => (
+                                  <span>
+                                    {r.cpu || r.memory ? `${r.cpu || '-'} / ${r.memory || '-'}` : (r.category || 'NAT 容器')}
+                                  </span>
+                                )
+                              },
+                              { title: '端口配额', key: 'ports', render: (_, r) => <span>{r.port_count || 0} / {r.port_limit || 10} 个</span> },
                               {
                                 title: '月度流量',
                                 key: 'traffic',
