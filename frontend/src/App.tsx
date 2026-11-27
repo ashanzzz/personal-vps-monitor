@@ -279,6 +279,10 @@ export default function App() {
   const [unraidStatus, setUnraidStatus] = useState<UnraidStatusReport | null>(null)
   // 已登录时首帧即置为加载中，避免首屏闪现「0 台 / 尚未同步」的假空态
   const [loading, setLoading] = useState<boolean>(!!getToken())
+  // 首次成功加载资产前，表格保持骨架加载态，杜绝「共 0 台」误导
+  const [initialLoaded, setInitialLoaded] = useState(false)
+  // 二手集市为慢通道，加载期间以占位符代替 0，避免统计数字跳变
+  const [marketLoading, setMarketLoading] = useState(true)
   const [checkinLoading, setCheckinLoading] = useState(false)
 
   // 模块细粒度刷新时间戳与每日资产快照
@@ -688,10 +692,13 @@ export default function App() {
         }),
       ]).finally(() => {
         loadingDataRef.current = false
+        setMarketLoading(false)
       })
     } catch {
       message.error('加载系统数据失败')
       setLoading(false)
+      setInitialLoaded(true)
+      setMarketLoading(false)
       loadingDataRef.current = false
     }
   }, [tokensForm, syncVendorCheckinFromHealth])
@@ -1322,7 +1329,7 @@ export default function App() {
           acck: instances.filter(i => i.provider_id === 'acck').length,
         }
         return (
-          <Space direction="vertical" size={20} style={{ width: '100%' }}>
+          <Space direction="vertical" size={20} style={{ width: '100%', overflowX: 'clip' }}>
             {/* 顶栏宏观概览卡片 */}
             <Row gutter={[16, 16]}>
               <Col xs={24} sm={12} md={6}>
@@ -1344,13 +1351,15 @@ export default function App() {
                 <Card bordered={false} className="vps-card" style={{ height: '100%' }}>
                   <Statistic
                     title={<span style={{ color: '#64748b' }}>全网二手流转挂单</span>}
-                    value={marketItems.length}
-                    suffix={<span style={{ fontSize: 13, color: '#94a3b8' }}>台在售</span>}
+                    value={marketLoading ? '—' : marketItems.length}
+                    suffix={<span style={{ fontSize: 13, color: '#94a3b8' }}>{marketLoading ? '同步中' : '台在售'}</span>}
                     prefix={<SwapOutlined style={{ color: '#059669', marginRight: 8 }} />}
                     valueStyle={{ fontWeight: 700, color: '#0f172a' }}
                   />
                   <div style={{ marginTop: 8, fontSize: 12, color: '#64748b' }}>
-                    懒猫云 {marketItems.filter(i => i.provider_id === 'lazycat').length} · Akile {marketItems.filter(i => i.provider_id === 'akile').length} · ACCK {marketItems.filter(i => i.provider_id === 'acck').length}
+                    {marketLoading
+                      ? '正在拉取懒猫云 / Akile / ACCK 三家集市…'
+                      : `懒猫云 ${marketItems.filter(i => i.provider_id === 'lazycat').length} · Akile ${marketItems.filter(i => i.provider_id === 'akile').length} · ACCK ${marketItems.filter(i => i.provider_id === 'acck').length}`}
                   </div>
                 </Card>
               </Col>
@@ -1488,7 +1497,8 @@ export default function App() {
               <Table
                 dataSource={instances}
                 rowKey="id"
-                scroll={{ x: 1320 }}
+                loading={loading || !initialLoaded}
+                locale={{ emptyText: initialLoaded ? undefined : ' ' }}
                 pagination={{
                   pageSize: 10,
                   showTotal: (total) => `共 ${total} 台全网资产 (动态同步)`,
@@ -1507,7 +1517,7 @@ export default function App() {
                     title: '所属厂商',
                     dataIndex: 'provider_id',
                     key: 'provider',
-                    width: 100,
+                    width: 110,
                     render: (pid: string) => {
                       const colors: Record<string, string> = { lazycat: 'purple', akile: 'blue', acck: 'cyan' }
                       return <Tag color={colors[pid] || 'default'} style={{ fontWeight: 600 }}>{pid.toUpperCase()}</Tag>
@@ -1516,7 +1526,6 @@ export default function App() {
                   {
                     title: '实例名称 / ID',
                     key: 'name',
-                    width: 240,
                     render: (_, r) => (
                       <div>
                         <div style={{ fontWeight: 600, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1541,7 +1550,7 @@ export default function App() {
                     title: '机房区域',
                     dataIndex: 'region',
                     key: 'region',
-                    width: 110,
+                    width: 120,
                     render: (reg) => <Tag color="geekblue">{reg || '默认机房'}</Tag>
                   },
                   {
@@ -2296,7 +2305,7 @@ export default function App() {
         )
 
         return (
-          <Space direction="vertical" size={20} style={{ width: '100%' }}>
+          <Space direction="vertical" size={20} style={{ width: '100%', overflowX: 'clip' }}>
             {/* 顶栏宏观监控状态卡片 */}
             <Row gutter={[16, 16]}>
               <Col xs={24} sm={12} md={6}>
@@ -2625,7 +2634,7 @@ export default function App() {
         const akStore = storeProducts.filter(i => i.provider_id === 'akile')
 
         return (
-          <Space direction="vertical" size={20} style={{ width: '100%' }}>
+          <Space direction="vertical" size={20} style={{ width: '100%', overflowX: 'clip' }}>
             {renderProviderHeader('akile', 'Akile Cloud')}
             <Card bordered={false} className="vps-card">
               <Tabs
@@ -3020,7 +3029,6 @@ export default function App() {
                           size="small"
                           dataSource={filteredAkMarket}
                           rowKey="id"
-                          scroll={{ x: 1560 }}
                           pagination={{
                             defaultPageSize: 50,
                             pageSizeOptions: ['20', '50', '100', '200'],
@@ -3233,7 +3241,7 @@ export default function App() {
         const acStore = storeProducts.filter(i => i.provider_id === 'acck')
 
         return (
-          <Space direction="vertical" size={20} style={{ width: '100%' }}>
+          <Space direction="vertical" size={20} style={{ width: '100%', overflowX: 'clip' }}>
             {renderProviderHeader('acck', 'ACCK 专区')}
             <Card bordered={false} className="vps-card">
               <Tabs
@@ -3620,7 +3628,6 @@ export default function App() {
                           size="small"
                           dataSource={filteredAcMarket}
                           rowKey="id"
-                          scroll={{ x: 1560 }}
                           pagination={{
                             defaultPageSize: 50,
                             pageSizeOptions: ['20', '50', '100', '200'],
@@ -3817,7 +3824,7 @@ export default function App() {
         const lzStore = storeProducts.filter(i => i.provider_id === 'lazycat')
 
         return (
-          <Space direction="vertical" size={20} style={{ width: '100%' }}>
+          <Space direction="vertical" size={20} style={{ width: '100%', overflowX: 'clip' }}>
             {renderProviderHeader('lazycat', 'LazyCat 懒猫云')}
             <Card bordered={false} className="vps-card">
               <Tabs
@@ -4236,7 +4243,6 @@ export default function App() {
                           size="small"
                           dataSource={filteredLzMarket}
                           rowKey="id"
-                          scroll={{ x: 1560 }}
                           pagination={{
                             defaultPageSize: 50,
                             pageSizeOptions: ['20', '50', '100', '200'],
@@ -4483,7 +4489,7 @@ export default function App() {
 
       case 'settings': {
         return (
-          <Space direction="vertical" size={20} style={{ width: '100%' }}>
+          <Space direction="vertical" size={20} style={{ width: '100%', overflowX: 'clip' }}>
             {unraidStatus && (
               <Card
                 title={
