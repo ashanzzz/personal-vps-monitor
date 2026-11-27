@@ -290,6 +290,18 @@ var (
 	marketCacheTTL = 45 * time.Second
 )
 
+// 官方商城聚合短期结果缓存：与集市共用 TTL 语义，
+// 避免每次首屏都串行打三家上游（实测最坏 24s）。
+type storeCacheEntry struct {
+	products    []providers.StoreProduct
+	refreshedAt time.Time
+}
+
+var (
+	storeCacheMu sync.Mutex
+	storeCache   = make(map[string]*storeCacheEntry)
+)
+
 func marketResponsePayload(items []providers.MarketItem, errs map[string]string, refreshedAt time.Time, cached bool) map[string]interface{} {
 	if errs == nil {
 		errs = map[string]string{}
@@ -498,47 +510,98 @@ type StoreProductItem = providers.StoreProduct
 
 func handleUnifiedStore(w http.ResponseWriter, r *http.Request) {
 	provider := r.URL.Query().Get("provider")
-	var products []providers.StoreProduct
+	if provider == "all" {
+		provider = ""
+	}
+	force := r.URL.Query().Get("force") == "true" || r.URL.Query().Get("refresh") == "true"
+	cacheKey := provider
+	if cacheKey == "" {
+		cacheKey = "all"
+	}
 
-	// 动态遍历实现了 StoreLister 的所有服务商 (懒猫云 42 款、Akile 179 款全量真实动态获取)
-	all := providers.GetAll()
-	for _, p := range all {
-		if provider != "" && provider != "all" && !strings.EqualFold(p.ID(), provider) {
+	if !force {
+		storeCacheMu.Lock()
+		if entry := storeCache[cacheKey]; entry != nil && time.Since(entry.refreshedAt) < marketCacheTTL {
+			products, refreshedAt := entry.products, entry.refreshedAt
+			storeCacheMu.Unlock()
+			respondJSON(w, http.StatusOK, storeResponsePayload(products, refreshedAt, true))
+			return
+		}
+		storeCacheMu.Unlock()
+	}
+
+	type storeJob struct {
+		id string
+		sl providers.StoreLister
+	}
+	jobs := make([]storeJob, 0, 4)
+	for _, p := range providers.GetAll() {
+		if provider != "" && !strings.EqualFold(p.ID(), provider) {
 			continue
 		}
 		if sl, ok := p.(providers.StoreLister); ok {
-			pCtx, pCancel := context.WithTimeout(r.Context(), 8*time.Second)
-			items, err := sl.ListStoreProducts(pCtx)
-			pCancel()
-
-			if err != nil && isAuthError(err) {
-				log.Printf("[Store] provider %s encountered auth error: %v, triggering auto-relogin...", p.ID(), err)
-				if store.TryAutoRecoverProvider(r.Context(), p.ID()) {
-					pCtx2, pCancel2 := context.WithTimeout(r.Context(), 8*time.Second)
-					items, err = sl.ListStoreProducts(pCtx2)
-					pCancel2()
-				}
-			}
-
-			if err == nil {
-				products = append(products, items...)
-				store.RecordRefreshTime("store:" + p.ID())
-			} else {
-				log.Printf("[Store] provider %s failed to list store products: %v", p.ID(), err)
-			}
+			jobs = append(jobs, storeJob{id: p.ID(), sl: sl})
 		}
 	}
 
-	if provider == "" || provider == "all" {
+	// 并发抓取：三家商城同时进行，单家慢速不再叠加成整站延迟
+	fetched := make([][]providers.StoreProduct, len(jobs))
+	errs := make([]error, len(jobs))
+	var wg sync.WaitGroup
+	for i, job := range jobs {
+		wg.Add(1)
+		go func(idx int, job storeJob) {
+			defer wg.Done()
+			pCtx, pCancel := context.WithTimeout(r.Context(), 8*time.Second)
+			items, err := job.sl.ListStoreProducts(pCtx)
+			pCancel()
+
+			if err != nil && isAuthError(err) {
+				log.Printf("[Store] provider %s encountered auth error: %v, triggering auto-relogin...", job.id, err)
+				if store.TryAutoRecoverProvider(r.Context(), job.id) {
+					pCtx2, pCancel2 := context.WithTimeout(r.Context(), 8*time.Second)
+					items, err = job.sl.ListStoreProducts(pCtx2)
+					pCancel2()
+				}
+			}
+			fetched[idx] = items
+			errs[idx] = err
+		}(i, job)
+	}
+	wg.Wait()
+
+	products := make([]providers.StoreProduct, 0, 256)
+	for i, job := range jobs {
+		if errs[i] != nil {
+			log.Printf("[Store] provider %s failed to list store products: %v", job.id, errs[i])
+			continue
+		}
+		store.RecordRefreshTime("store:" + job.id)
+		products = append(products, fetched[i]...)
+	}
+	if provider == "" {
 		store.RecordRefreshTime("store:all")
 	}
 
-	respondJSON(w, http.StatusOK, map[string]interface{}{
+	now := time.Now()
+	storeCacheMu.Lock()
+	storeCache[cacheKey] = &storeCacheEntry{products: products, refreshedAt: now}
+	storeCacheMu.Unlock()
+
+	respondJSON(w, http.StatusOK, storeResponsePayload(products, now, false))
+}
+
+func storeResponsePayload(products []providers.StoreProduct, refreshedAt time.Time, cached bool) map[string]interface{} {
+	if products == nil {
+		products = make([]providers.StoreProduct, 0)
+	}
+	return map[string]interface{}{
 		"total":                  len(products),
 		"products":               products,
-		"refreshed_at":           time.Now().Format(time.RFC3339),
+		"refreshed_at":           refreshedAt.Format(time.RFC3339),
 		"provider_refresh_times": store.GetAllRefreshTimes(),
-	})
+		"cached":                 cached,
+	}
 }
 
 func handleGetRefreshTimes(w http.ResponseWriter, r *http.Request) {
