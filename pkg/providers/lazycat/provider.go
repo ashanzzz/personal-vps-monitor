@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/config"
@@ -14,7 +15,7 @@ import (
 )
 
 type LazyCatProvider struct {
-	client     *Client
+	client      *Client
 	defaultInst string
 }
 
@@ -44,10 +45,21 @@ func (p *LazyCatProvider) ListInstances(ctx context.Context) ([]providers.Instan
 
 	rawList, err := p.client.GetInstances(ctx)
 	if err == nil && len(rawList) > 0 {
-		out := make([]providers.Instance, 0, len(rawList))
-		for _, item := range rawList {
-			out = append(out, p.buildInstanceFromListItem(ctx, item))
+		// 每台实例都要再拉详情/流量/续费/密码，串行会让同步时长随实例数线性膨胀；
+		// 这里按 4 路并发聚合，单台实例耗时不再累加。
+		out := make([]providers.Instance, len(rawList))
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 4)
+		for i, item := range rawList {
+			wg.Add(1)
+			go func(idx int, item InstanceListItem) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				out[idx] = p.buildInstanceFromListItem(ctx, item)
+			}(i, item)
 		}
+		wg.Wait()
 		return out, nil
 	}
 
@@ -184,29 +196,43 @@ func (p *LazyCatProvider) enrichInstance(ctx context.Context, item InstanceListI
 	billingCycle := 1
 
 	if p.client != nil && p.client.token != "" {
-		if traffic, trErr := p.client.GetInstanceTraffic(ctx, item.ID); trErr == nil && traffic != nil {
-			trafficUsed = traffic.MonthlyUsedFormatted
-			trafficTotal = traffic.MonthlyLimitFormatted
-			trafficPercent = traffic.Percentage
-			trafficResetDate = traffic.PeriodEnd
-		}
-
-		if quote, qErr := p.client.GetTrafficResetQuote(ctx, item.ID); qErr == nil && quote != nil {
-			trafficResetPrice = quote.Price
-			userBalance = quote.Balance
-		}
-
-		if pwd, pErr := p.client.GetInstancePassword(ctx, item.ID); pErr == nil && pwd != "" {
-			rootPassword = pwd
-		}
-
-		if billing, bErr := p.client.GetInstanceBilling(ctx, item.ID); bErr == nil && billing != nil {
-			renewPrice = billing.Billing.Price
-			autoRenew = billing.Billing.AutoRenew
-			if billing.Billing.BillingCycle > 0 {
-				billingCycle = billing.Billing.BillingCycle
+		// 四个补充接口彼此独立，串行调用会让单台实例耗时累加到 12s+；
+		// 并发后每个 goroutine 只写自己的局部变量，无共享写。
+		var wg sync.WaitGroup
+		wg.Add(4)
+		go func() {
+			defer wg.Done()
+			if traffic, trErr := p.client.GetInstanceTraffic(ctx, item.ID); trErr == nil && traffic != nil {
+				trafficUsed = traffic.MonthlyUsedFormatted
+				trafficTotal = traffic.MonthlyLimitFormatted
+				trafficPercent = traffic.Percentage
+				trafficResetDate = traffic.PeriodEnd
 			}
-		}
+		}()
+		go func() {
+			defer wg.Done()
+			if quote, qErr := p.client.GetTrafficResetQuote(ctx, item.ID); qErr == nil && quote != nil {
+				trafficResetPrice = quote.Price
+				userBalance = quote.Balance
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if pwd, pErr := p.client.GetInstancePassword(ctx, item.ID); pErr == nil && pwd != "" {
+				rootPassword = pwd
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if billing, bErr := p.client.GetInstanceBilling(ctx, item.ID); bErr == nil && billing != nil {
+				renewPrice = billing.Billing.Price
+				autoRenew = billing.Billing.AutoRenew
+				if billing.Billing.BillingCycle > 0 {
+					billingCycle = billing.Billing.BillingCycle
+				}
+			}
+		}()
+		wg.Wait()
 	}
 	cycleMonths, cycleName, monthlyPrice := providers.FormatCycle(billingCycle, renewPrice)
 
