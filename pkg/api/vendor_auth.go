@@ -786,11 +786,14 @@ func handleVendorSingleSync(w http.ResponseWriter, r *http.Request) {
 	_ = store.UpdateProviderInstancesInCache(provider, insts)
 	audit.Record("rest_api", "vendor.single_sync", provider, map[string]interface{}{"count": len(insts)}, "SUCCESS", fmt.Sprintf("单服务商 %s 强制同步成功，获取 %d 台实例", provider, len(insts)), 0)
 
+	// 与统一列表接口保持一致：HTTP 响应绝不回传明文 SSH / Root 密码
+	safeInsts := redactInstanceSecrets(insts)
+
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"status":         "success",
 		"provider_id":    provider,
-		"instances":      insts,
-		"count":          len(insts),
+		"instances":      safeInsts,
+		"count":          len(safeInsts),
 		"last_synced_at": nowStr,
 	})
 }

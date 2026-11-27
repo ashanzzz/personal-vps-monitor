@@ -182,8 +182,8 @@ func NewRouter() http.Handler {
 			// 懒猫云特化端点 (WebSocket 终端不施加 30s 短请求超时；exec/sync 支持自定义长超时)
 			r.Route("/lazycat", func(r chi.Router) {
 				r.Get("/terminal/ws", handleLazyCatTerminalWS)
-				r.With(middleware.Timeout(120 * time.Second)).Post("/terminal/exec", handleLazyCatTerminalExec)
-				r.With(middleware.Timeout(180 * time.Second)).Post("/sync", handleLazyCatSync)
+				r.With(middleware.Timeout(120*time.Second)).Post("/terminal/exec", handleLazyCatTerminalExec)
+				r.With(middleware.Timeout(180*time.Second)).Post("/sync", handleLazyCatSync)
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.Timeout(30 * time.Second))
 					r.Get("/instances", handleLazyCatInstances)
@@ -241,11 +241,9 @@ func handleUnifiedInstances(w http.ResponseWriter, r *http.Request) {
 		if targetProvider != "" && targetProvider != "all" && !strings.EqualFold(inst.ProviderID, targetProvider) {
 			continue
 		}
-		inst.HasPassword = inst.SSHPassword != "" || inst.RootPassword != ""
-		inst.SSHPassword = ""
-		inst.RootPassword = ""
 		filtered = append(filtered, inst)
 	}
+	filtered = redactInstanceSecrets(filtered)
 
 	providerErrors := make(map[string]string)
 	for id, st := range cache.ProviderStatus {
@@ -686,14 +684,9 @@ func handleLazyCatInstances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 统一脱敏：列表接口绝不回传明文 SSH / Root 密码
-	for i := range insts {
-		insts[i].HasPassword = insts[i].SSHPassword != "" || insts[i].RootPassword != ""
-		insts[i].SSHPassword = ""
-		insts[i].RootPassword = ""
-	}
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"total":     len(insts),
-		"instances": insts,
+		"instances": redactInstanceSecrets(insts),
 	})
 }
 
@@ -835,21 +828,21 @@ func handleGetTokens(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"akile_configured":        akile != "",
-		"akile_token_masked":      maskToken(akile),
-		"akile_expires_at":        akileExpStr,
-		"akile_is_expired":        akileExpired,
-		"akile_seconds_left":      akileSecLeft,
-		"akile_has_credentials":   creds.Akile != nil && creds.Akile.Username != "",
-		"akile_auto_refresh":      creds.Akile != nil && creds.Akile.AutoRefresh,
+		"akile_configured":      akile != "",
+		"akile_token_masked":    maskToken(akile),
+		"akile_expires_at":      akileExpStr,
+		"akile_is_expired":      akileExpired,
+		"akile_seconds_left":    akileSecLeft,
+		"akile_has_credentials": creds.Akile != nil && creds.Akile.Username != "",
+		"akile_auto_refresh":    creds.Akile != nil && creds.Akile.AutoRefresh,
 
-		"acck_configured":         acck != "",
-		"acck_token_masked":       maskToken(acck),
-		"acck_expires_at":         acckExpStr,
-		"acck_is_expired":         acckExpired,
-		"acck_seconds_left":       acckSecLeft,
-		"acck_has_credentials":    creds.ACCK != nil && creds.ACCK.Username != "",
-		"acck_auto_refresh":       creds.ACCK != nil && creds.ACCK.AutoRefresh,
+		"acck_configured":      acck != "",
+		"acck_token_masked":    maskToken(acck),
+		"acck_expires_at":      acckExpStr,
+		"acck_is_expired":      acckExpired,
+		"acck_seconds_left":    acckSecLeft,
+		"acck_has_credentials": creds.ACCK != nil && creds.ACCK.Username != "",
+		"acck_auto_refresh":    creds.ACCK != nil && creds.ACCK.AutoRefresh,
 
 		"lazycat_configured":      lazycat != "",
 		"lazycat_token_masked":    maskToken(lazycat),
