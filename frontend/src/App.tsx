@@ -668,6 +668,7 @@ export default function App() {
         ...(instRes.provider_refresh_times || {}),
       }))
       setLoading(false)
+      setInitialLoaded(true)
 
       // 慢通道异步加载二手集市与官方商城 (绝不阻塞首屏资产与健康渲染)
       void Promise.allSettled([
