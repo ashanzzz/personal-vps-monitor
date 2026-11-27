@@ -130,11 +130,15 @@ func LoadSavedTokens() *SavedTokens {
 }
 
 func SaveTokens(akile, acck, lazycat, proxy string) error {
-	return SaveTokensWithLazyCatProxy(akile, acck, lazycat, proxy, nil)
+	var proxyPtr *string
+	if proxy != "" {
+		proxyPtr = &proxy
+	}
+	return SaveTokensWithProxies(akile, acck, lazycat, proxyPtr, nil)
 }
 
-// SaveTokensWithLazyCatProxy 持久化保存各厂商 Token 与代理设置；lazycatProxy 为非 nil 时按传入值覆盖（支持传入空字符串清除专用代理）
-func SaveTokensWithLazyCatProxy(akile, acck, lazycat, proxy string, lazycatProxy *string) error {
+// SaveTokensWithProxies 持久化保存各厂商 Token 与代理设置；指针参数为非 nil 时按传入值覆盖（支持传入空字符串清除）
+func SaveTokensWithProxies(akile, acck, lazycat string, proxy, lazycatProxy *string) error {
 	target := getTokensWritePath()
 	_ = os.MkdirAll(filepath.Dir(target), 0755)
 
@@ -151,9 +155,10 @@ func SaveTokensWithLazyCatProxy(akile, acck, lazycat, proxy string, lazycatProxy
 		st.LazyCatToken = lazycat
 		SetProviderToken("lazycat", lazycat)
 	}
-	if proxy != "" {
-		st.ProxyURL = proxy
-		Global.ProxyURL = proxy
+	if proxy != nil {
+		cleanedProxy := strings.TrimSpace(*proxy)
+		st.ProxyURL = cleanedProxy
+		Global.ProxyURL = cleanedProxy
 	}
 	if lazycatProxy != nil {
 		cleaned := strings.TrimSpace(*lazycatProxy)

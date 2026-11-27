@@ -67,6 +67,7 @@ export interface Instance {
   ipv6?: string
   ssh_user?: string
   ssh_password?: string
+  has_password?: boolean
   ssh_port?: number
   status: string
   region: string
@@ -302,6 +303,7 @@ export interface SchedulerStatus {
 export interface MarketStats {
   total_tracked: number
   active_items: number
+  by_provider_active: Record<string, number>
   avg_price: number
   avg_duration_sec: number
   by_location: Record<string, number>
@@ -452,6 +454,12 @@ export const api = {
       provider_errors?: Record<string, string>
     }>('/api/instances', { params: { provider, refresh: refresh ? 'true' : undefined }, timeout: refresh ? 45000 : 15000 }).then(r => r.data),
   getProviders: () => http.get<Array<{ id: string; name: string }>>('/api/providers').then(r => r.data),
+  // 列表接口已统一脱敏，单台实例凭据按需单独取用
+  getInstanceCredential: (id: string, reveal = false) =>
+    http.get<{ provider_id: string; id: string; ssh_user?: string; ssh_port?: number; has_password: boolean; password: string }>(
+      `/api/instances/${encodeURIComponent(id)}/credential`,
+      { params: { reveal: reveal ? 'true' : undefined } }
+    ).then(r => r.data),
   checkinAll: () => http.post<Record<string, CheckinResult>>('/api/checkin', {}, { timeout: 45000 }).then(r => r.data),
   checkinProvider: (providerId: string) => http.post<CheckinResult>(`/api/checkin/${providerId}`, {}, { timeout: 45000 }).then(r => r.data),
 

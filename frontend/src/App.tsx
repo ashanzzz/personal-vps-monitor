@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ConfigProvider, theme, Layout, Menu, Typography, Button, Badge,
   Space, Tag, Table, Card, Row, Col, Statistic, Input, Select,
   Modal, Form, message, Alert, Tabs, Popconfirm, Drawer, Progress,
   Switch, InputNumber, Tooltip, Dropdown, Avatar
 } from 'antd'
+import zhCN from 'antd/locale/zh_CN'
 import {
   DashboardOutlined, CloudServerOutlined, ThunderboltOutlined,
   RocketOutlined, SafetyCertificateOutlined,
@@ -59,6 +60,23 @@ function formatFullTime(isoStr?: string): string {
   }
 }
 
+// 统一格式化实例到期时间 (将 LazyCat ISO UTC 时间转换为本地 YYYY-MM-DD HH:mm:ss)
+function formatExpireDate(dateStr?: string): string {
+  if (!dateStr) return '自动扣费'
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(dateStr)) return dateStr
+  try {
+    const d = new Date(dateStr)
+    if (isNaN(d.getTime())) return dateStr
+    const year = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    const time = d.toLocaleTimeString('zh-CN', { hour12: false })
+    return `${year}-${month}-${day} ${time}`
+  } catch {
+    return dateStr
+  }
+}
+
 // 格式化到期剩余时间提示
 function formatExpiry(expiresAt?: string, isExpired?: boolean, secondsLeft?: number): string {
   if (!expiresAt) return ''
@@ -109,12 +127,12 @@ function renderRenewalDisplay(item: {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'nowrap' }}>
         <Tag color={cycleTagColor} style={{ fontSize: 10, padding: '0 4px', margin: 0, fontWeight: 600 }}>
           {cycleName}
         </Tag>
-        <span style={{ color: '#2563eb', fontWeight: 600, fontSize: 12, fontFamily: 'monospace' }}>
-          ¥{price.toFixed(2)}/{cycleName}
+        <span style={{ color: '#2563eb', fontWeight: 600, fontSize: 12, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+          ¥{price.toFixed(2)}
         </span>
       </div>
       {isMultiMonth && (
@@ -259,7 +277,8 @@ export default function App() {
   const [storeProducts, setStoreProducts] = useState<StoreProductItem[]>([])
   const [auditLogs, setAuditLogs] = useState<AuditEntry[]>([])
   const [unraidStatus, setUnraidStatus] = useState<UnraidStatusReport | null>(null)
-  const [loading, setLoading] = useState(false)
+  // 已登录时首帧即置为加载中，避免首屏闪现「0 台 / 尚未同步」的假空态
+  const [loading, setLoading] = useState<boolean>(!!getToken())
   const [checkinLoading, setCheckinLoading] = useState(false)
 
   // 模块细粒度刷新时间戳与每日资产快照
@@ -278,6 +297,39 @@ export default function App() {
   // VPS 详情 Drawer
   const [detailDrawerOpen, setDetailDrawerOpen] = useState(false)
   const [selectedVps, setSelectedVps] = useState<Instance | null>(null)
+
+  // 单台实例 SSH / Root 凭据按需取用（列表接口已统一脱敏，绝不下发明文）
+  const [credentialValue, setCredentialValue] = useState<string>('')
+  const [credentialVisible, setCredentialVisible] = useState(false)
+  const [credentialLoading, setCredentialLoading] = useState(false)
+
+  const fetchCredential = useCallback(async (id: string) => {
+    setCredentialLoading(true)
+    try {
+      const res = await api.getInstanceCredential(id, true)
+      setCredentialValue(res.password || '')
+      setCredentialVisible(true)
+      if (!res.has_password) {
+        message.info('该实例暂未持久化 SSH 密码')
+      }
+    } catch (e: any) {
+      message.error('读取实例凭据失败: ' + (e.response?.data?.error || e.message))
+    } finally {
+      setCredentialLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    setCredentialValue('')
+    setCredentialVisible(false)
+  }, [selectedVps?.id])
+
+  useEffect(() => {
+    if (!detailDrawerOpen) {
+      setCredentialValue('')
+      setCredentialVisible(false)
+    }
+  }, [detailDrawerOpen])
 
   // 三家服务商二手集市独立搜索关键字
   const [akMarketSearch, setAkMarketSearch] = useState('')
@@ -437,11 +489,6 @@ export default function App() {
               <Tag color={isValid ? 'green' : 'error'} style={{ margin: 0, padding: '2px 8px' }}>
                 {isValid ? '● 鉴权有效 (秒级就绪)' : '● 鉴权失效 (自动重登自愈)'}
               </Tag>
-              {health?.has_credentials && (
-                <Tag color="cyan" style={{ margin: 0 }}>
-                  凭据库已存 ({health.username_masked || '免密'})
-                </Tag>
-              )}
               {checkinSuccess ? (
                 <Tag color="success" icon={<CheckCircleOutlined />} style={{ margin: 0 }}>
                   今日已打卡 {checkinTime ? `(${formatTime(checkinTime)})` : ''}
@@ -458,38 +505,33 @@ export default function App() {
                 </Tag>
               )}
             </Space>
-            <div style={{ marginTop: 8, fontSize: 13, color: '#475569', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontWeight: 600, color: '#334155' }}>独立同步时间:</span>
-              <Tag color={syncTime ? 'geekblue' : 'default'} style={{ fontFamily: 'monospace', fontSize: 13, padding: '2px 8px' }}>
-                {syncTime ? formatFullTime(syncTime) : '尚未单独同步 (点击右侧立即获取)'}
-              </Tag>
-              <span style={{ color: '#94a3b8', fontSize: 12 }}>
-                (按需实时自官方抓取，不阻塞其它服务)
-              </span>
+            <div style={{ marginTop: 6, fontSize: 12, color: '#94a3b8' }}>
+              独立同步: {syncTime ? formatFullTime(syncTime) : '尚未单独同步 (点击右侧「从官网获取」)'}
             </div>
           </Col>
-          <Col xs={24} md={9} style={{ textAlign: 'right' }}>
-            <Space size={8} wrap>
-              {health?.has_credentials && (
-                <Button
-                  size="small"
-                  type="primary"
-                  ghost
-                  icon={<ThunderboltOutlined />}
-                  loading={isLogging}
-                  onClick={() => handleQuickLogin(providerKey)}
-                >
-                  一键免密登录
-                </Button>
-              )}
+          <Col xs={24} md={9}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <Button
+                size="small"
+                type="primary"
+                ghost
+                icon={<ThunderboltOutlined />}
+                loading={isLogging}
+                disabled={!health?.has_credentials}
+                onClick={() => handleQuickLogin(providerKey)}
+                style={{ width: '100%', justifySelf: 'stretch' }}
+              >
+                一键免密登录
+              </Button>
               <Button
                 size="small"
                 type="primary"
                 icon={<SyncOutlined spin={isSyncing} />}
                 loading={isSyncing}
                 onClick={() => handleSingleSync(providerKey)}
+                style={{ width: '100%' }}
               >
-                从官网获取最新
+                从官网获取
               </Button>
               <Button
                 size="small"
@@ -497,8 +539,9 @@ export default function App() {
                 icon={<SafetyCertificateOutlined />}
                 loading={vaultSyncing}
                 onClick={handleGlobalVaultSync}
+                style={{ width: '100%' }}
               >
-                从 Vaultwarden 提取
+                密码库提取
               </Button>
               <Button
                 size="small"
@@ -507,10 +550,11 @@ export default function App() {
                   setLoginTargetProvider(providerKey)
                   setLoginModalOpen(true)
                 }}
+                style={{ width: '100%' }}
               >
                 凭据管理
               </Button>
-            </Space>
+            </div>
           </Col>
         </Row>
       </Card>
@@ -563,18 +607,19 @@ export default function App() {
     }
   }, [])
 
-  // 全量数据载入 (登录或全网一键刷新时触发)
+  // 全量数据载入 (两阶段非阻塞：秒级渲染主资产与健康态，慢接口后台独立渐进更新)
+  const loadingDataRef = useRef(false)
   const loadData = useCallback(async () => {
+    if (loadingDataRef.current) return
+    loadingDataRef.current = true
     setLoading(true)
     try {
       const [
-        instRes, marketRes, storeRes, auditRes, unraidRes,
+        instRes, auditRes, unraidRes,
         tokensRes, plansRes, schedRes, statsRes, timesRes,
         vendorHealthRes
       ] = await Promise.all([
         api.getInstances().catch(() => ({ total: 0, instances: [], provider_refresh_times: {}, provider_errors: {}, last_synced_at: undefined, next_scheduled_sync: undefined })),
-        api.getMarket().catch(() => ({ total: 0, items: [], provider_refresh_times: {}, provider_errors: {} })),
-        api.getStoreProducts().catch(() => ({ total: 0, products: [], provider_refresh_times: {} })),
         api.getAuditLogs({ limit: 30 }).catch(() => ({ total: 0, entries: [] })),
         api.getUnraidStatus().catch(() => null),
         api.getTokens().catch(() => null),
@@ -591,8 +636,6 @@ export default function App() {
       }
 
       setInstances(instRes.instances || [])
-      setMarketItems(marketRes.items || [])
-      setStoreProducts(storeRes.products || [])
       setAuditLogs(auditRes.entries || [])
       setPlans(plansRes.plans || [])
       if (instRes.last_synced_at) {
@@ -601,11 +644,10 @@ export default function App() {
           next_scheduled_sync: instRes.next_scheduled_sync,
         })
       }
-      if (instRes.provider_errors || marketRes.provider_errors) {
+      if (instRes.provider_errors) {
         setProviderErrors(prev => ({
           ...prev,
           ...(instRes.provider_errors || {}),
-          ...(marketRes.provider_errors || {}),
         }))
       }
       if (unraidRes) setUnraidStatus(unraidRes)
@@ -616,17 +658,41 @@ export default function App() {
       if (schedRes) setSchedulerStatus(schedRes)
       if (statsRes) setMarketStats(statsRes)
 
-      const mergedTimes = {
+      setRefreshTimes(prev => ({
+        ...prev,
         ...timesRes,
         ...(instRes.provider_refresh_times || {}),
-        ...(marketRes.provider_refresh_times || {}),
-        ...(storeRes.provider_refresh_times || {}),
-      }
-      setRefreshTimes(mergedTimes)
+      }))
+      setLoading(false)
+
+      // 慢通道异步加载二手集市与官方商城 (绝不阻塞首屏资产与健康渲染)
+      void Promise.allSettled([
+        api.getMarket().then(marketRes => {
+          if (Array.isArray(marketRes.items)) {
+            setMarketItems(marketRes.items)
+          }
+          if (marketRes.provider_errors) {
+            setProviderErrors(prev => ({ ...prev, ...(marketRes.provider_errors || {}) }))
+          }
+          if (marketRes.provider_refresh_times) {
+            setRefreshTimes(prev => ({ ...prev, ...marketRes.provider_refresh_times }))
+          }
+        }),
+        api.getStoreProducts().then(storeRes => {
+          if (Array.isArray(storeRes.products)) {
+            setStoreProducts(storeRes.products)
+          }
+          if (storeRes.provider_refresh_times) {
+            setRefreshTimes(prev => ({ ...prev, ...storeRes.provider_refresh_times }))
+          }
+        }),
+      ]).finally(() => {
+        loadingDataRef.current = false
+      })
     } catch {
       message.error('加载系统数据失败')
-    } finally {
       setLoading(false)
+      loadingDataRef.current = false
     }
   }, [tokensForm, syncVendorCheckinFromHealth])
 
@@ -726,11 +792,11 @@ export default function App() {
     setSavingTokens(true)
     try {
       const res = await api.saveTokens(values)
-      message.success(res.message || '凭证保存成功并已热加载生效！')
+      message.success(res.message || '凭据保存成功并已热加载生效！')
       setProviderErrors({})
       loadData()
     } catch (e: any) {
-      message.error('保存凭证失败: ' + (e.response?.data?.error || e.message))
+      message.error('保存凭据失败: ' + (e.response?.data?.error || e.message))
     } finally {
       setSavingTokens(false)
     }
@@ -894,7 +960,7 @@ export default function App() {
 
   if (!authed) {
     return (
-      <ConfigProvider theme={{
+      <ConfigProvider locale={zhCN} theme={{
         algorithm: theme.defaultAlgorithm,
         token: {
           colorPrimary: '#2563eb',
@@ -906,7 +972,6 @@ export default function App() {
       }}>
         <LoginForm onLoginSuccess={() => {
           setAuthed(true)
-          loadData()
         }} />
       </ConfigProvider>
     )
@@ -1030,28 +1095,28 @@ export default function App() {
               <Col span={8}>
                 <Text type="secondary">初始 Root 密码:</Text>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
-                  {selectedVps.ssh_password ? (
+                  {selectedVps.provider_id === 'lazycat' && !selectedVps.ssh_port ? (
+                    <Tag color="purple">WebShell 免密直通</Tag>
+                  ) : credentialVisible && credentialValue ? (
                     <>
-                      <Input.Password
-                        size="small"
-                        value={selectedVps.ssh_password}
-                        readOnly
-                        style={{ width: 140, fontFamily: 'monospace' }}
-                      />
+                      <Text code style={{ fontFamily: 'monospace', fontSize: 12 }}>{credentialValue}</Text>
                       <Button
                         size="small"
                         type="text"
                         icon={<CopyOutlined />}
                         onClick={() => {
-                          navigator.clipboard.writeText(selectedVps.ssh_password!)
+                          navigator.clipboard.writeText(credentialValue)
                           message.success('Root 密码已复制')
                         }}
                       />
                     </>
-                  ) : selectedVps.provider_id === 'lazycat' ? (
-                    <Tag color="purple">WebShell 免密直通</Tag>
                   ) : (
-                    <Text type="secondary">未设置或暂未同步</Text>
+                    <>
+                      <Tag style={{ fontFamily: 'monospace', margin: 0 }}>••••••••</Tag>
+                      <Button size="small" type="text" loading={credentialLoading} onClick={() => fetchCredential(selectedVps.id)}>
+                        取用
+                      </Button>
+                    </>
                   )}
                 </div>
               </Col>
@@ -1185,15 +1250,22 @@ export default function App() {
               <Col span={12}>
                 <Text type="secondary">Root 初始/管理密码:</Text>
                 <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Text code copyable={Boolean(selectedVps.root_password || selectedVps.ssh_password)}>
-                    {selectedVps.root_password || selectedVps.ssh_password || '无明文密码'}
-                  </Text>
+                  {credentialVisible && credentialValue ? (
+                    <Text code copyable style={{ fontFamily: 'monospace' }}>{credentialValue}</Text>
+                  ) : (
+                    <Space size={6}>
+                      <Tag style={{ fontFamily: 'monospace', margin: 0 }}>••••••••</Tag>
+                      <Button size="small" type="link" loading={credentialLoading} onClick={() => fetchCredential(selectedVps.id)}>
+                        按需取用
+                      </Button>
+                    </Space>
+                  )}
                 </div>
               </Col>
               <Col span={12}>
                 <Text type="secondary">资产到期时间:</Text>
                 <div style={{ fontWeight: 600, color: '#d97706', marginTop: 4 }}>
-                  {selectedVps.expire_date || '长期有效 / 自动扣费'}
+                  {formatExpireDate(selectedVps.expire_date)}
                 </div>
               </Col>
               <Col span={12}>
@@ -1222,7 +1294,7 @@ export default function App() {
   // 页面标题映射
   const pageTitleMap: Record<string, string> = {
     overview: '全网资产看板',
-    plans: '智能抢购中心 (1分钟轮询)',
+    plans: '智能抢购中心 (1 分钟轮询)',
     akile: 'Akile Cloud 专区',
     acck: 'ACCK 专区',
     lazycat: '懒猫云专区',
@@ -1232,8 +1304,8 @@ export default function App() {
 
   const pageSubtitleMap: Record<string, string> = {
     overview: '全网 VPS · NAT 容器 · 资产全景矩阵',
-    plans: '支持懒猫云/Akile/ACCK一手二手集市；默认模拟筛选安全不扣款，人工核实后开启实盘秒杀',
-    akile: '香港/美西/亚太高性能直连 VPS 资产与集市',
+    plans: '支持懒猫云 / Akile / ACCK 一手与二手集市；默认模拟筛选安全不扣款，人工核实后开启实盘秒杀',
+    akile: '香港 / 美西 / 亚太高性能直连 VPS 资产与集市',
     acck: '三网优化与高带宽二手机器交易流转',
     lazycat: '国内家宽出口 NAT 容器与动态端口映射',
     audit: '过去 30 天自动化与安全审计日志',
@@ -1254,7 +1326,7 @@ export default function App() {
             {/* 顶栏宏观概览卡片 */}
             <Row gutter={[16, 16]}>
               <Col xs={24} sm={12} md={6}>
-                <Card bordered={false} className="vps-card">
+                <Card bordered={false} className="vps-card" style={{ height: '100%' }}>
                   <Statistic
                     title={<span style={{ color: '#64748b' }}>全网纳管总资产</span>}
                     value={instances.length}
@@ -1269,7 +1341,7 @@ export default function App() {
               </Col>
 
               <Col xs={24} sm={12} md={6}>
-                <Card bordered={false} className="vps-card">
+                <Card bordered={false} className="vps-card" style={{ height: '100%' }}>
                   <Statistic
                     title={<span style={{ color: '#64748b' }}>全网二手流转挂单</span>}
                     value={marketItems.length}
@@ -1278,13 +1350,13 @@ export default function App() {
                     valueStyle={{ fontWeight: 700, color: '#0f172a' }}
                   />
                   <div style={{ marginTop: 8, fontSize: 12, color: '#64748b' }}>
-                    ACCK {marketItems.filter(i => i.provider_id === 'acck').length} · Akile {marketItems.filter(i => i.provider_id === 'akile').length}
+                    懒猫云 {marketItems.filter(i => i.provider_id === 'lazycat').length} · Akile {marketItems.filter(i => i.provider_id === 'akile').length} · ACCK {marketItems.filter(i => i.provider_id === 'acck').length}
                   </div>
                 </Card>
               </Col>
 
               <Col xs={24} sm={12} md={6}>
-                <Card bordered={false} className="vps-card">
+                <Card bordered={false} className="vps-card" style={{ height: '100%' }}>
                   <Statistic
                     title={<span style={{ color: '#64748b' }}>活跃购买盯盘计划</span>}
                     value={plans.filter(p => p.is_active).length}
@@ -1300,8 +1372,8 @@ export default function App() {
 
               <Col xs={24} sm={12} md={6}>
                 <Card bordered={false} className="vps-card">
-                  <div style={{ display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#64748b', fontSize: 14 }}>自动化操作中心</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14, justifyContent: 'space-between' }}>
+                    <span style={{ color: '#64748b', fontSize: 14, lineHeight: '22px' }}>自动化操作中心</span>
                     <Button
                       type="primary"
                       icon={<CheckCircleOutlined />}
@@ -1311,12 +1383,15 @@ export default function App() {
                     >
                       一键全网签到
                     </Button>
+                    <div style={{ fontSize: 12, color: '#64748b' }}>
+                      每日 08:00 自动签到 · 覆盖懒猫云 / Akile / ACCK
+                    </div>
                   </div>
                 </Card>
               </Col>
             </Row>
 
-            {instances.length === 0 && (
+            {!loading && instances.length === 0 && (
               <Alert
                 message="尚未同步云厂商 API 资产"
                 description={
@@ -1413,6 +1488,7 @@ export default function App() {
               <Table
                 dataSource={instances}
                 rowKey="id"
+                scroll={{ x: 1320 }}
                 pagination={{
                   pageSize: 10,
                   showTotal: (total) => `共 ${total} 台全网资产 (动态同步)`,
@@ -1431,7 +1507,7 @@ export default function App() {
                     title: '所属厂商',
                     dataIndex: 'provider_id',
                     key: 'provider',
-                    width: 120,
+                    width: 100,
                     render: (pid: string) => {
                       const colors: Record<string, string> = { lazycat: 'purple', akile: 'blue', acck: 'cyan' }
                       return <Tag color={colors[pid] || 'default'} style={{ fontWeight: 600 }}>{pid.toUpperCase()}</Tag>
@@ -1440,6 +1516,7 @@ export default function App() {
                   {
                     title: '实例名称 / ID',
                     key: 'name',
+                    width: 240,
                     render: (_, r) => (
                       <div>
                         <div style={{ fontWeight: 600, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1464,20 +1541,20 @@ export default function App() {
                     title: '机房区域',
                     dataIndex: 'region',
                     key: 'region',
-                    width: 130,
+                    width: 110,
                     render: (reg) => <Tag color="geekblue">{reg || '默认机房'}</Tag>
                   },
                   {
                     title: '网络 IP (v4/v6)',
                     key: 'ip',
-                    width: 190,
+                    width: 200,
                     render: (_, r) => (
                       <div style={{ fontFamily: 'monospace', fontSize: 12 }}>
                         <div><Tag color="blue" style={{ fontSize: 11, padding: '0 4px', marginRight: 4 }}>v4</Tag>{r.ipv4 || r.ip || 'NAT出口'}</div>
                         {r.ipv6 && (
-                          <div style={{ marginTop: 2, color: '#7c3aed' }}>
-                            <Tag color="purple" style={{ fontSize: 11, padding: '0 4px', marginRight: 4 }}>v6</Tag>
-                            <span style={{ fontSize: 11 }}>{r.ipv6.length > 20 ? r.ipv6.substring(0, 18) + '...' : r.ipv6}</span>
+                          <div style={{ marginTop: 2, color: '#7c3aed', display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+                            <Tag color="purple" style={{ fontSize: 11, padding: '0 4px', margin: 0, flexShrink: 0 }}>v6</Tag>
+                            <span style={{ fontSize: 11 }}>{r.ipv6.length > 18 ? r.ipv6.substring(0, 16) + '...' : r.ipv6}</span>
                           </div>
                         )}
                       </div>
@@ -1486,7 +1563,7 @@ export default function App() {
                   {
                     title: '配置规格',
                     key: 'spec',
-                    width: 160,
+                    width: 140,
                     render: (_, r) => (
                       <span style={{ fontSize: 12, color: '#64748b' }}>
                         {r.cpu ? `${r.cpu} / ${r.memory}` : (r.provider_id === 'lazycat' ? '家宽容器' : '标准规格')}
@@ -1496,13 +1573,13 @@ export default function App() {
                   {
                     title: '月度流量 & 重置资费',
                     key: 'traffic',
-                    width: 190,
+                    width: 180,
                     render: (_, r) => {
                       const pct = getTrafficPercent(r)
                       const color = getTrafficColor(pct)
                       return (
                         <div>
-                          <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                          <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', gap: 6, marginBottom: 2, whiteSpace: 'nowrap' }}>
                             <span style={{ fontWeight: 600 }}>{r.traffic_used || '0 GB'}</span>
                             <span style={{ color: '#64748b' }}>{r.traffic_total || '1000 GB'} ({pct}%)</span>
                           </div>
@@ -1518,11 +1595,11 @@ export default function App() {
                   {
                     title: '到期 / 续费 / 余额',
                     key: 'expire',
-                    width: 175,
+                    width: 185,
                     render: (_, r) => (
                       <div>
                         {renderRenewalDisplay(r)}
-                        <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{r.expire_date || '自动扣费'}</div>
+                        <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2, whiteSpace: 'nowrap' }}>{formatExpireDate(r.expire_date)}</div>
                         {r.user_balance !== undefined && r.user_balance > 0 ? (
                           <div style={{ fontSize: 10, color: '#2563eb', marginTop: 1 }}>余额: ¥{r.user_balance.toFixed(2)}</div>
                         ) : null}
@@ -2113,7 +2190,7 @@ export default function App() {
                     {r.max_price && r.max_price > 0 ? <Tag color="gold">售价: ≤ ¥{r.max_price}</Tag> : null}
                     {r.cycle_filter && r.cycle_filter !== 'all' ? (
                       <Tag color="purple">
-                        周期: {r.cycle_filter === 'yearly' ? '📅 年付' : r.cycle_filter === 'monthly' ? '🌙 月付' : '⏱️ 季付/半年付'}
+                        周期: {r.cycle_filter === 'yearly' ? '年付' : r.cycle_filter === 'monthly' ? '月付' : '季付/半年付'}
                       </Tag>
                     ) : null}
                     {r.max_renewal_price && r.max_renewal_price > 0 ? <Tag color="orange">月续费: ≤ ¥{r.max_renewal_price}/月</Tag> : null}
@@ -2273,6 +2350,9 @@ export default function App() {
                     valueStyle={{ fontWeight: 700, color: '#0f172a' }}
                   />
                   <div style={{ marginTop: 8, fontSize: 12, color: '#64748b' }}>
+                    在售 {marketStats?.active_items ?? 0} · 懒猫云 {marketStats?.by_provider_active?.lazycat ?? 0} / Akile {marketStats?.by_provider_active?.akile ?? 0} / ACCK {marketStats?.by_provider_active?.acck ?? 0}
+                  </div>
+                  <div style={{ marginTop: 2, fontSize: 12, color: '#94a3b8' }}>
                     平均历史价格: ¥{marketStats?.avg_price?.toFixed(1) || '0.0'}
                   </div>
                 </Card>
@@ -2725,9 +2805,9 @@ export default function App() {
                                   <div style={{ fontFamily: 'monospace', fontSize: 12 }}>
                                     <div><Tag color="blue" style={{ fontSize: 11, padding: '0 4px', marginRight: 4 }}>v4</Tag>{r.ipv4 || r.ip}</div>
                                     {r.ipv6 && (
-                                      <div style={{ marginTop: 2, color: '#7c3aed' }}>
-                                        <Tag color="purple" style={{ fontSize: 11, padding: '0 4px', marginRight: 4 }}>v6</Tag>
-                                        <span style={{ fontSize: 11 }}>{r.ipv6.length > 20 ? r.ipv6.substring(0, 18) + '...' : r.ipv6}</span>
+                                      <div style={{ marginTop: 2, color: '#7c3aed', display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+                                        <Tag color="purple" style={{ fontSize: 11, padding: '0 4px', margin: 0, flexShrink: 0 }}>v6</Tag>
+                                        <span style={{ fontSize: 11 }}>{r.ipv6.length > 18 ? r.ipv6.substring(0, 16) + '...' : r.ipv6}</span>
                                       </div>
                                     )}
                                   </div>
@@ -2743,7 +2823,7 @@ export default function App() {
                                   const color = getTrafficColor(pct)
                                   return (
                                     <div>
-                                      <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                                      <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', gap: 6, marginBottom: 2, whiteSpace: 'nowrap' }}>
                                         <span style={{ fontWeight: 600 }}>{r.traffic_used || '0 GB'}</span>
                                         <span style={{ color: '#64748b' }}>{r.traffic_total || '1000 GB'} ({pct}%)</span>
                                       </div>
@@ -2867,7 +2947,7 @@ export default function App() {
                               title: '库存状态',
                               dataIndex: 'in_stock',
                               key: 'in_stock',
-                              width: 90,
+                              width: 105,
                               sorter: (a, b) => (a.in_stock === b.in_stock ? 0 : a.in_stock ? -1 : 1),
                               render: (inStock: boolean) => inStock ? <Tag color="green" style={{ margin: 0 }}>有货</Tag> : <Tag color="default" style={{ margin: 0 }}>缺货</Tag>
                             },
@@ -2921,7 +3001,7 @@ export default function App() {
                               placeholder="搜索挂单标题 / 节点 / 备注..."
                               allowClear
                               size="small"
-                              style={{ width: 220 }}
+                              style={{ width: 260 }}
                               value={akMarketSearch}
                               onChange={e => setAkMarketSearch(e.target.value)}
                             />
@@ -2940,6 +3020,7 @@ export default function App() {
                           size="small"
                           dataSource={filteredAkMarket}
                           rowKey="id"
+                          scroll={{ x: 1560 }}
                           pagination={{
                             defaultPageSize: 50,
                             pageSizeOptions: ['20', '50', '100', '200'],
@@ -3033,12 +3114,12 @@ export default function App() {
                               title: '续费周期 / 价格',
                               dataIndex: 'renewal_price',
                               key: 'renewal_price',
-                              width: 145,
+                              width: 180,
                               sorter: (a, b) => (a.monthly_price || a.renewal_price || 0) - (b.monthly_price || b.renewal_price || 0),
                               filters: [
-                                { text: '📅 年付', value: 'yearly' },
-                                { text: '🌙 月付', value: 'monthly' },
-                                { text: '⏱️ 季付/半年付', value: 'other' }
+                                { text: '年付', value: 'yearly' },
+                                { text: '月付', value: 'monthly' },
+                                { text: '季付/半年付', value: 'other' }
                               ],
                               onFilter: (value, r) => {
                                 const c = r.cycle || 1
@@ -3313,9 +3394,9 @@ export default function App() {
                                   <div style={{ fontFamily: 'monospace', fontSize: 12 }}>
                                     <div><Tag color="blue" style={{ fontSize: 11, padding: '0 4px', marginRight: 4 }}>v4</Tag>{r.ipv4 || r.ip}</div>
                                     {r.ipv6 && (
-                                      <div style={{ marginTop: 2, color: '#7c3aed' }}>
-                                        <Tag color="purple" style={{ fontSize: 11, padding: '0 4px', marginRight: 4 }}>v6</Tag>
-                                        <span style={{ fontSize: 11 }}>{r.ipv6.length > 20 ? r.ipv6.substring(0, 18) + '...' : r.ipv6}</span>
+                                      <div style={{ marginTop: 2, color: '#7c3aed', display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+                                        <Tag color="purple" style={{ fontSize: 11, padding: '0 4px', margin: 0, flexShrink: 0 }}>v6</Tag>
+                                        <span style={{ fontSize: 11 }}>{r.ipv6.length > 18 ? r.ipv6.substring(0, 16) + '...' : r.ipv6}</span>
                                       </div>
                                     )}
                                   </div>
@@ -3331,7 +3412,7 @@ export default function App() {
                                   const color = getTrafficColor(pct)
                                   return (
                                     <div>
-                                      <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                                      <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', gap: 6, marginBottom: 2, whiteSpace: 'nowrap' }}>
                                         <span style={{ fontWeight: 600 }}>{r.traffic_used || '0 GB'}</span>
                                         <span style={{ color: '#64748b' }}>{r.traffic_total || '1000 GB'} ({pct}%)</span>
                                       </div>
@@ -3386,10 +3467,20 @@ export default function App() {
                         }
                         bordered={false}
                       >
+                        {acStore.length === 0 ? (
+                          <Alert
+                            type="info"
+                            showIcon
+                            message="ACCK 暂未开放官方新机商城数据"
+                            description="ACCK 平台仅提供二手流转集市，未开放官方新机库存查询接口。请切换到「二手转让集市」查看实时挂单。"
+                            style={{ borderRadius: 8 }}
+                          />
+                        ) : (
                         <Table
                           size="small"
                           dataSource={acStore}
                           rowKey="id"
+                          scroll={{ x: 1080 }}
                           pagination={{
                             defaultPageSize: 50,
                             pageSizeOptions: ['20', '50', '100', '200'],
@@ -3455,7 +3546,7 @@ export default function App() {
                               title: '库存状态',
                               dataIndex: 'in_stock',
                               key: 'in_stock',
-                              width: 90,
+                              width: 105,
                               sorter: (a, b) => (a.in_stock === b.in_stock ? 0 : a.in_stock ? -1 : 1),
                               render: (inStock: boolean) => inStock ? <Tag color="green" style={{ margin: 0 }}>有货</Tag> : <Tag color="default" style={{ margin: 0 }}>缺货</Tag>
                             },
@@ -3488,6 +3579,7 @@ export default function App() {
                             }
                           ]}
                         />
+                        )}
                       </Card>
                     )
                   },
@@ -3509,7 +3601,7 @@ export default function App() {
                               placeholder="搜索挂单标题 / 节点 / 备注..."
                               allowClear
                               size="small"
-                              style={{ width: 220 }}
+                              style={{ width: 260 }}
                               value={acMarketSearch}
                               onChange={e => setAcMarketSearch(e.target.value)}
                             />
@@ -3528,6 +3620,7 @@ export default function App() {
                           size="small"
                           dataSource={filteredAcMarket}
                           rowKey="id"
+                          scroll={{ x: 1560 }}
                           pagination={{
                             defaultPageSize: 50,
                             pageSizeOptions: ['20', '50', '100', '200'],
@@ -3633,12 +3726,12 @@ export default function App() {
                               title: '续费周期 / 价格',
                               dataIndex: 'renewal_price',
                               key: 'renewal_price',
-                              width: 145,
+                              width: 180,
                               sorter: (a, b) => (a.monthly_price || a.renewal_price || 0) - (b.monthly_price || b.renewal_price || 0),
                               filters: [
-                                { text: '📅 年付', value: 'yearly' },
-                                { text: '🌙 月付', value: 'monthly' },
-                                { text: '⏱️ 季付/半年付', value: 'other' }
+                                { text: '年付', value: 'yearly' },
+                                { text: '月付', value: 'monthly' },
+                                { text: '季付/半年付', value: 'other' }
                               ],
                               onFilter: (value, r) => {
                                 const c = r.cycle || 1
@@ -3920,7 +4013,7 @@ export default function App() {
                                   const color = getTrafficColor(pct)
                                   return (
                                     <div>
-                                      <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                                      <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', gap: 6, marginBottom: 2, whiteSpace: 'nowrap' }}>
                                         <span style={{ fontWeight: 600 }}>{r.traffic_used || '0 GB'}</span>
                                         <span style={{ color: '#64748b' }}>{r.traffic_total || '1000 GB'} ({pct}%)</span>
                                       </div>
@@ -4070,7 +4163,7 @@ export default function App() {
                               title: '库存状态',
                               dataIndex: 'in_stock',
                               key: 'in_stock',
-                              width: 90,
+                              width: 105,
                               sorter: (a, b) => (a.in_stock === b.in_stock ? 0 : a.in_stock ? -1 : 1),
                               render: (inStock: boolean) => inStock ? <Tag color="green" style={{ margin: 0 }}>有货</Tag> : <Tag color="default" style={{ margin: 0 }}>缺货</Tag>
                             },
@@ -4124,7 +4217,7 @@ export default function App() {
                               placeholder="搜索挂单标题 / 节点 / 备注..."
                               allowClear
                               size="small"
-                              style={{ width: 220 }}
+                              style={{ width: 260 }}
                               value={lzMarketSearch}
                               onChange={e => setLzMarketSearch(e.target.value)}
                             />
@@ -4143,6 +4236,7 @@ export default function App() {
                           size="small"
                           dataSource={filteredLzMarket}
                           rowKey="id"
+                          scroll={{ x: 1560 }}
                           pagination={{
                             defaultPageSize: 50,
                             pageSizeOptions: ['20', '50', '100', '200'],
@@ -4241,12 +4335,12 @@ export default function App() {
                             {
                               title: '续费周期 / 价格',
                               key: 'renewal',
-                              width: 145,
+                              width: 180,
                               sorter: (a, b) => (a.monthly_price || a.renewal_price || 0) - (b.monthly_price || b.renewal_price || 0),
                               filters: [
-                                { text: '📅 年付', value: 'yearly' },
-                                { text: '🌙 月付', value: 'monthly' },
-                                { text: '⏱️ 季付/半年付', value: 'other' }
+                                { text: '年付', value: 'yearly' },
+                                { text: '月付', value: 'monthly' },
+                                { text: '季付/半年付', value: 'other' }
                               ],
                               onFilter: (value, r) => {
                                 const c = r.cycle || 1
@@ -4353,13 +4447,24 @@ export default function App() {
               rowKey="id"
               pagination={{ pageSize: 15 }}
               columns={[
-                { title: '事件时间', dataIndex: 'timestamp', key: 'ts', width: 180 },
+                {
+                  title: '事件时间',
+                  dataIndex: 'timestamp',
+                  key: 'ts',
+                  width: 190,
+                  render: (t: string) => <span style={{ fontFamily: 'monospace', fontSize: 12, whiteSpace: 'nowrap' }}>{formatFullTime(t)}</span>
+                },
                 {
                   title: '触发来源',
                   dataIndex: 'source',
                   key: 'src',
-                  width: 100,
-                  render: (s) => <Tag color={s === 'security' ? 'red' : s === 'sniper' ? 'purple' : s === 'rest_api' ? 'blue' : 'green'}>{s}</Tag>
+                  width: 110,
+                  render: (s: string, r: AuditEntry) => {
+                    // 仅失败事件标红，成功的安全/运维动作按来源区分颜色
+                    if (r.status !== 'SUCCESS') return <Tag color="red">{s}</Tag>
+                    const color = s === 'security' ? 'geekblue' : s === 'sniper' ? 'purple' : s === 'rest_api' ? 'blue' : 'green'
+                    return <Tag color={color}>{s}</Tag>
+                  }
                 },
                 { title: '操作动作', dataIndex: 'action', key: 'act', width: 140 },
                 { title: '执行详情说明', dataIndex: 'message', key: 'msg' },
@@ -4390,6 +4495,14 @@ export default function App() {
                 bordered={false}
                 className="vps-card"
               >
+                {unraidStatus.credentials_found?.length > 0 && (
+                  <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>已发现持久化凭据文件:</Text>
+                    {unraidStatus.credentials_found.map((c) => (
+                      <Tag key={c} color="cyan" style={{ margin: 0, fontFamily: 'monospace', fontSize: 11 }}>{c}</Tag>
+                    ))}
+                  </div>
+                )}
                 <Table
                   dataSource={unraidStatus.containers}
                   rowKey="name"
@@ -4415,7 +4528,7 @@ export default function App() {
               title={
                 <Space>
                   <SettingOutlined style={{ color: '#2563eb' }} />
-                  <Text strong>云厂商 API 凭证与网络代理配置</Text>
+                  <Text strong>云厂商 API 凭据与网络代理配置</Text>
                 </Space>
               }
               extra={
@@ -4453,6 +4566,7 @@ export default function App() {
                 form={tokensForm}
                 layout="vertical"
                 onFinish={handleSaveTokens}
+                style={{ overflowX: 'hidden' }}
               >
                 <Row gutter={24}>
                   <Col xs={24} md={12}>
@@ -4584,16 +4698,16 @@ export default function App() {
                       label="网络出口代理 (Proxy URL)"
                       extra="建议配置本地 Clash/Sing-box HTTP 代理 (如 http://192.168.8.11:7890)，防止国内直连 Cloudflare WAF 403 封禁"
                     >
-                      <Input placeholder="http://192.168.8.11:7890" />
+                      <Input allowClear placeholder="http://192.168.8.11:7890" />
                     </Form.Item>
                   </Col>
                   <Col xs={24} md={12}>
                     <Form.Item
                       name="lazycat_proxy_url"
                       label="懒猫云专用代理 (LazyCat Proxy URL)"
-                      extra="可选：为懒猫云 API 与 WebShell PTY 单独指定独立稳定代理 (如 http://192.168.8.11:33001)，留空则继承全局代理"
+                      extra="可选：为懒猫云 API 与 WebShell PTY 单独指定独立稳定代理 (如 http://192.168.8.11:33000)，留空则继承全局代理"
                     >
-                      <Input allowClear placeholder={tokensConfig?.lazycat_effective_proxy_url ? `留空继承全局: ${tokensConfig.lazycat_effective_proxy_url}` : '留空继承全局代理，例如 http://192.168.8.11:33001'} />
+                      <Input allowClear placeholder={tokensConfig?.lazycat_effective_proxy_url ? `留空继承全局: ${tokensConfig.lazycat_effective_proxy_url}` : '留空继承全局代理，例如 http://192.168.8.11:33000'} />
                     </Form.Item>
                   </Col>
                 </Row>
@@ -4648,7 +4762,7 @@ export default function App() {
   }
 
   return (
-    <ConfigProvider theme={{
+    <ConfigProvider locale={zhCN} theme={{
       algorithm: theme.defaultAlgorithm,
       token: {
         colorPrimary: '#2563eb',
@@ -4789,16 +4903,22 @@ export default function App() {
                 }}
                 placement="bottomRight"
               >
-                <Space style={{
+                <div style={{
                   cursor: 'pointer',
-                  padding: '4px 10px',
+                  padding: '0 10px',
+                  height: 36,
+                  lineHeight: 'normal',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
                   borderRadius: 6,
                   background: '#f8fafc',
                   border: '1px solid #e2e8f0',
+                  boxSizing: 'border-box',
                 }}>
-                  <Avatar size="small" style={{ backgroundColor: '#2563eb' }}>A</Avatar>
-                  <span style={{ fontSize: 13, fontWeight: 500, color: '#0f172a' }}>管理员</span>
-                </Space>
+                  <Avatar size={24} style={{ backgroundColor: '#2563eb', fontSize: 12, lineHeight: '24px' }}>A</Avatar>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: '#0f172a', lineHeight: '20px' }}>管理员</span>
+                </div>
               </Dropdown>
             </Space>
           </Header>
@@ -4999,9 +5119,9 @@ export default function App() {
               <Form.Item name="cycle_filter" label="计费周期偏好" extra="筛选年付/月付/季付挂单 (默认不限)">
                 <Select>
                   <Select.Option value="all">全部周期 (不限)</Select.Option>
-                  <Select.Option value="yearly">📅 仅限年付 (≥12个月)</Select.Option>
-                  <Select.Option value="monthly">🌙 仅限月付 (1个月)</Select.Option>
-                  <Select.Option value="other">⏱️ 仅限季付/半年付 (3~6个月)</Select.Option>
+                  <Select.Option value="yearly">仅限年付 (≥12个月)</Select.Option>
+                  <Select.Option value="monthly">仅限月付 (1个月)</Select.Option>
+                  <Select.Option value="other">仅限季付/半年付 (3~6个月)</Select.Option>
                 </Select>
               </Form.Item>
             </Col>

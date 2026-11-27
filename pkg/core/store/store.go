@@ -98,12 +98,13 @@ type MarketRecord struct {
 }
 
 type MarketStats struct {
-	TotalTracked int                    `json:"total_tracked"`
-	ActiveItems  int                    `json:"active_items"`
-	AvgPrice     float64                `json:"avg_price"`
-	AvgDuration  int                    `json:"avg_duration_sec"`
-	ByLocation   map[string]int         `json:"by_location"`
-	HotModels    []string               `json:"hot_models"`
+	TotalTracked     int            `json:"total_tracked"`
+	ActiveItems      int            `json:"active_items"`
+	ByProviderActive map[string]int `json:"by_provider_active"`
+	AvgPrice         float64        `json:"avg_price"`
+	AvgDuration      int            `json:"avg_duration_sec"`
+	ByLocation       map[string]int `json:"by_location"`
+	HotModels        []string       `json:"hot_models"`
 }
 
 var (
@@ -541,14 +542,22 @@ type UpsertItemInput struct {
 	DiffPercent     float64
 }
 
-// UpsertMarketBatch 批量将拉取到的市场数据落库并推导停留时长
-func UpsertMarketBatch(currentItems []UpsertItemInput) {
+// UpsertMarketBatch 批量将拉取到的市场数据落库并推导停留时长。
+// activeProviders 界定本次请求真实覆盖的服务商范围：仅当某个服务商在本次请求中成功返回时，
+// 才允许把该服务商名下缺席的条目判定为已离场，避免单平台筛选或单平台超时误伤其它厂商的历史在售记录。
+func UpsertMarketBatch(currentItems []UpsertItemInput, activeProviders []string) {
 	mu.Lock()
 	defer mu.Unlock()
 
 	now := time.Now()
 	nowStr := now.Format(time.RFC3339)
 	seenKeys := make(map[string]bool)
+	scope := make(map[string]bool, len(activeProviders))
+	for _, pid := range activeProviders {
+		if pid != "" {
+			scope[pid] = true
+		}
+	}
 
 	for _, item := range currentItems {
 		key := item.Provider + ":" + item.ID
@@ -677,8 +686,9 @@ func UpsertMarketBatch(currentItems []UpsertItemInput) {
 	}
 
 	// 标记未出现在本批次中的商品为已离场 (Sold / Removed)
+	// 仅对本次请求确实成功拉取到的服务商生效，绝不跨厂商误判下架
 	for key, rec := range marketHistory {
-		if !seenKeys[key] && rec.IsActive {
+		if !seenKeys[key] && rec.IsActive && scope[strings.ToLower(rec.Provider)] {
 			rec.IsActive = false
 		}
 	}
@@ -692,10 +702,11 @@ func GetMarketStats() MarketStats {
 	defer mu.RUnlock()
 
 	stats := MarketStats{
-		TotalTracked: len(marketHistory),
-		ActiveItems:  0,
-		ByLocation:   make(map[string]int),
-		HotModels:    make([]string, 0),
+		TotalTracked:     len(marketHistory),
+		ActiveItems:      0,
+		ByProviderActive: make(map[string]int),
+		ByLocation:       make(map[string]int),
+		HotModels:        make([]string, 0),
 	}
 
 	totalPrice := 0.0
@@ -707,6 +718,7 @@ func GetMarketStats() MarketStats {
 	for _, m := range marketHistory {
 		if m.IsActive {
 			stats.ActiveItems++
+			stats.ByProviderActive[strings.ToLower(m.Provider)]++
 			totalPrice += m.Price
 			priceCount++
 		}

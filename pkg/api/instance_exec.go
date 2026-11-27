@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ashanzzz/personal-vps-monitor/pkg/core/audit"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/sshexec"
 	"github.com/go-chi/chi/v5"
 )
@@ -18,6 +19,9 @@ func registerInstanceExecRoutes(r chi.Router) {
 
 	// 模块 2: 普通主机代理服务结构化探查
 	r.Get("/instances/{id}/proxies", handleInstanceInspectProxies)
+
+	// 模块 2.1: 单台实例 SSH / Root 凭据按需取用（列表接口已统一脱敏）
+	r.Get("/instances/{id}/credential", handleInstanceCredential)
 
 	// 模块 3: 代理换端口自愈与增删生命周期管理
 	r.Put("/instances/{id}/proxies/{old_port}", handleInstanceChangeProxyPort)
@@ -92,6 +96,48 @@ func handleInstanceSSHExecByIP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, res)
+}
+
+// GET /api/instances/{id}/credential
+// 列表接口已统一脱敏，此处按需单独取用单台实例的 SSH / Root 凭据。
+func handleInstanceCredential(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	if id == "" {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "instance id required"})
+		return
+	}
+
+	inst, err := sshexec.FindInstance(id)
+	if err != nil || inst == nil {
+		respondJSON(w, http.StatusNotFound, map[string]string{"error": "instance not found: " + id})
+		return
+	}
+
+	pwd := inst.SSHPassword
+	if pwd == "" {
+		pwd = inst.RootPassword
+	}
+
+	reveal := r.URL.Query().Get("reveal") == "true"
+	password := pwd
+	if !reveal && pwd != "" {
+		password = "••••••••"
+	}
+
+	// 凭据查看同样纳入安全审计
+	audit.Record("rest_api", "instance.credential_view", inst.ProviderID, map[string]interface{}{
+		"instance_id": inst.ID,
+		"reveal":      reveal,
+	}, "SUCCESS", "按需查看实例 SSH 凭据", 0)
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"provider_id": inst.ProviderID,
+		"id":          inst.ID,
+		"ssh_user":    inst.SSHUser,
+		"ssh_port":    inst.SSHPort,
+		"has_password": pwd != "",
+		"password":    password,
+	})
 }
 
 // GET /api/instances/{id}/proxies

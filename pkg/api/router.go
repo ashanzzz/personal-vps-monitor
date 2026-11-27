@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/audit"
@@ -231,18 +233,17 @@ func handleUnifiedInstances(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ident := GetIdentity(ctx)
-	isReadOnly := ident != nil && ident.Role == "read"
-
-	var filtered []providers.Instance
+	// 列表接口一律脱敏：明文 SSH / Root 密码绝不下发到任何浏览器端，
+	// 内部 SSH 拨号仍直接使用持久化缓存中的原始凭据，互不影响。
+	// 详情抽屉按需通过独立鉴权接口单独取用。
+	filtered := make([]providers.Instance, 0, len(cache.Instances))
 	for _, inst := range cache.Instances {
 		if targetProvider != "" && targetProvider != "all" && !strings.EqualFold(inst.ProviderID, targetProvider) {
 			continue
 		}
-		if isReadOnly {
-			inst.SSHPassword = ""  // 只读密钥自动脱敏，不泄漏 root 密码
-			inst.RootPassword = "" // 彻底抹除 root 初始密码
-		}
+		inst.HasPassword = inst.SSHPassword != "" || inst.RootPassword != ""
+		inst.SSHPassword = ""
+		inst.RootPassword = ""
 		filtered = append(filtered, inst)
 	}
 
@@ -273,38 +274,115 @@ func isAuthError(err error) bool {
 	return strings.Contains(s, "401") || strings.Contains(s, "token") || strings.Contains(s, "unauthorized") || strings.Contains(s, "token无效")
 }
 
+type marketFetchResult struct {
+	items []providers.MarketItem
+	err   error
+}
+
+// 集市聚合短期结果缓存：避免首屏并发与轮询反复触发上游慢速抓取
+type marketCacheEntry struct {
+	items       []providers.MarketItem
+	errors      map[string]string
+	refreshedAt time.Time
+}
+
+var (
+	marketCacheMu  sync.Mutex
+	marketCache    = make(map[string]*marketCacheEntry)
+	marketCacheTTL = 45 * time.Second
+)
+
+func marketResponsePayload(items []providers.MarketItem, errs map[string]string, refreshedAt time.Time, cached bool) map[string]interface{} {
+	if errs == nil {
+		errs = map[string]string{}
+	}
+	if items == nil {
+		items = make([]providers.MarketItem, 0)
+	}
+	return map[string]interface{}{
+		"total":                  len(items),
+		"items":                  items,
+		"provider_errors":        errs,
+		"refreshed_at":           refreshedAt.Format(time.RFC3339),
+		"provider_refresh_times": store.GetAllRefreshTimes(),
+		"cached":                 cached,
+	}
+}
+
 func handleUnifiedMarket(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	targetProvider := r.URL.Query().Get("provider")
-	all := providers.GetAll()
-	var results []providers.MarketItem
-	var rawItems []store.UpsertItemInput
-	providerErrors := make(map[string]string)
+	if targetProvider == "all" {
+		targetProvider = ""
+	}
+	force := r.URL.Query().Get("force") == "true" || r.URL.Query().Get("refresh") == "true"
+	cacheKey := targetProvider
+	if cacheKey == "" {
+		cacheKey = "all"
+	}
 
-	for _, p := range all {
-		if targetProvider != "" && targetProvider != "all" && !strings.EqualFold(p.ID(), targetProvider) {
+	// 命中短期缓存直接返回，彻底消除首屏阻塞与重复上游抓取
+	if !force {
+		marketCacheMu.Lock()
+		if entry := marketCache[cacheKey]; entry != nil && time.Since(entry.refreshedAt) < marketCacheTTL {
+			items, errs, refreshedAt := entry.items, entry.errors, entry.refreshedAt
+			marketCacheMu.Unlock()
+			respondJSON(w, http.StatusOK, marketResponsePayload(items, errs, refreshedAt, true))
+			return
+		}
+		marketCacheMu.Unlock()
+	}
+
+	// 并发抓取各厂商集市，单家慢速或超时不再拖垮整站响应
+	type providerJob struct {
+		id string
+		ml providers.MarketLister
+	}
+	jobs := make([]providerJob, 0, 4)
+	for _, p := range providers.GetAll() {
+		if targetProvider != "" && !strings.EqualFold(p.ID(), targetProvider) {
 			continue
 		}
 		if ml, ok := p.(providers.MarketLister); ok {
-			pCtx, pCancel := context.WithTimeout(ctx, 15*time.Second)
-			items, err := ml.ListMarketItems(pCtx)
-			pCancel()
+			jobs = append(jobs, providerJob{id: p.ID(), ml: ml})
+		}
+	}
 
-			// 遇到 401 / Token 失效时触发自动免密重登自愈
-			if err != nil && isAuthError(err) {
-				log.Printf("[Market] provider %s encountered auth error: %v, triggering auto-relogin...", p.ID(), err)
-				if store.TryAutoRecoverProvider(ctx, p.ID()) {
-					pCtx2, pCancel2 := context.WithTimeout(ctx, 15*time.Second)
-					items, err = ml.ListMarketItems(pCtx2)
-					pCancel2()
+	results := make([]providers.MarketItem, 0, 128)
+	rawItems := make([]store.UpsertItemInput, 0, 128)
+	providerErrors := make(map[string]string)
+	syncedProviders := make([]string, 0, len(jobs))
+
+	if len(jobs) > 0 {
+		fetched := make([]marketFetchResult, len(jobs))
+		var wg sync.WaitGroup
+		for i, job := range jobs {
+			wg.Add(1)
+			go func(idx int, job providerJob) {
+				defer wg.Done()
+				pCtx, pCancel := context.WithTimeout(ctx, 6*time.Second)
+				items, err := job.ml.ListMarketItems(pCtx)
+				pCancel()
+				fetched[idx] = marketFetchResult{items: items, err: err}
+			}(i, job)
+		}
+		wg.Wait()
+
+		for i, job := range jobs {
+			res := fetched[i]
+			if res.err != nil {
+				// 鉴权失效：后台异步自愈，本请求立即回落持久化缓存，绝不阻塞首屏
+				if isAuthError(res.err) {
+					log.Printf("[Market] provider %s encountered auth error: %v, scheduling background recover", job.id, res.err)
+					go func(id string) {
+						rCtx, rCancel := context.WithTimeout(context.Background(), 45*time.Second)
+						defer rCancel()
+						_ = store.TryAutoRecoverProvider(rCtx, id)
+					}(job.id)
 				}
-			}
-
-			if err != nil {
-				log.Printf("[Market] provider %s failed to list live market: %v (falling back to cached store)", p.ID(), err)
-				providerErrors[p.ID()] = err.Error()
-				cached := store.GetActiveMarketRecords(p.ID())
-				for _, rec := range cached {
+				log.Printf("[Market] provider %s failed to list live market: %v (falling back to cached store)", job.id, res.err)
+				providerErrors[job.id] = res.err.Error()
+				for _, rec := range store.GetActiveMarketRecords(job.id) {
 					diff, tag := store.CalculateBargainIndex(rec.Name, rec.Price)
 					results = append(results, providers.MarketItem{
 						ProviderID:      rec.Provider,
@@ -340,64 +418,82 @@ func handleUnifiedMarket(w http.ResponseWriter, r *http.Request) {
 						BargainTag:      tag,
 					})
 				}
-			} else {
-				store.RecordRefreshTime("market:" + p.ID())
-				for _, it := range items {
-					diff, tag := store.CalculateBargainIndex(it.Name, it.Price)
-					it.DiffPercent = diff
-					it.BargainTag = tag
-					results = append(results, it)
-					rawItems = append(rawItems, store.UpsertItemInput{
-						ID:              it.ID,
-						Provider:        it.ProviderID,
-						Name:            it.Name,
-						Price:           it.Price,
-						RenewalPrice:    it.RenewalPrice,
-						DiscountPercent: it.DiscountPercent,
-						ResetPrice:      it.ResetPrice,
-						PlatformFee:     it.PlatformFee,
-						FlowUsed:        it.FlowUsed,
-						Cycle:           it.Cycle,
-						CycleName:       it.CycleName,
-						MonthlyPrice:    it.MonthlyPrice,
-						Location:        it.Location,
-						Bandwidth:       it.Bandwidth,
-						ConfigDesc:      it.ConfigDesc,
-						CPU:             it.CPU,
-						Memory:          it.Memory,
-						Disk:            it.Disk,
-						TrafficTotal:    it.TrafficTotal,
-						Detail:          it.Detail,
-						IPCheckDetail:   it.IPCheckDetail,
-						DueTime:         it.DueTime,
-						SLA:             it.SLA,
-						CanBuy:          it.CanBuy,
-						PortLimit:       it.PortLimit,
-						SellerUsername:  it.SellerUsername,
-						SellerUserID:    it.SellerUserID,
-						MarketType:      it.MarketType,
-						BargainTag:      it.BargainTag,
-						DiffPercent:     it.DiffPercent,
-					})
-				}
+				continue
+			}
+
+			syncedProviders = append(syncedProviders, job.id)
+			store.RecordRefreshTime("market:" + job.id)
+			for _, it := range res.items {
+				diff, tag := store.CalculateBargainIndex(it.Name, it.Price)
+				it.DiffPercent = diff
+				it.BargainTag = tag
+				results = append(results, it)
+				rawItems = append(rawItems, store.UpsertItemInput{
+					ID:              it.ID,
+					Provider:        it.ProviderID,
+					Name:            it.Name,
+					Price:           it.Price,
+					RenewalPrice:    it.RenewalPrice,
+					DiscountPercent: it.DiscountPercent,
+					ResetPrice:      it.ResetPrice,
+					PlatformFee:     it.PlatformFee,
+					FlowUsed:        it.FlowUsed,
+					Cycle:           it.Cycle,
+					CycleName:       it.CycleName,
+					MonthlyPrice:    it.MonthlyPrice,
+					Location:        it.Location,
+					Bandwidth:       it.Bandwidth,
+					ConfigDesc:      it.ConfigDesc,
+					CPU:             it.CPU,
+					Memory:          it.Memory,
+					Disk:            it.Disk,
+					TrafficTotal:    it.TrafficTotal,
+					Detail:          it.Detail,
+					IPCheckDetail:   it.IPCheckDetail,
+					DueTime:         it.DueTime,
+					SLA:             it.SLA,
+					CanBuy:          it.CanBuy,
+					PortLimit:       it.PortLimit,
+					SellerUsername:  it.SellerUsername,
+					SellerUserID:    it.SellerUserID,
+					MarketType:      it.MarketType,
+					BargainTag:      it.BargainTag,
+					DiffPercent:     it.DiffPercent,
+				})
 			}
 		}
 	}
 
-	if len(rawItems) > 0 {
-		store.UpsertMarketBatch(rawItems)
+	// 仅对本次确实成功拉取到的厂商执行缺席下架，杜绝跨平台误判
+	if len(syncedProviders) > 0 {
+		store.UpsertMarketBatch(rawItems, syncedProviders)
 	}
-	if targetProvider == "" || targetProvider == "all" {
+	if targetProvider == "" {
 		store.RecordRefreshTime("market:all")
 	}
 
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"total":                  len(results),
-		"items":                  results,
-		"provider_errors":        providerErrors,
-		"refreshed_at":           time.Now().Format(time.RFC3339),
-		"provider_refresh_times": store.GetAllRefreshTimes(),
+	// 稳定排序，避免并发抓取导致列表顺序抖动
+	sort.SliceStable(results, func(i, j int) bool {
+		if results[i].ProviderID != results[j].ProviderID {
+			return results[i].ProviderID < results[j].ProviderID
+		}
+		if results[i].Name != results[j].Name {
+			return results[i].Name < results[j].Name
+		}
+		return results[i].ID < results[j].ID
 	})
+
+	if len(syncedProviders) > 0 {
+		marketCacheMu.Lock()
+		marketCache[cacheKey] = &marketCacheEntry{
+			items:       results,
+			errors:      providerErrors,
+			refreshedAt: time.Now(),
+		}
+		marketCacheMu.Unlock()
+	}
+
+	respondJSON(w, http.StatusOK, marketResponsePayload(results, providerErrors, time.Now(), false))
 }
 
 type StoreProductItem = providers.StoreProduct
@@ -589,12 +685,11 @@ func handleLazyCatInstances(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ident := GetIdentity(r.Context())
-	if ident != nil && ident.Role == "read" {
-		for i := range insts {
-			insts[i].SSHPassword = ""
-			insts[i].RootPassword = ""
-		}
+	// 统一脱敏：列表接口绝不回传明文 SSH / Root 密码
+	for i := range insts {
+		insts[i].HasPassword = insts[i].SSHPassword != "" || insts[i].RootPassword != ""
+		insts[i].SSHPassword = ""
+		insts[i].RootPassword = ""
 	}
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"total":     len(insts),
@@ -786,7 +881,12 @@ func handleSaveTokens(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	if err := config.SaveTokensWithLazyCatProxy(req.AkileToken, req.ACCKToken, req.LazyCatToken, req.ProxyURL, req.LazyCatProxyURL); err != nil {
+	var proxyPtr *string
+	if strings.TrimSpace(req.ProxyURL) != "" {
+		cleaned := strings.TrimSpace(req.ProxyURL)
+		proxyPtr = &cleaned
+	}
+	if err := config.SaveTokensWithProxies(req.AkileToken, req.ACCKToken, req.LazyCatToken, proxyPtr, req.LazyCatProxyURL); err != nil {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "保存 Token 失败: " + err.Error()})
 		return
 	}

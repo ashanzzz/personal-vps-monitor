@@ -118,6 +118,7 @@ func (s *Scheduler) pollAndMatch(ctx context.Context) {
 	all := providers.GetAll()
 	var rawItems []store.UpsertItemInput
 	var fullItems []providers.MarketItem
+	var syncedProviders []string
 
 	for _, p := range all {
 		if ml, ok := p.(providers.MarketLister); ok {
@@ -129,24 +130,48 @@ func (s *Scheduler) pollAndMatch(ctx context.Context) {
 				}
 			}
 			if err == nil {
+				syncedProviders = append(syncedProviders, p.ID())
 				fullItems = append(fullItems, items...)
 				for _, it := range items {
 					rawItems = append(rawItems, store.UpsertItemInput{
-						ID:         it.ID,
-						Provider:   it.ProviderID,
-						Name:       it.Name,
-						Price:      it.Price,
-						Location:   it.Location,
-						Bandwidth:  it.Bandwidth,
-						ConfigDesc: it.ConfigDesc,
+						ID:              it.ID,
+						Provider:        it.ProviderID,
+						Name:            it.Name,
+						Price:           it.Price,
+						RenewalPrice:    it.RenewalPrice,
+						DiscountPercent: it.DiscountPercent,
+						ResetPrice:      it.ResetPrice,
+						PlatformFee:     it.PlatformFee,
+						FlowUsed:        it.FlowUsed,
+						Cycle:           it.Cycle,
+						CycleName:       it.CycleName,
+						MonthlyPrice:    it.MonthlyPrice,
+						Location:        it.Location,
+						Bandwidth:       it.Bandwidth,
+						ConfigDesc:      it.ConfigDesc,
+						CPU:             it.CPU,
+						Memory:          it.Memory,
+						Disk:            it.Disk,
+						TrafficTotal:    it.TrafficTotal,
+						Detail:          it.Detail,
+						IPCheckDetail:   it.IPCheckDetail,
+						DueTime:         it.DueTime,
+						SLA:             it.SLA,
+						CanBuy:          it.CanBuy,
+						PortLimit:       it.PortLimit,
+						SellerUsername:  it.SellerUsername,
+						SellerUserID:    it.SellerUserID,
+						MarketType:      it.MarketType,
+						BargainTag:      it.BargainTag,
+						DiffPercent:     it.DiffPercent,
 					})
 				}
 			}
 		}
 	}
 
-	if len(rawItems) > 0 {
-		store.UpsertMarketBatch(rawItems)
+	if len(syncedProviders) > 0 {
+		store.UpsertMarketBatch(rawItems, syncedProviders)
 	}
 
 	activePlans := store.GetActivePlans()

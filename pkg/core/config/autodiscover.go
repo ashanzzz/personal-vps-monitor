@@ -52,22 +52,26 @@ func ProbeUnraidContainers(ctx context.Context) AutoDiscoveryReport {
 
 		if err == nil {
 			if strings.Contains(t.URL, ":9090") {
-				req.Header.Set("Authorization", "Bearer Woo@@@204317")
+				if secret := strings.TrimSpace(getEnv("CLASH_API_SECRET", getEnv("SINGBOX_SECRET", ""))); secret != "" {
+					req.Header.Set("Authorization", "Bearer "+secret)
+				}
 			}
 			resp, err := client.Do(req)
 			if err == nil {
 				online = (resp.StatusCode < 500)
 				if strings.Contains(t.URL, ":4743") {
-					detail = fmt.Sprintf("在线 (HTTP %d - Vaultwarden 正常就绪)", resp.StatusCode)
+					detail = fmt.Sprintf("HTTP %d · Vaultwarden 服务正常就绪", resp.StatusCode)
+				} else if resp.StatusCode == http.StatusUnauthorized {
+					detail = fmt.Sprintf("HTTP %d · 控制面可达 (未设 CLASH_API_SECRET)", resp.StatusCode)
 				} else {
-					detail = fmt.Sprintf("在线 (HTTP %d)", resp.StatusCode)
+					detail = fmt.Sprintf("HTTP %d · 代理控制面就绪", resp.StatusCode)
 				}
 				_ = resp.Body.Close()
 			} else {
 				if strings.Contains(t.URL, ":4743") {
-					detail = "未连接/离线 (请检查 192.168.8.11:4743)"
+					detail = "连接失败 (请检查 192.168.8.11:4743)"
 				} else {
-					detail = "未连接/离线"
+					detail = "连接失败 (请检查 192.168.8.11:9090)"
 				}
 			}
 		}
@@ -82,7 +86,7 @@ func ProbeUnraidContainers(ctx context.Context) AutoDiscoveryReport {
 		})
 	}
 
-	// 自动扫描本地持久化目录中的凭据
+	// 自动扫描本地持久化目录中的凭据（按文件名去重，避免映射路径重合导致重复列示）
 	tokenFiles := []string{
 		"/app/data/credentials.json",
 		"./data/credentials.json",
@@ -93,9 +97,14 @@ func ProbeUnraidContainers(ctx context.Context) AutoDiscoveryReport {
 		"./data/admin.json",
 	}
 
+	seenCreds := make(map[string]bool)
 	for _, p := range tokenFiles {
 		if fi, err := os.Stat(p); err == nil && !fi.IsDir() && fi.Size() > 0 {
-			report.CredentialsFound = append(report.CredentialsFound, filepath.Base(p))
+			base := filepath.Base(p)
+			if !seenCreds[base] {
+				seenCreds[base] = true
+				report.CredentialsFound = append(report.CredentialsFound, base)
+			}
 		}
 	}
 

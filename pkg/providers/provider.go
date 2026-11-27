@@ -24,8 +24,9 @@ type Instance struct {
 	IPv4         string  `json:"ipv4,omitempty"`
 	IPv6         string  `json:"ipv6,omitempty"`
 	SSHUser      string  `json:"ssh_user,omitempty"`
-	SSHPassword  string  `json:"ssh_password,omitempty"`
+	SSHPassword  string  `json:"ssh_password,omitempty"` // 仅内部拨号使用；HTTP 列表接口一律脱敏为空
 	SSHPort      int     `json:"ssh_port,omitempty"`
+	HasPassword  bool    `json:"has_password,omitempty"` // 该实例是否已持久化 SSH/Root 密码 (供前端提示)
 	Status       string  `json:"status"`
 	Region       string  `json:"region"`
 	Category     string  `json:"category,omitempty"` // 例如: "全球家宽" / "固定出口"
