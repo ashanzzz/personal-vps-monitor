@@ -56,6 +56,30 @@ body {
   white-space: nowrap !important;
 }
 
+/* Ant Design 的栅格间距靠"Row 负外边距 + Col 内边距"实现，
+   Row 的盒子因此比父容器宽出 2×gutter/2，在 100% 宽的页面容器里
+   产生 8~12px 的假性横向溢出（滚动条不出现，但会撑破测量与截图）。
+   页面级栅格改为：去掉负边距，首尾列贴齐内容边缘，列间距保持不变。 */
+.ant-space-item > .ant-row,
+.ant-form > .ant-row {
+  margin-inline: 0 !important;
+}
+
+.ant-space-item > .ant-row > .ant-col,
+.ant-form > .ant-row > .ant-col {
+  padding-inline: 8px !important;
+}
+
+.ant-space-item > .ant-row > .ant-col:first-child,
+.ant-form > .ant-row > .ant-col:first-child {
+  padding-inline-start: 0 !important;
+}
+
+.ant-space-item > .ant-row > .ant-col:last-child,
+.ant-form > .ant-row > .ant-col:last-child {
+  padding-inline-end: 0 !important;
+}
+
 .ant-table-tbody > tr > td {
   border-bottom: 1px solid #f1f5f9 !important;
   color: #1e293b !important;

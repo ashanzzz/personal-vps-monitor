@@ -1329,7 +1329,7 @@ export default function App() {
           acck: instances.filter(i => i.provider_id === 'acck').length,
         }
         return (
-          <Space direction="vertical" size={20} style={{ width: '100%', overflowX: 'clip' }}>
+          <Space direction="vertical" size={20} style={{ width: '100%' }}>
             {/* 顶栏宏观概览卡片 */}
             <Row gutter={[16, 16]}>
               <Col xs={24} sm={12} md={6}>
@@ -2305,7 +2305,7 @@ export default function App() {
         )
 
         return (
-          <Space direction="vertical" size={20} style={{ width: '100%', overflowX: 'clip' }}>
+          <Space direction="vertical" size={20} style={{ width: '100%' }}>
             {/* 顶栏宏观监控状态卡片 */}
             <Row gutter={[16, 16]}>
               <Col xs={24} sm={12} md={6}>
@@ -2634,7 +2634,7 @@ export default function App() {
         const akStore = storeProducts.filter(i => i.provider_id === 'akile')
 
         return (
-          <Space direction="vertical" size={20} style={{ width: '100%', overflowX: 'clip' }}>
+          <Space direction="vertical" size={20} style={{ width: '100%' }}>
             {renderProviderHeader('akile', 'Akile Cloud')}
             <Card bordered={false} className="vps-card">
               <Tabs
@@ -3029,6 +3029,7 @@ export default function App() {
                           size="small"
                           dataSource={filteredAkMarket}
                           rowKey="id"
+                          scroll={{ x: 'max-content' }}
                           pagination={{
                             defaultPageSize: 50,
                             pageSizeOptions: ['20', '50', '100', '200'],
@@ -3241,7 +3242,7 @@ export default function App() {
         const acStore = storeProducts.filter(i => i.provider_id === 'acck')
 
         return (
-          <Space direction="vertical" size={20} style={{ width: '100%', overflowX: 'clip' }}>
+          <Space direction="vertical" size={20} style={{ width: '100%' }}>
             {renderProviderHeader('acck', 'ACCK 专区')}
             <Card bordered={false} className="vps-card">
               <Tabs
@@ -3628,6 +3629,7 @@ export default function App() {
                           size="small"
                           dataSource={filteredAcMarket}
                           rowKey="id"
+                          scroll={{ x: 'max-content' }}
                           pagination={{
                             defaultPageSize: 50,
                             pageSizeOptions: ['20', '50', '100', '200'],
@@ -3824,7 +3826,7 @@ export default function App() {
         const lzStore = storeProducts.filter(i => i.provider_id === 'lazycat')
 
         return (
-          <Space direction="vertical" size={20} style={{ width: '100%', overflowX: 'clip' }}>
+          <Space direction="vertical" size={20} style={{ width: '100%' }}>
             {renderProviderHeader('lazycat', 'LazyCat 懒猫云')}
             <Card bordered={false} className="vps-card">
               <Tabs
@@ -4243,6 +4245,7 @@ export default function App() {
                           size="small"
                           dataSource={filteredLzMarket}
                           rowKey="id"
+                          scroll={{ x: 'max-content' }}
                           pagination={{
                             defaultPageSize: 50,
                             pageSizeOptions: ['20', '50', '100', '200'],
@@ -4489,7 +4492,7 @@ export default function App() {
 
       case 'settings': {
         return (
-          <Space direction="vertical" size={20} style={{ width: '100%', overflowX: 'clip' }}>
+          <Space direction="vertical" size={20} style={{ width: '100%' }}>
             {unraidStatus && (
               <Card
                 title={
