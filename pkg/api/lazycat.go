@@ -448,3 +448,55 @@ func handleLazyCatPortRepublish(w http.ResponseWriter, r *http.Request) {
 		"new_mapping_id":  newMappingID,
 	})
 }
+
+// POST /api/lazycat/singbox/deploy
+// 在 Alpine/OpenRC 实例上部署原生 sing-box（无 Docker）+ Reality VLESS 入站，并确保 NAT 映射存在。
+func handleLazyCatSingBoxDeploy(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		InstanceID string `json:"instance_id"`
+		ListenPort int    `json:"listen_port"`
+		SNI        string `json:"sni"`
+		Remark     string `json:"remark"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "无效的部署请求体"})
+		return
+	}
+	req.InstanceID = resolveLazyCatInstanceID(req.InstanceID, false)
+	if req.ListenPort <= 0 {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "listen_port 必填"})
+		return
+	}
+	inst, err := sshexec.FindInstance(req.InstanceID)
+	if err != nil {
+		respondJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+
+	res, err := sshexec.DeployNativeSingBox(r.Context(), inst, sshexec.NativeSingBoxDeployRequest{
+		ListenPort: req.ListenPort,
+		SNI:        req.SNI,
+		Remark:     req.Remark,
+	})
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	respondJSON(w, http.StatusOK, res)
+}
+
+// GET /api/lazycat/singbox/health?instance_id=10674
+func handleLazyCatSingBoxHealth(w http.ResponseWriter, r *http.Request) {
+	instanceID := resolveLazyCatInstanceID(r.URL.Query().Get("instance_id"), false)
+	inst, err := sshexec.FindInstance(instanceID)
+	if err != nil {
+		respondJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	health, err := sshexec.NativeSingBoxHealth(r.Context(), inst)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	respondJSON(w, http.StatusOK, health)
+}

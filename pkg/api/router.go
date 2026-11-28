@@ -185,6 +185,8 @@ func NewRouter() http.Handler {
 				r.With(middleware.Timeout(120*time.Second)).Post("/terminal/exec", handleLazyCatTerminalExec)
 				r.With(middleware.Timeout(180*time.Second)).Post("/sync", handleLazyCatSync)
 				r.With(middleware.Timeout(90*time.Second)).Post("/ports/republish", handleLazyCatPortRepublish)
+				r.With(middleware.Timeout(240*time.Second)).Post("/singbox/deploy", handleLazyCatSingBoxDeploy)
+				r.With(middleware.Timeout(60*time.Second)).Get("/singbox/health", handleLazyCatSingBoxHealth)
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.Timeout(30 * time.Second))
 					r.Get("/instances", handleLazyCatInstances)
