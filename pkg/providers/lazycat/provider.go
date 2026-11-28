@@ -2,6 +2,7 @@ package lazycat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -18,6 +19,9 @@ type LazyCatProvider struct {
 	client      *Client
 	defaultInst string
 }
+
+// ErrNotResidentialInstance 表示目标实例不是动态家宽出口机（不应执行 sync_egress.py 家宽巡检）。
+var ErrNotResidentialInstance = errors.New("instance is not a residential egress instance")
 
 func init() {
 	providers.Register(&LazyCatProvider{})
@@ -379,6 +383,15 @@ func (p *LazyCatProvider) SyncEgressForInstance(ctx context.Context, instanceID 
 	}
 	if instID == "" {
 		instID = "11433"
+	}
+
+	// 固定出口机（如 HKG-3 / 10674）无 python3，且不跑家宽拨号巡检，必须硬拦。
+	if rawList, err := p.client.GetInstances(ctx); err == nil {
+		for _, item := range rawList {
+			if strconv.Itoa(item.ID) == instID && !isResidential(item.PackageName, item.PlanName, item.Name) {
+				return fmt.Errorf("%w: instance %s (%s / %s)", ErrNotResidentialInstance, instID, item.PackageName, item.PlanName)
+			}
+		}
 	}
 
 	// 若尚未运行，则在后台以 setsid + sleep 1 确认彻底脱离 PTY 后才关闭首条 WS；使用 ^ 锚点防止 pgrep -f 自匹配 sh -c
