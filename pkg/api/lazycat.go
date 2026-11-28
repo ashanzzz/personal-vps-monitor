@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/config"
+	"github.com/ashanzzz/personal-vps-monitor/pkg/core/sshexec"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/core/store"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers"
 	"github.com/ashanzzz/personal-vps-monitor/pkg/providers/lazycat"
@@ -383,4 +384,67 @@ func handleLazyCatEgressSubscriptions(w http.ResponseWriter, r *http.Request) {
 	default:
 		respondJSON(w, http.StatusOK, bundle)
 	}
+}
+
+// POST /api/lazycat/ports/republish
+// 重发布 NAT 公网端口：私网端口保持不变，宿机 sing-box 配置与进程完全不动。
+// 用于「端口被墙」自愈：先新增映射，成功后才删除旧映射，失败自动回滚。
+func handleLazyCatPortRepublish(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		InstanceID    string `json:"instance_id"`
+		PrivatePort   int    `json:"private_port"`
+		OldPublicPort int    `json:"old_public_port"`
+		Remark        string `json:"remark"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "无效的端口重发布请求体"})
+		return
+	}
+	req.InstanceID = resolveLazyCatInstanceID(req.InstanceID, false)
+	if req.PrivatePort <= 0 || req.PrivatePort > 65535 {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "private_port 必须在 1-65535 之间"})
+		return
+	}
+	if req.Remark == "" {
+		req.Remark = "vless"
+	}
+
+	inst, err := sshexec.FindInstance(req.InstanceID)
+	if err != nil {
+		respondJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// 按 (私网端口, 旧公网端口) 反查旧映射 ID；找不到就当作首次映射（只增不删）。
+	oldMappingID := 0
+	if req.OldPublicPort > 0 {
+		if prov, ok := providers.Get(inst.ProviderID); ok {
+			if pm, isMapper := prov.(providers.PortMapper); isMapper {
+				if mappings, merr := pm.ListPortMappings(r.Context(), inst.ID); merr == nil {
+					for _, m := range mappings {
+						if m.PublicPort == req.OldPublicPort && m.PrivatePort == req.PrivatePort {
+							oldMappingID = m.ID
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	newPublicPort, newMappingID, err := sshexec.RepublishNATPort(r.Context(), inst, req.PrivatePort, oldMappingID, req.Remark)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"status":          "ok",
+		"instance_id":     req.InstanceID,
+		"private_port":    req.PrivatePort,
+		"old_public_port": req.OldPublicPort,
+		"old_mapping_id":  oldMappingID,
+		"new_public_port": newPublicPort,
+		"new_mapping_id":  newMappingID,
+	})
 }
